@@ -1,0 +1,36 @@
+package com.utsav.ffdownloader.core
+
+import android.content.Context
+import android.content.SharedPreferences
+
+/**
+ * Simple SharedPreferences-backed settings, initialized once from FfApp.
+ */
+object Settings {
+    private const val PREFS = "ff_settings"
+    private const val KEY_CONNECTIONS = "connections_per_download"
+    private const val KEY_SPEED_LIMIT_KBPS = "speed_limit_kbps"
+    private const val KEY_MAX_CONCURRENT = "max_concurrent_downloads"
+
+    private lateinit var prefs: SharedPreferences
+
+    fun init(context: Context) {
+        prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    }
+
+    fun connectionsPerDownload(): Int = prefs.getInt(KEY_CONNECTIONS, 4)
+    fun setConnectionsPerDownload(value: Int) {
+        prefs.edit().putInt(KEY_CONNECTIONS, value).apply()
+    }
+
+    /** KB/s per individual download; 0 means unlimited. */
+    fun speedLimitKBps(): Int = prefs.getInt(KEY_SPEED_LIMIT_KBPS, 0)
+    fun setSpeedLimitKBps(value: Int) {
+        prefs.edit().putInt(KEY_SPEED_LIMIT_KBPS, value.coerceAtLeast(0)).apply()
+    }
+
+    fun maxConcurrentDownloads(): Int = prefs.getInt(KEY_MAX_CONCURRENT, 2)
+    fun setMaxConcurrentDownloads(value: Int) {
+        prefs.edit().putInt(KEY_MAX_CONCURRENT, value.coerceIn(1, 5)).apply()
+    }
+}

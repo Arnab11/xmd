@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:layout_marginBottom="8dp">
+
+    <View
+        android:id="@+id/statusIndicator"
+        android:layout_width="4dp"
+        android:layout_height="match_parent"
+        android:background="@color/ff_muted" />
+
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:background="@color/ff_surface"
+        android:orientation="vertical"
+        android:padding="12dp">
+
+        <TextView
+            android:id="@+id/itemTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/ff_text"
+            android:textStyle="bold"
+            android:textSize="14sp"
+            android:maxLines="1"
+            android:ellipsize="middle" />
+
+        <TextView
+            android:id="@+id/itemCategory"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="1dp"
+            android:textColor="@color/ff_accent"
+            android:textSize="11sp" />
+
+        <TextView
+            android:id="@+id/itemStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="3dp"
+            android:textColor="@color/ff_muted"
+            android:textSize="12sp"
+            android:maxLines="3"
+            android:ellipsize="end" />
+
+        <ProgressBar
+            android:id="@+id/itemProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:max="100"
+            android:visibility="gone" />
+
+        <LinearLayout
+            android:id="@+id/itemActions"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="horizontal"
+            android:visibility="gone">
+
+            <Button
+                android:id="@+id/itemPauseResume"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="0dp"
+                android:layout_marginEnd="24dp"
+                android:textColor="@color/ff_accent"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:text="@string/action_pause" />
+
+            <Button
+                android:id="@+id/itemCancel"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingHorizontal="0dp"
+                android:textColor="@color/ff_error"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:text="@string/action_cancel" />
+        </LinearLayout>
+
+    </LinearLayout>
+</LinearLayout>
