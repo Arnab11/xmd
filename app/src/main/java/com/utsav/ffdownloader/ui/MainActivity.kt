@@ -207,6 +207,11 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks {
         }
         if (directUrl != null) {
             QueueRepository.update(item.id) { it.copy(directUrl = directUrl, status = ItemStatus.READY) }
+            // If downloads are already running (or were started earlier and ran out of
+            // READY items), this item would otherwise sit at READY with no worker left
+            // to claim it. Re-poking the service tops workers back up to the configured
+            // max so a newly-resolved link starts downloading right away.
+            DownloadService.start(this@MainActivity)
         } else {
             QueueRepository.update(item.id) {
                 it.copy(status = ItemStatus.FAILED, error = error ?: "Could not resolve link")

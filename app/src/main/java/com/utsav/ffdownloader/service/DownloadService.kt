@@ -19,9 +19,6 @@ import com.utsav.ffdownloader.core.QueueRepository
 import com.utsav.ffdownloader.core.Settings
 import com.utsav.ffdownloader.ui.MainActivity
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.os.Environment
@@ -114,16 +111,30 @@ class DownloadService : LifecycleService() {
 
     /** Active engines keyed by queue item id, so per-item controls can target the right download. */
     private val engines = ConcurrentHashMap<String, DownloadEngine>()
-    private var runJob: Job? = null
+
+    // Number of worker loops currently alive. Workers exit their loop the
+    // moment claimNextReady() returns null (nothing READY *right now*) --
+    // previously that meant a single ACTION_START only ever spun up workers
+    // once, so an item that became READY *after* the workers had already
+    // exhausted the queue (e.g. it was still resolving) would sit at READY
+    // forever: no live worker left to claim it, and onStartCommand refused
+    // to launch more because a stale `runJob` still looked "active" while
+    // the other worker(s) were mid-download.
+    //
+    // Fix: track live worker count directly, and let every ACTION_START
+    // top the count back up to Settings.maxConcurrentDownloads() -- so
+    // pressing "Download ready files" again (or any other ACTION_START,
+    // e.g. right after a link finishes resolving) always has a chance to
+    // spawn a fresh worker for anything newly READY, even while other
+    // downloads are still in flight.
+    private val activeWorkers = java.util.concurrent.atomic.AtomicInteger(0)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         when (intent?.action) {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, buildNotification())
-                if (runJob?.isActive != true) {
-                    runJob = lifecycleScope.launch { runQueue() }
-                }
+                topUpWorkers()
             }
             ACTION_PAUSE_ITEM -> intent.getStringExtra(EXTRA_ITEM_ID)?.let { id ->
                 engines[id]?.pause()
@@ -139,15 +150,23 @@ class DownloadService : LifecycleService() {
         return START_NOT_STICKY
     }
 
-    private suspend fun runQueue() {
-        val workerCount = Settings.maxConcurrentDownloads().coerceIn(1, 5)
-
-        withContext(Dispatchers.IO) {
-            (1..workerCount).map { async { worker() } }.awaitAll()
+    /** Launches enough fresh worker loops to bring the live count up to the configured max. */
+    private fun topUpWorkers() {
+        val maxWorkers = Settings.maxConcurrentDownloads().coerceIn(1, 5)
+        val toLaunch = maxWorkers - activeWorkers.get()
+        if (toLaunch <= 0) return
+        repeat(toLaunch) {
+            activeWorkers.incrementAndGet()
+            lifecycleScope.launch(Dispatchers.IO) {
+                worker()
+                if (activeWorkers.decrementAndGet() == 0) {
+                    withContext(Dispatchers.Main) {
+                        ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
+                        stopSelf()
+                    }
+                }
+            }
         }
-
-        ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
 
     private suspend fun worker() {
