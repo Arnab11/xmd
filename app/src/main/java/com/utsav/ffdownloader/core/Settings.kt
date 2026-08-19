@@ -18,7 +18,7 @@ object Settings {
         prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     }
 
-    fun connectionsPerDownload(): Int = prefs.getInt(KEY_CONNECTIONS, 8)
+    fun connectionsPerDownload(): Int = prefs.getInt(KEY_CONNECTIONS, 16)
     fun setConnectionsPerDownload(value: Int) {
         prefs.edit().putInt(KEY_CONNECTIONS, value).apply()
     }

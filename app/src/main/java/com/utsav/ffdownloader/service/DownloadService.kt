@@ -28,6 +28,7 @@ import android.os.Environment
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -88,10 +89,20 @@ class DownloadService : LifecycleService() {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        // Force HTTP/1.1. If the server (often Cloudflare/CDN-backed, like
+        // dl.fuckingfast.co) speaks HTTP/2, OkHttp will silently multiplex ALL
+        // of our "parallel" segment requests over ONE physical TCP connection
+        // -- so raising `connections` to 8/16 did nothing for real throughput,
+        // it was still one TCP flow with one congestion window. Disabling H2
+        // forces each segment onto its own genuine TCP connection, which is
+        // what actually unlocks parallel bandwidth on cellular networks (this
+        // is the same trick IDM / Chrome's own parallel downloader rely on).
+        .protocols(listOf(Protocol.HTTP_1_1))
         // OkHttp's default Dispatcher caps concurrent requests to the SAME
-        // host at 5. With multi-connection downloads using up to 16 segments
-        // against one host, the extra segments were queueing instead of
-        // running in parallel -- this was silently throttling throughput.
+        // host at 5. With up to 16 segments hitting one host, the extras
+        // would queue behind the default limit instead of running in
+        // parallel -- this raises the ceiling so all segments actually run
+        // concurrently now that they're on separate HTTP/1.1 connections.
         .dispatcher(Dispatcher().apply {
             maxRequestsPerHost = 32
             maxRequests = 64
