@@ -1,7 +1,15 @@
 package com.utsav.ffdownloader.core
 
+import android.content.Context
 import androidx.lifecycle.MutableLiveData
+import com.utsav.ffdownloader.core.db.AppDatabase
+import com.utsav.ffdownloader.core.db.QueueItemDao
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Single in-memory source of truth for the queue, shared between MainActivity
@@ -18,6 +26,18 @@ import java.util.UUID
  * because that tick's map() was computed from a stale .value read before
  * the status change had been applied). Keeping our own synchronized master
  * list sidesteps that entirely.
+ *
+ * PERSISTENCE: [master] is mirrored to a Room DB (see core/db/AppDatabase.kt)
+ * so the queue survives the app process being killed and restarted -- it
+ * used to be purely in-memory, so a restart silently wiped the whole list
+ * even though the already-downloaded files on disk were untouched. Call
+ * [init] once (from FfApp.onCreate) before anything touches the queue.
+ * Writes to Room happen off the main thread and don't block the in-memory
+ * update; progress-only ticks (bytesDone/speedBps, which fire up to ~5x/sec
+ * per active download) are throttled per-item so we're not hammering SQLite
+ * on every tick -- status/error/fileName/directUrl/category changes are
+ * always persisted immediately since those matter for correctness after a
+ * restart.
  */
 object QueueRepository {
 
@@ -25,6 +45,54 @@ object QueueRepository {
     private var master: List<QueueItem> = emptyList()
 
     val items = MutableLiveData<List<QueueItem>>(emptyList())
+
+    private lateinit var dao: QueueItemDao
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val lastPersistMs = ConcurrentHashMap<String, Long>()
+    private const val PROGRESS_PERSIST_INTERVAL_MS = 1_000L
+
+    /**
+     * Loads whatever was persisted from a previous run, then starts
+     * mirroring further changes back to disk. Safe to call once at app
+     * startup (FfApp.onCreate); harmless if called again.
+     *
+     * Items that were mid-flight when the process died (RESOLVING /
+     * DOWNLOADING / SAVING) can't just resume -- there's no worker thread
+     * for them anymore -- so they're rolled back to a restartable state:
+     * READY if we already have a directUrl (download can just restart),
+     * otherwise PENDING (needs re-resolve). NEEDS_CHALLENGE/PAUSED/READY/
+     * DONE/FAILED are left as-is.
+     */
+    fun init(context: Context) {
+        if (::dao.isInitialized) return
+        dao = AppDatabase.get(context).queueItemDao()
+        scope.launch {
+            val persisted = runCatching { dao.getAll() }.getOrDefault(emptyList())
+            val recovered = persisted.map { item ->
+                when (item.status) {
+                    ItemStatus.RESOLVING -> item.copy(status = ItemStatus.PENDING)
+                    ItemStatus.DOWNLOADING, ItemStatus.SAVING ->
+                        if (item.directUrl != null) item.copy(status = ItemStatus.READY)
+                        else item.copy(status = ItemStatus.PENDING)
+                    else -> item
+                }
+            }
+            synchronized(lock) {
+                // Don't clobber anything the UI already queued before this
+                // background load finished.
+                val current = master.associateBy { it.id }
+                val recoveredIds = recovered.map { it.id }.toSet()
+                master = recovered.map { current[it.id] ?: it } +
+                    master.filter { it.id !in recoveredIds }
+                items.postValue(master)
+            }
+            // Persist any status rollback we just did.
+            val changed = recovered.filter { r ->
+                persisted.find { it.id == r.id }?.status != r.status
+            }
+            if (changed.isNotEmpty()) runCatching { dao.upsertAll(changed) }
+        }
+    }
 
     /**
      * Category is auto-detected per link from its extension (see
@@ -42,6 +110,7 @@ object QueueRepository {
      * download from a prior call is never removed from [master].
      */
     fun setLinks(rawLinks: List<String>) {
+        val toPersist: List<QueueItem>
         synchronized(lock) {
             val current = master.associateBy { it.sourceUrl }
             val updatedOrNew = rawLinks.map { link ->
@@ -59,14 +128,26 @@ object QueueRepository {
             val untouched = master.filter { it.sourceUrl !in rawLinks.toSet() }
             master = untouched + updatedOrNew
             items.postValue(master)
+            toPersist = updatedOrNew
         }
+        persistNow(toPersist)
     }
 
     fun update(id: String, mutate: (QueueItem) -> QueueItem) {
+        var previous: QueueItem? = null
+        var updated: QueueItem? = null
         synchronized(lock) {
-            master = master.map { if (it.id == id) mutate(it) else it }
+            master = master.map {
+                if (it.id == id) {
+                    previous = it
+                    val mutated = mutate(it)
+                    updated = mutated
+                    mutated
+                } else it
+            }
             items.postValue(master)
         }
+        updated?.let { persistDebounced(it, previous) }
     }
 
     /**
@@ -75,6 +156,7 @@ object QueueRepository {
      * same item.
      */
     fun claimNextReady(): QueueItem? {
+        var claimedItem: QueueItem? = null
         synchronized(lock) {
             val idx = master.indexOfFirst { it.status == ItemStatus.READY }
             if (idx == -1) return null
@@ -84,16 +166,53 @@ object QueueRepository {
             )
             master = master.toMutableList().also { it[idx] = claimed }
             items.postValue(master)
-            return claimed
+            claimedItem = claimed
         }
+        claimedItem?.let { persistNow(listOf(it)) }
+        return claimedItem
     }
 
     fun clearFinishedAndFailed() {
+        val removedIds: List<String>
         synchronized(lock) {
-            master = master.filter { it.status != ItemStatus.DONE && it.status != ItemStatus.FAILED }
+            val (removed, kept) = master.partition { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
+            master = kept
             items.postValue(master)
+            removedIds = removed.map { it.id }
+        }
+        if (removedIds.isNotEmpty() && ::dao.isInitialized) {
+            scope.launch { runCatching { dao.deleteByIds(removedIds) } }
         }
     }
 
     fun current(): List<QueueItem> = synchronized(lock) { master }
+
+    // ── Persistence helpers ─────────────────────────────────────────────
+
+    private fun persistNow(items: List<QueueItem>) {
+        if (items.isEmpty() || !::dao.isInitialized) return
+        items.forEach { lastPersistMs[it.id] = System.currentTimeMillis() }
+        scope.launch { runCatching { dao.upsertAll(items) } }
+    }
+
+    /**
+     * Persists immediately on any state-relevant field change (status,
+     * error, fileName, directUrl, category); otherwise throttles to at
+     * most once per [PROGRESS_PERSIST_INTERVAL_MS] per item so rapid
+     * progress ticks don't hit SQLite ~5x/sec per active download.
+     */
+    private fun persistDebounced(item: QueueItem, previous: QueueItem?) {
+        if (!::dao.isInitialized) return
+        val stateChanged = previous == null ||
+            previous.status != item.status ||
+            previous.error != item.error ||
+            previous.fileName != item.fileName ||
+            previous.directUrl != item.directUrl ||
+            previous.category != item.category
+        val now = System.currentTimeMillis()
+        val last = lastPersistMs[item.id] ?: 0L
+        if (!stateChanged && now - last < PROGRESS_PERSIST_INTERVAL_MS) return
+        lastPersistMs[item.id] = now
+        scope.launch { runCatching { dao.upsert(item) } }
+    }
 }

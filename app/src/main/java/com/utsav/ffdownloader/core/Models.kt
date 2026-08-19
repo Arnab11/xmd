@@ -1,5 +1,8 @@
 package com.utsav.ffdownloader.core
 
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
 /** Status of a single queued link as it moves through resolve -> download. */
 enum class ItemStatus {
     PENDING,
@@ -37,8 +40,15 @@ enum class DownloadCategory(val folderName: String, val label: String) {
  * One entry in the queue. [sourceUrl] is what the user pasted (or a link
  * discovered on a fitgirl-repacks page); [directUrl] is filled in once
  * resolved to a dl.fuckingfast.co URL.
+ *
+ * Persisted to disk via Room (see core/db/AppDatabase.kt) so the queue
+ * survives the app process being killed/restarted -- QueueRepository used
+ * to hold this purely in memory, which meant every item vanished on
+ * restart even though the downloaded files themselves were fine.
  */
+@Entity(tableName = "queue_items")
 data class QueueItem(
+    @PrimaryKey
     val id: String,
     val sourceUrl: String,
     var directUrl: String? = null,

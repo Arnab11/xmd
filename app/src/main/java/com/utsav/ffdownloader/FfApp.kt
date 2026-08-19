@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
+import com.utsav.ffdownloader.core.QueueRepository
 import com.utsav.ffdownloader.core.Settings
 
 class FfApp : Application() {
@@ -15,6 +16,9 @@ class FfApp : Application() {
     override fun onCreate() {
         super.onCreate()
         Settings.init(this)
+        // Loads the previously-persisted queue from disk so it survives
+        // process restart (see QueueRepository's persistence docs).
+        QueueRepository.init(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 DOWNLOAD_CHANNEL_ID,
