@@ -1,2 +1,0 @@
-class ResolutionError(RuntimeError):
-    pass
