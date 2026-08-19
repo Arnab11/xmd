@@ -25,8 +25,12 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.os.Environment
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
 import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
@@ -84,6 +88,17 @@ class DownloadService : LifecycleService() {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
+        // OkHttp's default Dispatcher caps concurrent requests to the SAME
+        // host at 5. With multi-connection downloads using up to 16 segments
+        // against one host, the extra segments were queueing instead of
+        // running in parallel -- this was silently throttling throughput.
+        .dispatcher(Dispatcher().apply {
+            maxRequestsPerHost = 32
+            maxRequests = 64
+        })
+        // Bigger pool of kept-alive connections so segment requests reuse
+        // warm sockets instead of paying a fresh TCP+TLS handshake each time.
+        .connectionPool(ConnectionPool(32, 5, TimeUnit.MINUTES))
         .build()
 
     /** Active engines keyed by queue item id, so per-item controls can target the right download. */
@@ -164,14 +179,30 @@ class DownloadService : LifecycleService() {
                 .takeIf { it != DownloadCategory.default() } ?: categoryAtClaim
             QueueRepository.update(itemId) { it.copy(fileName = fileName, category = category) }
 
-            val destinationDir = File(Environment.getExternalStorageDirectory(), "umd/${category.folderName}")
-            val destination = File(destinationDir, fileName)
-            destinationFile = destination
+            // Download into the app's private cache first. Public/shared storage
+            // (/sdcard/...) is served through Android's FUSE emulation layer, where
+            // every read/write syscall carries extra overhead -- that overhead is
+            // what was capping speed well below Chrome's. The private cache sits on
+            // the real filesystem with none of that overhead, so the download itself
+            // runs at full network speed. The finished file is then moved to
+            // /sdcard/umd/ in one continuous copy, which is far faster than paying
+            // the FUSE tax on every chunk of the download.
+            val tempDir = File(cacheDir, "umd_temp/${category.folderName}")
+            val tempFile = File(tempDir, fileName)
+            destinationFile = tempFile
+
+            val finalDir = File(Environment.getExternalStorageDirectory(), "umd/${category.folderName}")
+            val finalFile = File(finalDir, fileName)
 
             // Pause (engine.pause()) blocks in-place inside downloadAuto and never throws here --
             // the engine stays registered in `engines` so Resume can call engine.resume() on the
             // very same in-flight connection. Only a genuine Cancel throws, ending this coroutine.
-            engine.downloadAuto(directUrl, destination)
+            engine.downloadAuto(directUrl, tempFile)
+
+            QueueRepository.update(itemId) { it.copy(status = ItemStatus.SAVING) }
+            withContext(Dispatchers.IO) { moveToPublicStorage(tempFile, finalFile) }
+            destinationFile = finalFile
+
             QueueRepository.update(itemId) { it.copy(status = ItemStatus.DONE) }
         } catch (e: DownloadCancelledException) {
             destinationFile?.delete()
@@ -182,6 +213,34 @@ class DownloadService : LifecycleService() {
             engines.remove(itemId)
             updateNotification()
         }
+    }
+
+    /**
+     * Moves the finished temp file into public storage. `renameTo` is instant
+     * when both paths are on the same filesystem, but the private cache and
+     * /sdcard/... often sit on different mount views (FUSE), so it commonly
+     * fails there -- in which case we fall back to a large-buffer streamed
+     * copy, which is still one continuous sequential write instead of the
+     * many small interleaved writes a live multi-segment download would do.
+     */
+    private fun moveToPublicStorage(temp: File, final: File) {
+        final.parentFile?.mkdirs()
+        if (final.exists()) final.delete()
+
+        if (temp.renameTo(final)) return
+
+        FileInputStream(temp).use { input ->
+            FileOutputStream(final).use { output ->
+                val buffer = ByteArray(4 * 1024 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read == -1) break
+                    output.write(buffer, 0, read)
+                }
+                output.fd.sync()
+            }
+        }
+        temp.delete()
     }
 
     private fun updateNotification() {

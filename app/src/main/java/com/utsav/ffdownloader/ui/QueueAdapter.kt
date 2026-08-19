@@ -55,13 +55,14 @@ class QueueAdapter(
                 "⬇  ${if (item.bytesTotal > 0) "$pct%" else "Downloading…"}"
             }
             ItemStatus.PAUSED           -> "⏸  Paused"
+            ItemStatus.SAVING           -> "💾 Saving to storage…"
             ItemStatus.DONE             -> "✔  Done"
             ItemStatus.FAILED           -> "✖  ${item.error ?: "Failed"}"
         }
 
         // ── Size line (MB done / total MB) ────────────────────────────────
         when (item.status) {
-            ItemStatus.DOWNLOADING, ItemStatus.PAUSED -> {
+            ItemStatus.DOWNLOADING, ItemStatus.PAUSED, ItemStatus.SAVING -> {
                 when {
                     item.bytesTotal > 0 -> {
                         holder.sizeText.text =
@@ -101,6 +102,10 @@ class QueueAdapter(
                 holder.progress.progress = 100
                 holder.progress.visibility = View.VISIBLE
             }
+            ItemStatus.SAVING -> {
+                holder.progress.progress = 100
+                holder.progress.visibility = View.VISIBLE
+            }
             else -> holder.progress.visibility = View.GONE
         }
 
@@ -133,6 +138,7 @@ class QueueAdapter(
         ItemStatus.READY           -> R.color.ff_accent
         ItemStatus.DOWNLOADING     -> R.color.ff_accent
         ItemStatus.PAUSED          -> R.color.ff_warning
+        ItemStatus.SAVING          -> R.color.ff_accent
         ItemStatus.DONE            -> R.color.ff_success
         ItemStatus.FAILED          -> R.color.ff_error
     }

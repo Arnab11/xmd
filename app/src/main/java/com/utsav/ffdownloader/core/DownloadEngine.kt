@@ -16,8 +16,11 @@ import java.util.regex.Pattern
 typealias ProgressFn = (done: Long, total: Long, speedBps: Double) -> Unit
 typealias LogFn = (String) -> Unit
 
-private const val STREAM_BLOCK_SIZE = 256 * 1024
-private const val MULTI_CONNECTION_MIN_BYTES = 8L * 1024 * 1024
+// 1 MiB blocks: far fewer read()/write() syscalls than the old 256 KiB,
+// which matters most when the destination sits behind Android's FUSE
+// layer (shared/public storage) where every syscall has extra overhead.
+private const val STREAM_BLOCK_SIZE = 1024 * 1024
+private const val MULTI_CONNECTION_MIN_BYTES = 4L * 1024 * 1024
 private const val PROGRESS_THROTTLE_NANOS = 200_000_000L // ~5 UI updates/sec
 
 class DownloadEngine(

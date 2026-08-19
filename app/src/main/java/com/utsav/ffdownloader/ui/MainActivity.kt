@@ -109,7 +109,8 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks {
         // Active-download badge on the Downloads tab
         QueueRepository.items.observe(this) { list ->
             val active = list.count {
-                it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED
+                it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
+                it.status == ItemStatus.SAVING
             }
             val badge = bottomNav.getOrCreateBadge(R.id.nav_downloads)
             if (active > 0) {

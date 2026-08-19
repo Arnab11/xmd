@@ -61,6 +61,7 @@ class DownloadsFragment : Fragment() {
                 it.status == ItemStatus.NEEDS_CHALLENGE
             }
             val paused  = list.count { it.status == ItemStatus.PAUSED }
+            val saving  = list.count { it.status == ItemStatus.SAVING }
             val done    = list.count { it.status == ItemStatus.DONE }
             val failed  = list.count { it.status == ItemStatus.FAILED }
 
@@ -69,6 +70,7 @@ class DownloadsFragment : Fragment() {
             if (ready > 0)       parts += "$ready ready"
             if (resolving > 0)   parts += "$resolving resolving"
             if (paused > 0)      parts += "$paused paused"
+            if (saving > 0)      parts += "$saving saving"
             if (done > 0)        parts += "$done done"
             if (failed > 0)      parts += "$failed failed"
 

@@ -8,6 +8,7 @@ enum class ItemStatus {
     READY,
     DOWNLOADING,
     PAUSED,
+    SAVING,
     DONE,
     FAILED
 }
