@@ -1,8 +1,23 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("kotlin-kapt")
 }
+
+// Release signing is loaded from (in priority order): environment variables
+// (used by CI), then keystore.properties in the project root (used for local
+// release builds). Neither the keystore file nor keystore.properties should
+// ever be committed -- see .gitignore.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) {
+        keystorePropsFile.inputStream().use { load(it) }
+    }
+}
+fun signingProp(envName: String, propName: String): String? =
+    System.getenv(envName) ?: keystoreProps.getProperty(propName)
 
 android {
     namespace = "com.utsav.ffdownloader"
@@ -12,14 +27,28 @@ android {
         applicationId = "com.utsav.ffdownloader"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
+    }
+
+    signingConfigs {
+        create("release") {
+            val storeFilePath = signingProp("KEYSTORE_FILE", "storeFile")
+            if (storeFilePath != null) {
+                storeFile = file(storeFilePath)
+                storePassword = signingProp("KEYSTORE_PASSWORD", "storePassword")
+                keyAlias = signingProp("KEY_ALIAS", "keyAlias")
+                keyPassword = signingProp("KEY_PASSWORD", "keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 

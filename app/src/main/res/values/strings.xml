@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">FF Downloader</string>
+    <string name="app_name">Xmd - Xtreme Media Downloader</string>
     <string name="hint_links">Paste FuckingFast share links, direct links, or a fitgirl-repacks page URL — one per line</string>
     <string name="action_prepare">Prepare</string>
     <string name="action_download">Download ready files</string>
