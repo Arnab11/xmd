@@ -1,6 +1,7 @@
 package com.utsav.ffdownloader.ui
 
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.ProgressBar
@@ -17,15 +18,17 @@ class QueueAdapter(
     private val onCancel: (QueueItem) -> Unit
 ) : ListAdapter<QueueItem, QueueAdapter.VH>(DIFF) {
 
-    class VH(view: android.view.View) : RecyclerView.ViewHolder(view) {
-        val indicator: android.view.View = view.findViewById(R.id.statusIndicator)
-        val title: TextView = view.findViewById(R.id.itemTitle)
-        val category: TextView = view.findViewById(R.id.itemCategory)
-        val status: TextView = view.findViewById(R.id.itemStatus)
-        val progress: ProgressBar = view.findViewById(R.id.itemProgress)
-        val actions: android.view.View = view.findViewById(R.id.itemActions)
-        val pauseResume: Button = view.findViewById(R.id.itemPauseResume)
-        val cancel: Button = view.findViewById(R.id.itemCancel)
+    class VH(view: View) : RecyclerView.ViewHolder(view) {
+        val indicator: View      = view.findViewById(R.id.statusIndicator)
+        val title: TextView      = view.findViewById(R.id.itemTitle)
+        val category: TextView   = view.findViewById(R.id.itemCategory)
+        val status: TextView     = view.findViewById(R.id.itemStatus)
+        val sizeText: TextView   = view.findViewById(R.id.itemSizeText)   // MB done / total MB
+        val progress: ProgressBar= view.findViewById(R.id.itemProgress)
+        val speedEta: TextView   = view.findViewById(R.id.itemSpeedEta)   // speed + ETA
+        val actions: View        = view.findViewById(R.id.itemActions)
+        val pauseResume: Button  = view.findViewById(R.id.itemPauseResume)
+        val cancel: Button       = view.findViewById(R.id.itemCancel)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -35,31 +38,83 @@ class QueueAdapter(
 
     override fun onBindViewHolder(holder: VH, position: Int) {
         val item = getItem(position)
+        val context = holder.itemView.context
+
         holder.title.text = item.fileName ?: item.sourceUrl
         holder.category.text = item.category.label
-
-        val context = holder.itemView.context
-        holder.status.text = when (item.status) {
-            ItemStatus.PENDING -> "⏳ Queued"
-            ItemStatus.RESOLVING -> "🔄 Resolving…"
-            ItemStatus.NEEDS_CHALLENGE -> "🛡️ Verifying — complete the check in the browser screen"
-            ItemStatus.READY -> "✅ Ready to download"
-            ItemStatus.DOWNLOADING -> "⬇️ ${buildDownloadingText(item)}"
-            ItemStatus.PAUSED -> "⏸️ Paused"
-            ItemStatus.DONE -> "✔️ Done"
-            ItemStatus.FAILED -> "❌ ${item.error ?: "Failed"}"
-        }
         holder.indicator.setBackgroundColor(context.getColor(colorForStatus(item.status)))
 
-        if (item.status == ItemStatus.DOWNLOADING && item.bytesTotal > 0) {
-            holder.progress.visibility = android.view.View.VISIBLE
-            holder.progress.progress = ((item.bytesDone * 100) / item.bytesTotal).toInt()
-        } else {
-            holder.progress.visibility = android.view.View.GONE
+        // ── Status text ───────────────────────────────────────────────────
+        holder.status.text = when (item.status) {
+            ItemStatus.PENDING          -> "⏳ Queued"
+            ItemStatus.RESOLVING        -> "🔄 Resolving…"
+            ItemStatus.NEEDS_CHALLENGE  -> "🛡 Verifying — complete check in browser"
+            ItemStatus.READY            -> "✅ Ready to download"
+            ItemStatus.DOWNLOADING      -> {
+                val pct = if (item.bytesTotal > 0) (item.bytesDone * 100 / item.bytesTotal) else 0
+                "⬇  ${if (item.bytesTotal > 0) "$pct%" else "Downloading…"}"
+            }
+            ItemStatus.PAUSED           -> "⏸  Paused"
+            ItemStatus.DONE             -> "✔  Done"
+            ItemStatus.FAILED           -> "✖  ${item.error ?: "Failed"}"
         }
 
+        // ── Size line (MB done / total MB) ────────────────────────────────
+        when (item.status) {
+            ItemStatus.DOWNLOADING, ItemStatus.PAUSED -> {
+                when {
+                    item.bytesTotal > 0 -> {
+                        holder.sizeText.text =
+                            "${formatBytes(item.bytesDone)} / ${formatBytes(item.bytesTotal)}"
+                        holder.sizeText.visibility = View.VISIBLE
+                    }
+                    item.bytesDone > 0 -> {
+                        holder.sizeText.text = formatBytes(item.bytesDone)
+                        holder.sizeText.visibility = View.VISIBLE
+                    }
+                    else -> holder.sizeText.visibility = View.GONE
+                }
+            }
+            ItemStatus.DONE -> {
+                val bytes = if (item.bytesTotal > 0) item.bytesTotal else item.bytesDone
+                if (bytes > 0) {
+                    holder.sizeText.text = formatBytes(bytes)
+                    holder.sizeText.visibility = View.VISIBLE
+                } else {
+                    holder.sizeText.visibility = View.GONE
+                }
+            }
+            else -> holder.sizeText.visibility = View.GONE
+        }
+
+        // ── Progress bar ─────────────────────────────────────────────────
+        when (item.status) {
+            ItemStatus.DOWNLOADING -> {
+                if (item.bytesTotal > 0) {
+                    holder.progress.progress = ((item.bytesDone * 100) / item.bytesTotal).toInt()
+                    holder.progress.visibility = View.VISIBLE
+                } else {
+                    holder.progress.visibility = View.GONE
+                }
+            }
+            ItemStatus.DONE -> {
+                holder.progress.progress = 100
+                holder.progress.visibility = View.VISIBLE
+            }
+            else -> holder.progress.visibility = View.GONE
+        }
+
+        // ── Speed + ETA line ─────────────────────────────────────────────
+        if (item.status == ItemStatus.DOWNLOADING && item.speedBps > 0) {
+            holder.speedEta.text = buildSpeedEtaText(item)
+            holder.speedEta.visibility = View.VISIBLE
+        } else {
+            holder.speedEta.visibility = View.GONE
+        }
+
+        // ── Action buttons ────────────────────────────────────────────────
         val showActions = item.status == ItemStatus.DOWNLOADING || item.status == ItemStatus.PAUSED
-        holder.actions.visibility = if (showActions) android.view.View.VISIBLE else android.view.View.GONE
+        holder.actions.visibility = if (showActions) View.VISIBLE else View.GONE
         holder.pauseResume.text = if (item.status == ItemStatus.PAUSED) {
             context.getString(R.string.action_resume)
         } else {
@@ -69,40 +124,45 @@ class QueueAdapter(
         holder.cancel.setOnClickListener { onCancel(item) }
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────
+
     private fun colorForStatus(status: ItemStatus): Int = when (status) {
-        ItemStatus.PENDING, ItemStatus.RESOLVING, ItemStatus.NEEDS_CHALLENGE -> R.color.ff_muted
-        ItemStatus.READY -> R.color.ff_accent
-        ItemStatus.DOWNLOADING -> R.color.ff_accent
-        ItemStatus.PAUSED -> R.color.ff_warning
-        ItemStatus.DONE -> R.color.ff_success
-        ItemStatus.FAILED -> R.color.ff_error
+        ItemStatus.PENDING,
+        ItemStatus.RESOLVING,
+        ItemStatus.NEEDS_CHALLENGE -> R.color.ff_muted
+        ItemStatus.READY           -> R.color.ff_accent
+        ItemStatus.DOWNLOADING     -> R.color.ff_accent
+        ItemStatus.PAUSED          -> R.color.ff_warning
+        ItemStatus.DONE            -> R.color.ff_success
+        ItemStatus.FAILED          -> R.color.ff_error
     }
 
-    private fun buildDownloadingText(item: QueueItem): String {
-        val pct = if (item.bytesTotal > 0) (item.bytesDone * 100 / item.bytesTotal) else 0
-        val speedKb = item.speedBps / 1024.0
+    /** "2.1 MB/s  •  ETA 3:42" */
+    private fun buildSpeedEtaText(item: QueueItem): String {
+        val bps = item.speedBps
+        val speedStr = when {
+            bps >= 1_048_576.0 -> "%.1f MB/s".format(bps / 1_048_576.0)
+            bps >= 1_024.0     -> "%.0f KB/s".format(bps / 1_024.0)
+            else               -> "%.0f B/s".format(bps)
+        }
+        val remaining = (item.bytesTotal - item.bytesDone).coerceAtLeast(0)
+        val etaSec = if (bps > 1.0 && item.bytesTotal > 0) (remaining / bps).toLong() else -1L
+        return if (etaSec >= 0) "$speedStr  •  ETA ${formatDuration(etaSec)}" else speedStr
+    }
 
-        val elapsedSec = if (item.downloadStartedAtMs > 0) {
-            ((System.currentTimeMillis() - item.downloadStartedAtMs) / 1000L).coerceAtLeast(0)
-        } else 0L
-
-        val remainingBytes = (item.bytesTotal - item.bytesDone).coerceAtLeast(0)
-        val etaSec = if (item.speedBps > 1.0) (remainingBytes / item.speedBps).toLong() else -1L
-
-        val elapsedStr = formatDuration(elapsedSec)
-        val etaStr = if (etaSec >= 0) formatDuration(etaSec) else "…"
-
-        return "$pct% @ ${"%.0f".format(speedKb)} KB/s  •  $elapsedStr elapsed  •  ETA $etaStr"
+    /** Bytes → human-readable string using binary prefixes (KiB, MiB, GiB). */
+    private fun formatBytes(bytes: Long): String = when {
+        bytes >= 1_073_741_824L -> "%.2f GB".format(bytes / 1_073_741_824.0)
+        bytes >= 1_048_576L     -> "%.1f MB".format(bytes / 1_048_576.0)
+        bytes >= 1_024L         -> "%.0f KB".format(bytes / 1_024.0)
+        else                    -> "$bytes B"
     }
 
     private fun formatDuration(totalSeconds: Long): String {
         val h = totalSeconds / 3600
         val m = (totalSeconds % 3600) / 60
         val s = totalSeconds % 60
-        return when {
-            h > 0 -> "%d:%02d:%02d".format(h, m, s)
-            else -> "%d:%02d".format(m, s)
-        }
+        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
     }
 
     companion object {
