@@ -35,7 +35,7 @@ android {
         create("release") {
             val storeFilePath = signingProp("KEYSTORE_FILE", "storeFile")
             if (storeFilePath != null) {
-                storeFile = file(storeFilePath)
+                storeFile = rootProject.file(storeFilePath)
                 storePassword = signingProp("KEYSTORE_PASSWORD", "storePassword")
                 keyAlias = signingProp("KEY_ALIAS", "keyAlias")
                 keyPassword = signingProp("KEY_PASSWORD", "keyPassword")
