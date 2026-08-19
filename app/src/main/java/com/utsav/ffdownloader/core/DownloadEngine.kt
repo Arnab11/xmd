@@ -17,36 +17,24 @@ typealias ProgressFn = (done: Long, total: Long, speedBps: Double) -> Unit
 typealias LogFn = (String) -> Unit
 
 private const val STREAM_BLOCK_SIZE = 256 * 1024
-private const val MULTI_CONNECTION_MIN_BYTES = 8L * 1024 * 1024 // below this, one connection is plenty
-private const val PROGRESS_THROTTLE_NANOS = 200_000_000L // ~5 UI updates/sec, avoids flooding the main thread
+private const val MULTI_CONNECTION_MIN_BYTES = 8L * 1024 * 1024
+private const val PROGRESS_THROTTLE_NANOS = 200_000_000L // ~5 UI updates/sec
 
-/**
- * Resumable downloader with pause/cancel support and optional multi-connection
- * (segmented, parallel) downloads for large files on servers that support
- * HTTP range requests. Kotlin port of ff_downloader/core/downloader.py's
- * DownloadEngine, extended with segmented downloads since mobile networks
- * benefit more from parallel connections than the desktop's single-stream
- * approach.
- *
- * Not thread-shared: create one instance per in-flight download (its
- * pause/cancel flags are shared across that download's segment workers,
- * but a fresh instance should be used per queue item).
- */
 class DownloadEngine(
     private val client: OkHttpClient,
     private val progress: ProgressFn = { _, _, _ -> },
     private val log: LogFn = {},
     private val connections: Int = 4,
-    private val speedLimitBytesPerSec: Long = 0L // 0 = unlimited
+    private val speedLimitBytesPerSec: Long = 0L
 ) {
-    private val paused = AtomicBoolean(false)
+    private val paused    = AtomicBoolean(false)
     private val cancelled = AtomicBoolean(false)
     private val lastProgressEmitNanos = AtomicLong(0L)
-    private val limiter = RateLimiter(speedLimitBytesPerSec)
+    private val limiter   = RateLimiter(speedLimitBytesPerSec)
 
-    /** Continuous cumulative-rate limiter, shared across a download's segment threads. */
+    // ── Rate limiter (unchanged) ──────────────────────────────────────────
     private class RateLimiter(private val bytesPerSecond: Long) {
-        private val lock = Any()
+        private val lock  = Any()
         private val startNanos = System.nanoTime()
         private var bytesConsumed = 0L
 
@@ -55,23 +43,59 @@ class DownloadEngine(
             var sleepNanos = 0L
             synchronized(lock) {
                 bytesConsumed += bytes
-                val elapsedNanos = System.nanoTime() - startNanos
-                // How much wall-clock time SHOULD have passed to have consumed this many
-                // bytes at the target rate -- if we're ahead of that, sleep the difference.
-                // Using total-consumed-since-start (not a periodically-reset window) avoids
-                // drift and stays accurate however bursty the underlying reads are.
+                val elapsedNanos  = System.nanoTime() - startNanos
                 val expectedNanos = (bytesConsumed.toDouble() / bytesPerSecond * 1_000_000_000L).toLong()
-                if (expectedNanos > elapsedNanos) {
-                    sleepNanos = expectedNanos - elapsedNanos
+                if (expectedNanos > elapsedNanos) sleepNanos = expectedNanos - elapsedNanos
+            }
+            if (sleepNanos > 0) Thread.sleep(sleepNanos / 1_000_000, (sleepNanos % 1_000_000).toInt())
+        }
+    }
+
+    // ── Sliding-window speed meter ────────────────────────────────────────
+    /**
+     * Thread-safe 3-second sliding window speed meter.
+     *
+     * Previous code used (totalBytesDownloaded / totalElapsedSeconds), which
+     * produced an ever-decaying average dragged down by TCP slow-start at the
+     * beginning of the download. This meter only considers bytes received in
+     * the last [windowMs] ms, so it tracks the *current* speed the way the
+     * system status-bar does — no drift, no slow-start penalty.
+     *
+     * In multi-connection mode a single shared instance is passed to all
+     * segment workers so their bytes are summed into one accurate aggregate.
+     */
+    private class SpeedMeter(private val windowMs: Long = 3_000L) {
+        private val lock    = Any()
+        // ArrayDeque of (timestampNanos, bytes) pairs
+        private val samples = ArrayDeque<Pair<Long, Long>>()
+
+        fun record(bytes: Long) {
+            if (bytes <= 0) return
+            val now = System.nanoTime()
+            synchronized(lock) {
+                samples.addLast(now to bytes)
+                val cutoff = now - windowMs * 1_000_000L
+                while (samples.isNotEmpty() && samples.first().first < cutoff) {
+                    samples.removeFirst()
                 }
             }
-            if (sleepNanos > 0) {
-                Thread.sleep(sleepNanos / 1_000_000, (sleepNanos % 1_000_000).toInt())
+        }
+
+        /** Returns bytes/sec over the sliding window; 0.0 if fewer than 2 samples. */
+        fun bps(): Double {
+            synchronized(lock) {
+                if (samples.size < 2) return 0.0
+                val windowNanos = samples.last().first - samples.first().first
+                if (windowNanos <= 0L) return 0.0
+                // Sum bytes of every sample EXCEPT the first (it's the window anchor)
+                val totalBytes = samples.drop(1).sumOf { it.second }
+                return totalBytes * 1_000_000_000.0 / windowNanos
             }
         }
     }
 
-    fun pause() { paused.set(true) }
+    // ── Public control ────────────────────────────────────────────────────
+    fun pause()  { paused.set(true) }
     fun resume() { paused.set(false) }
     fun cancel() { cancelled.set(true); paused.set(false) }
 
@@ -83,9 +107,8 @@ class DownloadEngine(
         }
     }
 
-    /** Emits progress at most every ~200ms per engine instance, except always on [force]. */
     private fun emitProgress(done: Long, total: Long, speedBps: Double, force: Boolean = false) {
-        val now = System.nanoTime()
+        val now  = System.nanoTime()
         val last = lastProgressEmitNanos.get()
         if (!force && now - last < PROGRESS_THROTTLE_NANOS) return
         if (lastProgressEmitNanos.compareAndSet(last, now) || force) {
@@ -93,8 +116,9 @@ class DownloadEngine(
         }
     }
 
+    // ── Companions (filename utils, unchanged) ────────────────────────────
     companion object {
-        private val INVALID_CHARS = charArrayOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
+        private val INVALID_CHARS       = charArrayOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
         private val CONTENT_RANGE_TOTAL = Pattern.compile("/(\\d+)$")
 
         private fun sanitize(name: String): String =
@@ -102,13 +126,12 @@ class DownloadEngine(
 
         fun filenameFromUrl(url: String): String {
             val path = runCatching { URI(url).path }.getOrNull().orEmpty()
-            val raw = path.substringAfterLast('/').let {
+            val raw  = path.substringAfterLast('/').let {
                 runCatching { URLDecoder.decode(it, "UTF-8") }.getOrDefault(it)
             }
             return sanitize(raw.ifBlank { "download.bin" })
         }
 
-        /** Mirrors desktop's filename_from_link: uses the URL fragment as a display name. */
         fun filenameFromLink(link: String): String {
             val fragment = runCatching { URI(link).fragment }.getOrNull()?.trim().orEmpty()
             if (fragment.isEmpty()) return ""
@@ -116,12 +139,7 @@ class DownloadEngine(
         }
     }
 
-    /**
-     * Picks the fastest safe strategy: multi-connection for large files on a
-     * range-supporting server with no existing partial file, single-connection
-     * (with resume) otherwise. Falls back to a clean single-connection restart
-     * if the multi-connection attempt fails partway.
-     */
+    // ── Entry point ───────────────────────────────────────────────────────
     fun downloadAuto(url: String, destination: File) {
         cancelled.set(false)
         paused.set(false)
@@ -138,14 +156,15 @@ class DownloadEngine(
                     throw e
                 } catch (e: Exception) {
                     log("Parallel download failed (${e.message}), retrying single-connection")
-                    destination.delete() // scattered partial ranges aren't safely resumable
-                    cancelled.set(false) // clear the internal cancel() used to stop sibling segments
+                    destination.delete()
+                    cancelled.set(false)
                 }
             }
         }
         download(url, destination)
     }
 
+    // ── Range probe (unchanged) ───────────────────────────────────────────
     private data class RangeProbe(val totalSize: Long, val supportsRanges: Boolean)
 
     private fun probeRangeSupport(url: String): RangeProbe {
@@ -171,6 +190,7 @@ class DownloadEngine(
         }
     }
 
+    // ── Multi-connection download ──────────────────────────────────────────
     private fun downloadMulti(url: String, destination: File, totalSize: Long) {
         destination.parentFile?.mkdirs()
         RandomAccessFile(destination, "rw").use { it.setLength(totalSize) }
@@ -178,23 +198,25 @@ class DownloadEngine(
         val segmentSize = totalSize / connections
         val ranges = (0 until connections).map { i ->
             val start = i * segmentSize
-            val end = if (i == connections - 1) totalSize - 1 else (start + segmentSize - 1)
+            val end   = if (i == connections - 1) totalSize - 1 else (start + segmentSize - 1)
             start to end
         }
 
         val doneCounter = AtomicLong(0L)
-        val started = System.nanoTime()
-        val failure = AtomicReference<Exception?>(null)
-        val executor = Executors.newFixedThreadPool(connections)
+        // One shared SpeedMeter so all segment threads contribute to the
+        // same sliding window — gives the true aggregate download speed.
+        val speedMeter  = SpeedMeter()
+        val failure     = AtomicReference<Exception?>(null)
+        val executor    = Executors.newFixedThreadPool(connections)
 
         try {
             val futures = ranges.map { (start, end) ->
                 executor.submit {
                     try {
-                        downloadRange(url, destination, start, end, doneCounter, totalSize, started)
+                        downloadRange(url, destination, start, end, doneCounter, totalSize, speedMeter)
                     } catch (e: Exception) {
                         failure.compareAndSet(null, e)
-                        cancel() // stop sibling segments if one fails (unless it's just our own cancel)
+                        cancel()
                     }
                 }
             }
@@ -213,6 +235,7 @@ class DownloadEngine(
         log("Downloaded ${destination.name}")
     }
 
+    // Signature changed: accepts shared SpeedMeter instead of `started: Long`
     private fun downloadRange(
         url: String,
         destination: File,
@@ -220,7 +243,7 @@ class DownloadEngine(
         end: Long,
         doneCounter: AtomicLong,
         totalSize: Long,
-        started: Long
+        speedMeter: SpeedMeter          // ← shared across all segment workers
     ) {
         val request = Request.Builder().url(url).header("Range", "bytes=$start-$end").build()
         client.newCall(request).execute().use { response ->
@@ -240,25 +263,23 @@ class DownloadEngine(
                         raf.write(buffer, 0, read)
                         val done = doneCounter.addAndGet(read.toLong())
                         limiter.acquire(read)
-                        val elapsedSec = ((System.nanoTime() - started) / 1_000_000_000.0).coerceAtLeast(0.001)
-                        emitProgress(done, totalSize, done / elapsedSec)
+                        speedMeter.record(read.toLong())          // ← sliding window
+                        emitProgress(done, totalSize, speedMeter.bps())
                     }
                 }
             }
         }
     }
 
-    /** Single-connection download to [destination], resuming from existing partial content if present. */
+    // ── Single-connection download (with resume) ───────────────────────────
     fun download(url: String, destination: File) {
         destination.parentFile?.mkdirs()
         cancelled.set(false)
         paused.set(false)
 
-        val existingSize = if (destination.isFile) destination.length() else 0L
-        val requestBuilder = Request.Builder().url(url)
-        if (existingSize > 0) {
-            requestBuilder.header("Range", "bytes=$existingSize-")
-        }
+        val existingSize    = if (destination.isFile) destination.length() else 0L
+        val requestBuilder  = Request.Builder().url(url)
+        if (existingSize > 0) requestBuilder.header("Range", "bytes=$existingSize-")
 
         client.newCall(requestBuilder.build()).execute().use { response ->
             when (response.code) {
@@ -275,8 +296,7 @@ class DownloadEngine(
                         existingSize + (response.header("content-length")?.toLongOrNull() ?: 0L)
                     }
                     if (totalSize > 0 && existingSize >= totalSize) {
-                        log("File already complete: ${destination.name}")
-                        return
+                        log("File already complete: ${destination.name}"); return
                     }
                     log("Resuming ${destination.name} from $existingSize bytes")
                     streamToFile(response, destination, existingSize, totalSize, append = true)
@@ -284,12 +304,9 @@ class DownloadEngine(
                 200 -> {
                     val totalSize = response.header("content-length")?.toLongOrNull() ?: 0L
                     if (existingSize > 0 && totalSize > 0 && existingSize >= totalSize) {
-                        log("File already complete: ${destination.name}")
-                        return
+                        log("File already complete: ${destination.name}"); return
                     }
-                    if (existingSize > 0) {
-                        log("Server ignored resume request; restarting ${destination.name}")
-                    }
+                    if (existingSize > 0) log("Server ignored resume; restarting ${destination.name}")
                     streamToFile(response, destination, 0L, totalSize, append = false)
                 }
                 else -> {
@@ -297,14 +314,13 @@ class DownloadEngine(
                     if (host == "dl.fuckingfast.co" && response.code in setOf(401, 403, 404, 410)) {
                         throw RuntimeException(
                             "This direct link has expired or is unavailable. Paste the original " +
-                                "share link to prepare a fresh download URL."
+                            "share link to prepare a fresh download URL."
                         )
                     }
                     throw RuntimeException("Failed to download file (HTTP ${response.code})")
                 }
             }
         }
-
         log("Downloaded ${destination.name}")
     }
 
@@ -315,9 +331,9 @@ class DownloadEngine(
         totalSize: Long,
         append: Boolean
     ) {
-        val body = response.body ?: throw RuntimeException("Empty response body")
-        var done = initial
-        val started = System.nanoTime()
+        val body       = response.body ?: throw RuntimeException("Empty response body")
+        var done       = initial
+        val speedMeter = SpeedMeter()           // ← per-download sliding window
 
         RandomAccessFile(destination, "rw").use { raf ->
             if (append) raf.seek(destination.length()) else { raf.setLength(0); raf.seek(0) }
@@ -331,8 +347,8 @@ class DownloadEngine(
                     raf.write(buffer, 0, read)
                     done += read
                     limiter.acquire(read)
-                    val elapsedSec = ((System.nanoTime() - started) / 1_000_000_000.0).coerceAtLeast(0.001)
-                    emitProgress(done, totalSize, (done - initial) / elapsedSec)
+                    speedMeter.record(read.toLong())              // ← sliding window
+                    emitProgress(done, totalSize, speedMeter.bps())
                 }
             }
         }
