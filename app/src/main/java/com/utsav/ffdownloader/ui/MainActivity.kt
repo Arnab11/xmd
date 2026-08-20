@@ -582,6 +582,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         val speedInput      = view.findViewById<EditText>(R.id.speedLimitInput)
         val concurrentInput = view.findViewById<EditText>(R.id.maxConcurrentInput)
         val autoRetrySwitch = view.findViewById<com.google.android.material.switchmaterial.SwitchMaterial>(R.id.autoRetrySwitch)
+        val saveToDownloadsSwitch = view.findViewById<com.google.android.material.switchmaterial.SwitchMaterial>(R.id.saveToDownloadsSwitch)
 
         val idForConnections = mapOf(
             2 to R.id.conn2, 4 to R.id.conn4, 8 to R.id.conn8, 16 to R.id.conn16
@@ -592,6 +593,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         speedInput.setText(Settings.speedLimitKBps().toString())
         concurrentInput.setText(Settings.maxConcurrentDownloads().toString())
         autoRetrySwitch.isChecked = Settings.autoRetryEnabled()
+        saveToDownloadsSwitch.isChecked = Settings.saveToDownloadsFolder()
 
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
@@ -604,6 +606,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
                 Settings.setSpeedLimitKBps(speedInput.text?.toString()?.toIntOrNull() ?: 0)
                 Settings.setMaxConcurrentDownloads(concurrentInput.text?.toString()?.toIntOrNull() ?: 2)
                 Settings.setAutoRetryEnabled(autoRetrySwitch.isChecked)
+                Settings.setSaveToDownloadsFolder(saveToDownloadsSwitch.isChecked)
                 Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(android.R.string.cancel, null)

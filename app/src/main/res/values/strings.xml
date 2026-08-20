@@ -28,6 +28,8 @@
     <string name="settings_max_concurrent">Max simultaneous downloads (1–5)</string>
     <string name="settings_auto_retry">Auto-retry on network error</string>
     <string name="settings_auto_retry_hint">Retries up to 3 times automatically on connection timeout/drop. Expired links still need a manual retry.</string>
+    <string name="settings_save_to_downloads">Save to Downloads folder</string>
+    <string name="settings_save_to_downloads_hint">Skip the Xmd category folders and save every file straight into your device\'s Download folder, like Chrome.</string>
     <string name="settings_save">Save</string>
     <string name="action_add">Add</string>
     <string name="action_dismiss">Dismiss</string>

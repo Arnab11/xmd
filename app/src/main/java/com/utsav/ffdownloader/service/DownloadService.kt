@@ -249,7 +249,13 @@ class DownloadService : LifecycleService() {
                 val tempFile = File(tempDir, fileName)
                 destinationFile = tempFile
 
-                val finalDir = File(Environment.getExternalStorageDirectory(), "Xmd/${category.folderName}")
+                val finalDir = if (Settings.saveToDownloadsFolder()) {
+                    // Chrome-style: flat, straight into the device's standard
+                    // Download folder, no Xmd/<Category> subfolder at all.
+                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                } else {
+                    File(Environment.getExternalStorageDirectory(), "Xmd/${category.folderName}")
+                }
                 val finalFile = File(finalDir, fileName)
 
                 // Pause (engine.pause()) blocks in-place inside downloadAuto and never throws here --

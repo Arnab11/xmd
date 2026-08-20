@@ -12,6 +12,7 @@ object Settings {
     private const val KEY_SPEED_LIMIT_KBPS = "speed_limit_kbps"
     private const val KEY_MAX_CONCURRENT = "max_concurrent_downloads"
     private const val KEY_AUTO_RETRY = "auto_retry_network_errors"
+    private const val KEY_SAVE_TO_DOWNLOADS = "save_to_downloads_folder"
 
     private lateinit var prefs: SharedPreferences
 
@@ -42,6 +43,14 @@ object Settings {
     fun autoRetryEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_RETRY, true)
     fun setAutoRetryEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_RETRY, value).apply()
+    }
+
+    /** When true, downloads skip the app's own Xmd/<Category> subfolders and
+     *  land flat in the device's standard Download folder instead -- same
+     *  as Chrome. Default OFF (existing categorized Xmd/... behavior). */
+    fun saveToDownloadsFolder(): Boolean = prefs.getBoolean(KEY_SAVE_TO_DOWNLOADS, false)
+    fun setSaveToDownloadsFolder(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SAVE_TO_DOWNLOADS, value).apply()
     }
 
     // ── Browser: Private DNS (DNS-over-HTTPS for in-app browsing only) ────
