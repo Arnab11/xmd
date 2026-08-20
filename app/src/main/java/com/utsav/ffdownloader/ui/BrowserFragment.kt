@@ -52,12 +52,26 @@ class BrowserFragment : Fragment() {
     interface Callbacks {
         /** Same handoff HomeFragment uses for pasted links -- expands + queues + resolves. */
         fun triggerPrepare(lines: List<String>)
+        /** The browser's own toolbar has no options menu of its own -- its overflow
+         *  button opens the same Settings dialog the app toolbar's menu does. */
+        fun openSettings()
     }
 
+    /**
+     * One open tab. A single WebView is reused across tabs rather than keeping
+     * one WebView instance alive per tab -- simpler and lighter, at the cost of
+     * a tab losing its scroll position/in-page state while it's not the active
+     * one (it reloads [url] on switch). [title] backs the label shown in the
+     * tab list.
+     */
+    private data class BrowserTab(val id: Long, var url: String? = null, var title: String = "New tab")
+
+    private lateinit var newTabButton: ImageButton
     private lateinit var urlInput: EditText
-    private lateinit var backButton: ImageButton
-    private lateinit var forwardButton: ImageButton
     private lateinit var reloadButton: ImageButton
+    private lateinit var tabsButton: FrameLayout
+    private lateinit var tabsCount: android.widget.TextView
+    private lateinit var overflowButton: ImageButton
     private lateinit var pageProgress: ProgressBar
     private lateinit var webView: WebView
     private lateinit var speedDialContainer: View
@@ -70,6 +84,10 @@ class BrowserFragment : Fragment() {
     private lateinit var suggestionAdapter: SuggestionAdapter
     private var lastDetectedLink: String? = null
     private var suggestJob: Job? = null
+
+    private val tabs = mutableListOf(BrowserTab(id = 0L))
+    private var currentTabIndex = 0
+    private var nextTabId = 1L
 
     // Own client instead of reusing MainActivity's -- this is a short-timeout,
     // fire-and-forget lookup that shouldn't share connection pool pressure
@@ -86,10 +104,12 @@ class BrowserFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
+        newTabButton = view.findViewById(R.id.newTabButton)
         urlInput = view.findViewById(R.id.urlInput)
-        backButton = view.findViewById(R.id.backButton)
-        forwardButton = view.findViewById(R.id.forwardButton)
         reloadButton = view.findViewById(R.id.reloadButton)
+        tabsButton = view.findViewById(R.id.tabsButton)
+        tabsCount = view.findViewById(R.id.tabsCount)
+        overflowButton = view.findViewById(R.id.overflowButton)
         pageProgress = view.findViewById(R.id.pageProgress)
         webView = view.findViewById(R.id.webView)
         speedDialContainer = view.findViewById(R.id.speedDialContainer)
@@ -103,10 +123,14 @@ class BrowserFragment : Fragment() {
         setupAddressBar()
         setupSuggestions()
 
+        newTabButton.setOnClickListener { addNewTab() }
+        tabsButton.setOnClickListener { showTabsDialog() }
+        overflowButton.setOnClickListener { (activity as? Callbacks)?.openSettings() }
         addLinkFab.setOnClickListener { onAddLinkClicked() }
 
         // Start on the speed-dial ("new tab") page.
         showSpeedDial()
+        updateTabsCount()
     }
 
     // ── WebView ──────────────────────────────────────────────────────────
@@ -123,13 +147,16 @@ class BrowserFragment : Fragment() {
                 pageProgress.visibility = View.VISIBLE
                 pageProgress.progress = 0
                 url?.let { urlInput.setText(it) }
+                tabs.getOrNull(currentTabIndex)?.let { it.url = url }
                 clearDetectedLink()
-                updateNavButtons()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
                 pageProgress.visibility = View.GONE
-                updateNavButtons()
+                tabs.getOrNull(currentTabIndex)?.let {
+                    it.url = url
+                    it.title = view.title?.takeIf { t -> t.isNotBlank() } ?: url.orEmpty()
+                }
                 url?.let { checkPageForLinks(it) }
             }
         }
@@ -140,15 +167,28 @@ class BrowserFragment : Fragment() {
         }
     }
 
-    private fun updateNavButtons() {
-        backButton.isEnabled = webView.canGoBack()
-        forwardButton.isEnabled = webView.canGoForward()
-    }
-
-    /** Called by MainActivity to consume system back presses while a page is loaded. */
+    /**
+     * Called by MainActivity to consume system/gesture back presses while the
+     * Browser tab is visible.
+     *
+     * Previously this only handled in-page history (webView.canGoBack()) and
+     * returned false otherwise -- which meant the very first navigation from
+     * the speed dial (no back history yet) fell straight through to the
+     * activity's default back behavior and closed the whole app instead of
+     * returning to the speed dial. Now: if the WebView is showing a page,
+     * back either steps through its history or, with none left, returns to
+     * the speed dial (still consumed). Only once we're already on the speed
+     * dial does this return false, so MainActivity's callback can fall back
+     * to the Home tab instead of exiting.
+     */
     fun onBackPressed(): Boolean {
-        if (webView.canGoBack()) {
-            webView.goBack()
+        if (webView.visibility == View.VISIBLE) {
+            if (webView.canGoBack()) {
+                webView.goBack()
+            } else {
+                showSpeedDial()
+                tabs.getOrNull(currentTabIndex)?.let { it.url = null; it.title = "New tab" }
+            }
             return true
         }
         return false
@@ -157,8 +197,6 @@ class BrowserFragment : Fragment() {
     // ── Address bar ──────────────────────────────────────────────────────
 
     private fun setupAddressBar() {
-        backButton.setOnClickListener { webView.goBack() }
-        forwardButton.setOnClickListener { webView.goForward() }
         reloadButton.setOnClickListener { webView.reload() }
 
         urlInput.setOnEditorActionListener { _, actionId, event ->
@@ -272,8 +310,6 @@ class BrowserFragment : Fragment() {
         urlInput.setText("")
         hideSuggestions()
         clearDetectedLink()
-        backButton.isEnabled = webView.canGoBack()
-        forwardButton.isEnabled = webView.canGoForward()
     }
 
     private fun showWebView() {
@@ -334,6 +370,45 @@ class BrowserFragment : Fragment() {
                 BookmarkRepository.remove(bookmark)
                 BookmarkRepository.add(titleInput.text?.toString()?.trim().orEmpty(), normalizeToUrl(url))
             }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    // ── Tabs ─────────────────────────────────────────────────────────────
+
+    private fun updateTabsCount() {
+        tabsCount.text = tabs.size.toString()
+    }
+
+    private fun addNewTab() {
+        tabs.add(BrowserTab(id = nextTabId++))
+        currentTabIndex = tabs.lastIndex
+        showSpeedDial()
+        updateTabsCount()
+    }
+
+    private fun switchToTab(index: Int) {
+        if (index !in tabs.indices) return
+        currentTabIndex = index
+        val tab = tabs[index]
+        val url = tab.url
+        if (url.isNullOrBlank()) {
+            showSpeedDial()
+        } else {
+            showWebView()
+            webView.loadUrl(url)
+        }
+    }
+
+    private fun showTabsDialog() {
+        val labels = tabs.map { it.title.ifBlank { it.url ?: "New tab" } }.toTypedArray()
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.action_tabs)
+            .setSingleChoiceItems(labels, currentTabIndex) { dialog, which ->
+                switchToTab(which)
+                dialog.dismiss()
+            }
+            .setPositiveButton(R.string.action_new_tab) { _, _ -> addNewTab() }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }

@@ -108,31 +108,47 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
             when (item.itemId) {
                 R.id.nav_home -> {
                     showFragment(TAG_HOME)
+                    toolbar.visibility = android.view.View.VISIBLE
                     supportActionBar?.title = getString(R.string.app_name)
                 }
                 R.id.nav_browser -> {
                     showFragment(TAG_BROWSER)
-                    supportActionBar?.title = "Browser"
+                    // The Browser fragment's own address bar is the top bar here
+                    // (with its own reload/tabs/overflow controls) -- the shared
+                    // app toolbar (and its "Browser" title) would just duplicate it.
+                    toolbar.visibility = android.view.View.GONE
                 }
                 R.id.nav_downloads -> {
                     showFragment(TAG_DOWNLOADS)
+                    toolbar.visibility = android.view.View.VISIBLE
                     supportActionBar?.title = "Downloads"
                 }
             }
             true
         }
 
-        // While the Browser tab is active, let the WebView consume back
-        // presses to navigate its own history before falling through to
-        // the default activity-finish behavior.
+        // Back handling, gesture or button:
+        //  1. Browser tab with page history / a loaded page -> step back
+        //     through it (or back to the speed dial). Handled entirely by
+        //     BrowserFragment.onBackPressed().
+        //  2. Browser tab already on the speed dial (or any other tab) ->
+        //     jump to the Home tab, rather than falling straight through to
+        //     the default behavior and closing the app. This is what used to
+        //     be missing: searching or opening a site, then going back, used
+        //     to exit the app outright instead of landing on Home.
+        //  3. Already on the Home tab -> default behavior (exits the app).
         onBackPressedDispatcher.addCallback(this) {
             val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
-            val consumed = browser?.isVisible == true && browser.onBackPressed()
-            if (!consumed) {
-                isEnabled = false
-                onBackPressedDispatcher.onBackPressed()
-                isEnabled = true
+            if (browser?.isVisible == true && browser.onBackPressed()) {
+                return@addCallback
             }
+            if (bottomNav.selectedItemId != R.id.nav_home) {
+                bottomNav.selectedItemId = R.id.nav_home
+                return@addCallback
+            }
+            isEnabled = false
+            onBackPressedDispatcher.onBackPressed()
+            isEnabled = true
         }
 
         // Active-download badge on the Downloads tab
@@ -218,6 +234,12 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
             }
         }
         DownloadService.start(this)
+    }
+
+    // ── BrowserFragment.Callbacks ───────────────────────────────────────────
+
+    override fun openSettings() {
+        showSettingsDialog()
     }
 
     // ── DownloadsFragment.Callbacks ─────────────────────────────────────────
