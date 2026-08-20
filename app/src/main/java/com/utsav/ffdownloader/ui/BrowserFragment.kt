@@ -29,6 +29,7 @@ import com.utsav.ffdownloader.R
 import com.utsav.ffdownloader.core.Bookmark
 import com.utsav.ffdownloader.core.BookmarkRepository
 import com.utsav.ffdownloader.core.DnsOverHttpsResolver
+import com.utsav.ffdownloader.core.DownloadEngine
 import com.utsav.ffdownloader.core.HistoryRepository
 import com.utsav.ffdownloader.core.LinkParser
 import com.utsav.ffdownloader.core.Settings
@@ -106,6 +107,14 @@ class BrowserFragment : Fragment() {
     // fire-and-forget lookup that shouldn't share connection pool pressure
     // with the resolve/download clients.
     private val suggestClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
+
+    // Same short-timeout shape as suggestClient, dedicated to the confirm
+    // dialog's real-filename probe (see onWebViewDownloadRequested) --
+    // fire-and-forget, shouldn't share pool pressure with anything else.
+    private val filenameClient = OkHttpClient.Builder()
         .connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(5, TimeUnit.SECONDS)
         .build()
@@ -612,18 +621,39 @@ class BrowserFragment : Fragment() {
      * native "start a download" signal for arbitrary files from any site.
      * Always confirms before queuing since it fires on real clicks, not
      * just heuristics.
+     *
+     * The contentDisposition WebView hands us here is frequently missing
+     * or generic on sites like this (vcloud/gofile-style hosts serving a
+     * token URL with no filename in the path) -- URLUtil.guessFileName then
+     * has nothing real to work with and falls back to a mostly-made-up name
+     * (e.g. "Outer.bin"). The actual filename only reliably shows up in the
+     * *response's* Content-Disposition header, so show the dialog right
+     * away with the best guess, then probe the URL directly and swap in
+     * the real name if it resolves before the user taps a button.
      */
     private fun onWebViewDownloadRequested(url: String, contentDisposition: String?, mimeType: String?) {
-        val fileName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
-        AlertDialog.Builder(requireContext())
+        val guessedName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
+        var resolvedName = guessedName
+
+        val dialog = AlertDialog.Builder(requireContext())
             .setTitle(R.string.download_confirm_title)
-            .setMessage(getString(R.string.download_confirm_message, fileName))
+            .setMessage(getString(R.string.download_confirm_message, guessedName))
             .setPositiveButton(R.string.action_add_to_downloads) { _, _ ->
                 (activity as? Callbacks)?.triggerPrepare(listOf(url))
                 Toast.makeText(requireContext(), R.string.link_found_toast, Toast.LENGTH_LONG).show()
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
+
+        lifecycleScope.launch {
+            val probed = withContext(Dispatchers.IO) {
+                DownloadEngine.probeRealFilename(filenameClient, url)
+            }
+            if (probed != null && probed != resolvedName && dialog.isShowing) {
+                resolvedName = probed
+                dialog.setMessage(getString(R.string.download_confirm_message, probed))
+            }
+        }
     }
 
     /**
