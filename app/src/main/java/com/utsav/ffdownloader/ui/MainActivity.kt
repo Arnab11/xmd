@@ -155,7 +155,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         QueueRepository.items.observe(this) { list ->
             val active = list.count {
                 it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
-                it.status == ItemStatus.SAVING
+                it.status == ItemStatus.SAVING || it.status == ItemStatus.RETRYING
             }
             val badge = bottomNav.getOrCreateBadge(R.id.nav_downloads)
             if (active > 0) {
@@ -426,6 +426,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         val group           = view.findViewById<RadioGroup>(R.id.connectionsGroup)
         val speedInput      = view.findViewById<EditText>(R.id.speedLimitInput)
         val concurrentInput = view.findViewById<EditText>(R.id.maxConcurrentInput)
+        val autoRetrySwitch = view.findViewById<com.google.android.material.switchmaterial.SwitchMaterial>(R.id.autoRetrySwitch)
 
         val idForConnections = mapOf(
             2 to R.id.conn2, 4 to R.id.conn4, 8 to R.id.conn8, 16 to R.id.conn16
@@ -435,6 +436,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         )).isChecked = true
         speedInput.setText(Settings.speedLimitKBps().toString())
         concurrentInput.setText(Settings.maxConcurrentDownloads().toString())
+        autoRetrySwitch.isChecked = Settings.autoRetryEnabled()
 
         AlertDialog.Builder(this)
             .setTitle(R.string.settings_title)
@@ -446,6 +448,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
                 Settings.setConnectionsPerDownload(connections)
                 Settings.setSpeedLimitKBps(speedInput.text?.toString()?.toIntOrNull() ?: 0)
                 Settings.setMaxConcurrentDownloads(concurrentInput.text?.toString()?.toIntOrNull() ?: 2)
+                Settings.setAutoRetryEnabled(autoRetrySwitch.isChecked)
                 Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()
             }
             .setNegativeButton(android.R.string.cancel, null)
