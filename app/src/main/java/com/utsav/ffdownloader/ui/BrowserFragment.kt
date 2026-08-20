@@ -14,6 +14,7 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
+import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
@@ -400,17 +401,88 @@ class BrowserFragment : Fragment() {
         }
     }
 
-    private fun showTabsDialog() {
-        val labels = tabs.map { it.title.ifBlank { it.url ?: "New tab" } }.toTypedArray()
-        AlertDialog.Builder(requireContext())
-            .setTitle(R.string.action_tabs)
-            .setSingleChoiceItems(labels, currentTabIndex) { dialog, which ->
-                switchToTab(which)
-                dialog.dismiss()
+    /**
+     * Closes a tab. Never drops below one tab -- closing the last remaining
+     * one just resets it to a fresh "New tab" instead of removing it, same
+     * as closing the last tab in a normal browser.
+     */
+    private fun closeTab(index: Int) {
+        if (index !in tabs.indices) return
+        if (tabs.size == 1) {
+            tabs[0] = BrowserTab(id = tabs[0].id)
+            showSpeedDial()
+            updateTabsCount()
+            return
+        }
+        val closingCurrent = index == currentTabIndex
+        tabs.removeAt(index)
+        when {
+            closingCurrent -> {
+                currentTabIndex = index.coerceAtMost(tabs.size - 1)
+                switchToTab(currentTabIndex)
             }
+            index < currentTabIndex -> currentTabIndex--
+        }
+        updateTabsCount()
+    }
+
+    private fun showTabsDialog() {
+        val context = requireContext()
+        val rowsContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(32, 8, 8, 8)
+        }
+
+        lateinit var dialog: AlertDialog
+
+        fun refreshRows() {
+            rowsContainer.removeAllViews()
+            tabs.forEachIndexed { index, tab ->
+                val row = LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                }
+                val label = android.widget.TextView(context).apply {
+                    text = (if (index == currentTabIndex) "\u25CF  " else "") +
+                        tab.title.ifBlank { tab.url ?: "New tab" }
+                    textSize = 15f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    setPadding(0, 28, 16, 28)
+                    layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                    setOnClickListener {
+                        switchToTab(index)
+                        dialog.dismiss()
+                    }
+                }
+                val closeBtn = ImageButton(context).apply {
+                    setImageResource(R.drawable.ic_close)
+                    background = null
+                    setPadding(16, 16, 16, 16)
+                    // Only offer closing when more than one tab is open --
+                    // closing the last one is handled by the "New tab"
+                    // button instead, same as most browsers.
+                    isEnabled = tabs.size > 1
+                    alpha = if (tabs.size > 1) 1f else 0.3f
+                    setOnClickListener {
+                        closeTab(index)
+                        refreshRows()
+                    }
+                }
+                row.addView(label)
+                row.addView(closeBtn)
+                rowsContainer.addView(row)
+            }
+        }
+        refreshRows()
+
+        dialog = AlertDialog.Builder(context)
+            .setTitle(R.string.action_tabs)
+            .setView(rowsContainer)
             .setPositiveButton(R.string.action_new_tab) { _, _ -> addNewTab() }
             .setNegativeButton(android.R.string.cancel, null)
-            .show()
+            .create()
+        dialog.show()
     }
 
     // ── Link auto-detect ─────────────────────────────────────────────────

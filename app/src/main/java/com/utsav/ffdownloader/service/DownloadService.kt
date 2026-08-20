@@ -199,8 +199,16 @@ class DownloadService : LifecycleService() {
 
         try {
             val directUrl = directUrlAtClaim ?: throw RuntimeException("No resolved URL")
-            val fileName = DownloadEngine.filenameFromLink(sourceUrl)
-                .ifBlank { DownloadEngine.filenameFromUrl(directUrl) }
+
+            // The URL path alone is unreliable for id-based download endpoints
+            // (pixeldrain.dev/api/file/<id>?download, hubcloud-generated links,
+            // etc.) -- that path segment is just an opaque id, not the real
+            // filename, which only ever appears in the response's
+            // Content-Disposition header. Ask the server first; fall back to
+            // the old URL/fragment-based naming if it doesn't answer with one.
+            val realName = withContext(Dispatchers.IO) { DownloadEngine.probeRealFilename(client, directUrl) }
+            val fileName = realName
+                ?: DownloadEngine.filenameFromLink(sourceUrl).ifBlank { DownloadEngine.filenameFromUrl(directUrl) }
 
             // The source URL alone (e.g. a FuckingFast share link) often has no visible
             // extension -- re-detect the category now that the real filename is resolved,

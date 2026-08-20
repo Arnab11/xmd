@@ -138,10 +138,12 @@ class DownloadEngine(
         }
     }
 
-    // ── Companions (filename utils, unchanged) ────────────────────────────
+    // ── Companions (filename utils) ─────────────────────────────────────
     companion object {
         private val INVALID_CHARS       = charArrayOf('<', '>', ':', '"', '/', '\\', '|', '?', '*')
         private val CONTENT_RANGE_TOTAL = Pattern.compile("/(\\d+)$")
+        private val CONTENT_DISPOSITION_FILENAME =
+            Pattern.compile("filename\\*?=(?:UTF-8'')?\"?([^\";]+)\"?", Pattern.CASE_INSENSITIVE)
 
         private fun sanitize(name: String): String =
             name.map { if (it in INVALID_CHARS) '_' else it }.joinToString("").take(220)
@@ -158,6 +160,47 @@ class DownloadEngine(
             val fragment = runCatching { URI(link).fragment }.getOrNull()?.trim().orEmpty()
             if (fragment.isEmpty()) return ""
             return sanitize(fragment)
+        }
+
+        /** Parses a filename out of a raw Content-Disposition header value, e.g.
+         *  `attachment; filename="Movie.mkv"` or the RFC 5987
+         *  `attachment; filename*=UTF-8''Movie.mkv` form. Null if none found. */
+        fun filenameFromContentDisposition(header: String?): String? {
+            if (header.isNullOrBlank()) return null
+            val matcher = CONTENT_DISPOSITION_FILENAME.matcher(header)
+            if (!matcher.find()) return null
+            val raw = matcher.group(1)?.trim().orEmpty()
+            if (raw.isEmpty()) return null
+            val decoded = runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrDefault(raw)
+            return sanitize(decoded).ifBlank { null }
+        }
+
+        /**
+         * Looks up the server's real filename before a download starts, for
+         * links whose URL path is just an opaque id rather than the actual
+         * filename -- e.g. pixeldrain.dev/api/file/<id>?download or a
+         * hubcloud-generated link. filenameFromUrl() alone would name the
+         * file after that id (what was happening before this existed); the
+         * real name only ever shows up in the response's Content-Disposition
+         * header. Tries a cheap HEAD first, then falls back to a 0-byte
+         * ranged GET for servers that don't implement HEAD (many CDNs).
+         * Returns null (never throws) if neither yields a usable name, so
+         * callers can fall back to the URL-based naming as before.
+         */
+        fun probeRealFilename(client: OkHttpClient, url: String): String? {
+            val headName = runCatching {
+                client.newCall(Request.Builder().url(url).head().build()).execute().use { resp ->
+                    if (resp.isSuccessful) filenameFromContentDisposition(resp.header("Content-Disposition")) else null
+                }
+            }.getOrNull()
+            if (headName != null) return headName
+
+            return runCatching {
+                val rangeRequest = Request.Builder().url(url).header("Range", "bytes=0-0").build()
+                client.newCall(rangeRequest).execute().use { resp ->
+                    filenameFromContentDisposition(resp.header("Content-Disposition"))
+                }
+            }.getOrNull()
         }
     }
 
