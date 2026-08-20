@@ -1,43 +1,82 @@
-# Fucking Fast Downloader
+# Xmd — Xtreme Media Downloader
 
-A focused PyQt5 desktop downloader for public FuckingFast share links. Paste links, prepare a queue, then download the files that are ready. It supports FitGirl page extraction, copying fresh direct URLs, resumable downloads, and pause/cancel controls.
+An Android download manager built for FuckingFast share links (`fuckingfast.co`), with fitgirl-repacks page support and Cloudflare/Turnstile challenge handling — an Android port of the original PyQt5 desktop downloader.
 
-## Architecture
+## Features
+
+- Paste `fuckingfast.co` share links, `dl.fuckingfast.co` direct links, or a `fitgirl-repacks.site` page URL — the app expands source pages into their share links automatically.
+- If a link needs Cloudflare/Turnstile verification, an in-app WebView opens the share page so you can clear the challenge yourself; once cleared, the direct URL is captured automatically.
+- Resumable, pause/cancel-able downloads that run in a foreground service, so they survive backgrounding the app.
+- IDM-style **auto-categorized downloads** — files are sorted by extension into `Videos`, `Music`, `Documents`, `Apps`, or `Others` subfolders, no manual picking required.
+- Download queue persists across app restarts (Room-backed), so nothing is lost if the app process is killed.
+
+## Project structure
 
 ```text
-ff_downloader/
-|- core/
-|  |- resolver.py      # source-page and share-link resolver
-|  `- downloader.py    # resumable streaming download engine
-|- ui/
-|  `- main_window.py   # PyQt desktop UI
-|- config.py           # runtime settings
-|- workers.py          # QThread adapters
-`- __main__.py         # application entry point
-main.py                # compatibility launcher
+app/src/main/java/com/utsav/ffdownloader/
+├─ core/
+│  ├─ LinkParser.kt        # share/direct/fitgirl link parsing & validation
+│  ├─ DownloadEngine.kt    # resumable streaming download engine
+│  ├─ CategoryDetector.kt  # extension -> DownloadCategory mapping
+│  ├─ QueueRepository.kt   # in-memory + Room-backed queue state
+│  ├─ Settings.kt          # persisted app settings
+│  └─ db/                  # Room entities/DAO for the queue
+├─ service/
+│  └─ DownloadService.kt   # foreground service driving downloads per category folder
+├─ ui/
+│  ├─ MainActivity.kt, HomeFragment.kt, DownloadsFragment.kt, QueueAdapter.kt
+│  └─ ChallengeActivity.kt # WebView for clearing Cloudflare/Turnstile challenges
+└─ FfApp.kt                # Application class
 ```
 
-## Install
+## Building
+
+Requires JDK 17 and the Android SDK (compileSdk 34, minSdk 26).
 
 ```bash
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# Linux/macOS: source .venv/bin/activate
-pip install -r requirements.txt
-python main.py
+./gradlew assembleDebug     # debug APK
+./gradlew assembleRelease   # unsigned release APK, then sign with apksigner (see below)
 ```
 
-## How it works
+Or open the project in Android Studio and run/build normally.
 
-1. Paste original `fuckingfast.co` share URLs, a supported source page, or current `dl.fuckingfast.co` direct URLs.
-2. Select **Prepare**. The prepared queue is stored in the window, so download always uses the links you reviewed—not a hidden cache.
-3. If the host requests verification, complete it in the browser window that opens. This uses the browser's normal session; the app does not try to solve the challenge invisibly.
-4. Select **Download ready files**, or use the copy button to send fresh direct URLs to another download manager.
+### Signing a release build
 
-Direct `dl.fuckingfast.co` URLs expire after 24 hours. A stale direct URL cannot be renewed by itself; paste its original share URL to prepare a fresh one. When a batch has stale share URLs, usable files remain in the queue and only the affected entries are marked for attention.
+Release builds are intentionally unsigned by Gradle — `assembleRelease` produces `app-release-unsigned.apk`, which you sign explicitly with `apksigner`:
 
-## External managers
+```bash
+apksigner sign --ks your-release.jks --ks-key-alias <alias> \
+  --out app-release.apk app/build/outputs/apk/release/app-release-unsigned.apk
+```
 
-Use **Prepare**, then the copy button to copy one fresh direct URL per line for tools such as JDownloader.
+CI does this automatically on push to `main` via `.github/workflows/android-build.yml`, using repo secrets (`KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD`); the signed APK is uploaded as a build artifact.
+
+## Releases
+
+Tagged pushes trigger `.github/workflows/release.yml`, which builds a signed release APK and publishes it to GitHub Releases with a SHA-256 checksum and notes pulled from `CHANGELOG.md`.
+
+To cut a release:
+
+1. Bump `versionCode`/`versionName` in `app/build.gradle.kts` and add a new `## [x.y.z]` section to the top of `CHANGELOG.md`, then commit and push those to `main`.
+2. Tag the commit with `vX.Y.Z` (must match `app/build.gradle.kts`'s `versionName`) and push the tag:
+
+   ```bash
+   git tag v1.0.0
+   git push origin v1.0.0
+   ```
+
+3. The `release-for-github` job runs automatically and publishes the GitHub Release with `Xmd-v1.0.0.apk` attached.
+
+You can also trigger it manually from the **Actions** tab → **Make release** → **Run workflow**, entering the tag name (e.g. `v1.0.0`) without needing to push a tag first.
+
+## Permissions
+
+- `INTERNET`, `ACCESS_NETWORK_STATE` — fetching links and downloading
+- `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `POST_NOTIFICATIONS` — background download progress notification
+- `MANAGE_EXTERNAL_STORAGE` — saving downloaded files into category subfolders
+
+## License
+
+Licensed under the GNU Affero General Public License v3.0 — see [LICENSE](LICENSE).
 
 Only download content you are authorized to access.
