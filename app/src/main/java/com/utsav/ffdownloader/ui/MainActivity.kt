@@ -15,6 +15,7 @@ import android.widget.EditText
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.Toast
+import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -37,7 +38,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
-class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragment.Callbacks {
+class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragment.Callbacks, BrowserFragment.Callbacks {
 
     // ── HTTP client (resolve step) ────────────────────────────────────────
     private val client = OkHttpClient.Builder()
@@ -91,10 +92,13 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         // Add fragments only on a fresh start (not after config-change)
         if (savedInstanceState == null) {
             val home      = HomeFragment()
+            val browser   = BrowserFragment()
             val downloads = DownloadsFragment()
             supportFragmentManager.beginTransaction()
                 .add(R.id.fragmentContainer, home,      TAG_HOME)
+                .add(R.id.fragmentContainer, browser,   TAG_BROWSER)
                 .add(R.id.fragmentContainer, downloads, TAG_DOWNLOADS)
+                .hide(browser)
                 .hide(downloads)   // Home is the initial tab
                 .commit()
         }
@@ -106,12 +110,29 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
                     showFragment(TAG_HOME)
                     supportActionBar?.title = getString(R.string.app_name)
                 }
+                R.id.nav_browser -> {
+                    showFragment(TAG_BROWSER)
+                    supportActionBar?.title = "Browser"
+                }
                 R.id.nav_downloads -> {
                     showFragment(TAG_DOWNLOADS)
                     supportActionBar?.title = "Downloads"
                 }
             }
             true
+        }
+
+        // While the Browser tab is active, let the WebView consume back
+        // presses to navigate its own history before falling through to
+        // the default activity-finish behavior.
+        onBackPressedDispatcher.addCallback(this) {
+            val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
+            val consumed = browser?.isVisible == true && browser.onBackPressed()
+            if (!consumed) {
+                isEnabled = false
+                onBackPressedDispatcher.onBackPressed()
+                isEnabled = true
+            }
         }
 
         // Active-download badge on the Downloads tab
@@ -158,10 +179,14 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
     private fun showFragment(tag: String) {
         val fm        = supportFragmentManager
         val home      = fm.findFragmentByTag(TAG_HOME)      ?: return
+        val browser   = fm.findFragmentByTag(TAG_BROWSER)   ?: return
         val downloads = fm.findFragmentByTag(TAG_DOWNLOADS) ?: return
         fm.beginTransaction().apply {
-            if (tag == TAG_HOME) { show(home); hide(downloads) }
-            else                 { hide(home); show(downloads) }
+            when (tag) {
+                TAG_HOME      -> { show(home); hide(browser); hide(downloads) }
+                TAG_BROWSER   -> { hide(home); show(browser); hide(downloads) }
+                else          -> { hide(home); hide(browser); show(downloads) }
+            }
         }.commit()
     }
 
@@ -401,6 +426,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
 
     companion object {
         private const val TAG_HOME      = "home"
+        private const val TAG_BROWSER   = "browser"
         private const val TAG_DOWNLOADS = "downloads"
     }
 }

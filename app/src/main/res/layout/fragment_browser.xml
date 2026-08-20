@@ -1,0 +1,143 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/ff_bg">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Address bar -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:background="@color/ff_surface"
+            android:paddingStart="4dp"
+            android:paddingEnd="12dp"
+            android:paddingVertical="6dp">
+
+            <ImageButton
+                android:id="@+id/backButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_arrow_back"
+                android:tint="@color/ff_muted"
+                android:contentDescription="@string/action_back"
+                android:enabled="false" />
+
+            <ImageButton
+                android:id="@+id/forwardButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_arrow_forward"
+                android:tint="@color/ff_muted"
+                android:contentDescription="@string/action_forward"
+                android:enabled="false" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                app:cardBackgroundColor="@color/ff_surface_2"
+                app:cardCornerRadius="20dp"
+                app:cardElevation="0dp">
+
+                <EditText
+                    android:id="@+id/urlInput"
+                    android:layout_width="match_parent"
+                    android:layout_height="40dp"
+                    android:background="@null"
+                    android:paddingHorizontal="14dp"
+                    android:hint="@string/hint_url"
+                    android:textColorHint="@color/ff_muted"
+                    android:textColor="@color/ff_text"
+                    android:textSize="14sp"
+                    android:singleLine="true"
+                    android:imeOptions="actionGo"
+                    android:inputType="textUri"
+                    android:selectAllOnFocus="true" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <ImageButton
+                android:id="@+id/reloadButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:src="@drawable/ic_refresh"
+                android:tint="@color/ff_muted"
+                android:contentDescription="@string/action_reload" />
+        </LinearLayout>
+
+        <ProgressBar
+            android:id="@+id/pageProgress"
+            style="?android:attr/progressBarStyleHorizontal"
+            android:layout_width="match_parent"
+            android:layout_height="2dp"
+            android:max="100"
+            android:progressTint="@color/ff_accent"
+            android:visibility="gone" />
+
+        <!-- Content area: WebView underneath, speed-dial shown on top for new tab -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <WebView
+                android:id="@+id/webView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <!-- Speed-dial "new tab" page -->
+            <LinearLayout
+                android:id="@+id/speedDialContainer"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical"
+                android:background="@color/ff_bg"
+                android:visibility="visible">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_shortcuts"
+                    android:textColor="@color/ff_muted"
+                    android:textSize="10sp"
+                    android:letterSpacing="0.15"
+                    android:layout_margin="16dp" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/speedDialGrid"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:clipToPadding="false"
+                    android:paddingHorizontal="8dp"
+                    android:paddingBottom="16dp" />
+            </LinearLayout>
+        </FrameLayout>
+    </LinearLayout>
+
+    <!-- Auto-detect FAB: appears when a downloadable link is found on the page -->
+    <com.google.android.material.floatingactionbutton.FloatingActionButton
+        android:id="@+id/addLinkFab"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="bottom|end"
+        android:layout_margin="20dp"
+        android:src="@drawable/ic_download_link"
+        app:backgroundTint="@color/ff_accent"
+        app:tint="@color/ff_bg"
+        android:contentDescription="@string/action_add_to_downloads"
+        android:visibility="gone" />
+
+</FrameLayout>

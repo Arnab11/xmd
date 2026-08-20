@@ -5,16 +5,41 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.room.migration.Migration
+import com.utsav.ffdownloader.core.Bookmark
 import com.utsav.ffdownloader.core.QueueItem
 
-@Database(entities = [QueueItem::class], version = 1, exportSchema = false)
+@Database(entities = [QueueItem::class, Bookmark::class], version = 2, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun queueItemDao(): QueueItemDao
+    abstract fun bookmarkDao(): BookmarkDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
+
+        // v1 -> v2: adds the bookmarks table (Browser tab speed-dial).
+        // Explicit migration instead of fallbackToDestructiveMigration so
+        // the existing queue_items table (and any in-flight downloads) on
+        // upgrading installs isn't wiped.
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `bookmarks` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `title` TEXT NOT NULL,
+                        `url` TEXT NOT NULL,
+                        `faviconUrl` TEXT,
+                        `sortOrder` INTEGER NOT NULL DEFAULT 0,
+                        `createdAtMs` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
 
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
@@ -23,8 +48,9 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "ff_queue.db"
                 )
-                    // No prior schema versions exist yet, but fall back to a
-                    // clean DB instead of crashing if this ever changes.
+                    .addMigrations(MIGRATION_1_2)
+                    // Safety net only for schema drift beyond the explicit
+                    // migrations above (shouldn't trigger in practice).
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }
