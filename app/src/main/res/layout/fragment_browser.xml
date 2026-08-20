@@ -11,7 +11,7 @@
         android:orientation="vertical">
 
         <!-- Address bar: gesture back handles page/tab navigation now, so no
-             back/forward buttons -- just new-tab, the search field, reload,
+             back/forward buttons; just new-tab, the search field, reload,
              tabs, and overflow. -->
         <LinearLayout
             android:layout_width="match_parent"
