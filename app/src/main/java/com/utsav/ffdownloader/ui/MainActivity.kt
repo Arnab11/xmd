@@ -37,7 +37,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
-class MainActivity : AppCompatActivity(), HomeFragment.Callbacks {
+class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragment.Callbacks {
 
     // ── HTTP client (resolve step) ────────────────────────────────────────
     private val client = OkHttpClient.Builder()
@@ -164,6 +164,51 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks {
             }
         }
         DownloadService.start(this)
+    }
+
+    // ── DownloadsFragment.Callbacks ─────────────────────────────────────────
+
+    override fun retryItem(itemId: String) {
+        val item = QueueRepository.current().firstOrNull { it.id == itemId } ?: return
+        lifecycleScope.launch { retrySingle(item) }
+    }
+
+    override fun retryAll() {
+        val failed = QueueRepository.current().filter { it.status == ItemStatus.FAILED }
+        if (failed.isEmpty()) return
+        lifecycleScope.launch {
+            for ((index, item) in failed.withIndex()) {
+                retrySingle(item)
+                if (index + 1 < failed.size) delay(500)
+            }
+        }
+    }
+
+    /**
+     * Resets a failed/cancelled item and retries it. Share links (FuckingFast
+     * etc.) get a fresh resolve since the previously-resolved directUrl is a
+     * short-lived CDN link that may have expired by the time Retry is tapped;
+     * a plain direct URL has nothing to re-resolve, so it goes straight back
+     * to READY and the download service picks it up immediately.
+     */
+    private suspend fun retrySingle(item: QueueItem) {
+        val needsResolve = LinkParser.isShareLink(item.sourceUrl)
+        QueueRepository.update(item.id) {
+            it.copy(
+                status = if (needsResolve) ItemStatus.RESOLVING else ItemStatus.READY,
+                error = null,
+                bytesDone = 0L,
+                bytesTotal = 0L,
+                speedBps = 0.0,
+                directUrl = if (needsResolve) null else (it.directUrl ?: it.sourceUrl)
+            )
+        }
+        if (needsResolve) {
+            val refreshed = QueueRepository.current().first { it.id == item.id }
+            resolveOne(refreshed)
+        } else {
+            DownloadService.start(this@MainActivity)
+        }
     }
 
     // ── Resolve logic (uses challengeLauncher — must live in Activity) ────

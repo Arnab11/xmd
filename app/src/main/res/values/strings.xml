@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Xmd - Xtreme Media Downloader</string>
+    <string name="app_name">FF Downloader</string>
     <string name="hint_links">Paste FuckingFast share links, direct links, or a fitgirl-repacks page URL — one per line</string>
     <string name="action_prepare">Prepare</string>
     <string name="action_download">Download ready files</string>
@@ -8,6 +8,10 @@
     <string name="action_pause">Pause</string>
     <string name="action_resume">Resume</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_clear">Clear</string>
+    <string name="action_retry_all">Retry all</string>
+    <string name="action_clear_all">Clear all</string>
     <string name="action_clear_finished">Clear finished</string>
     <string name="empty_queue">Paste some links above and tap Prepare</string>
     <string name="challenge_title">Complete verification</string>

@@ -172,6 +172,17 @@ object QueueRepository {
         return claimedItem
     }
 
+    /** Removes a single item from the queue (used by the per-item "Clear" button). */
+    fun removeItem(id: String) {
+        synchronized(lock) {
+            master = master.filter { it.id != id }
+            items.postValue(master)
+        }
+        if (::dao.isInitialized) {
+            scope.launch { runCatching { dao.deleteByIds(listOf(id)) } }
+        }
+    }
+
     fun clearFinishedAndFailed() {
         val removedIds: List<String>
         synchronized(lock) {

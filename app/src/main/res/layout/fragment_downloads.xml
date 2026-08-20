@@ -68,16 +68,33 @@
         </LinearLayout>
     </FrameLayout>
 
-    <!-- Cancel All (only shown when queue has items) -->
-    <com.google.android.material.button.MaterialButton
-        android:id="@+id/cancelButton"
-        style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+    <!-- Cancel All / Retry All (context-switches) + Clear All -->
+    <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_margin="12dp"
-        android:text="@string/action_cancel_all"
-        app:strokeColor="@color/ff_error"
-        android:textColor="@color/ff_error"
-        android:visibility="gone" />
+        android:orientation="vertical"
+        android:layout_margin="12dp">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/cancelButton"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="@string/action_cancel_all"
+            app:strokeColor="@color/ff_error"
+            android:textColor="@color/ff_error"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/clearAllButton"
+            style="@style/Widget.MaterialComponents.Button.OutlinedButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="@string/action_clear_all"
+            app:strokeColor="@color/ff_muted"
+            android:textColor="@color/ff_muted"
+            android:visibility="gone" />
+    </LinearLayout>
 
 </LinearLayout>

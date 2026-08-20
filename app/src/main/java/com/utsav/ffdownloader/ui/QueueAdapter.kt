@@ -15,7 +15,9 @@ import com.utsav.ffdownloader.core.QueueItem
 
 class QueueAdapter(
     private val onPauseResume: (QueueItem) -> Unit,
-    private val onCancel: (QueueItem) -> Unit
+    private val onCancel: (QueueItem) -> Unit,
+    private val onRetry: (QueueItem) -> Unit,
+    private val onClear: (QueueItem) -> Unit
 ) : ListAdapter<QueueItem, QueueAdapter.VH>(DIFF) {
 
     class VH(view: View) : RecyclerView.ViewHolder(view) {
@@ -29,6 +31,9 @@ class QueueAdapter(
         val actions: View        = view.findViewById(R.id.itemActions)
         val pauseResume: Button  = view.findViewById(R.id.itemPauseResume)
         val cancel: Button       = view.findViewById(R.id.itemCancel)
+        val secondaryActions: View = view.findViewById(R.id.itemSecondaryActions)
+        val retry: Button        = view.findViewById(R.id.itemRetry)
+        val clear: Button        = view.findViewById(R.id.itemClear)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): VH {
@@ -127,6 +132,13 @@ class QueueAdapter(
         }
         holder.pauseResume.setOnClickListener { onPauseResume(item) }
         holder.cancel.setOnClickListener { onCancel(item) }
+
+        // ── Retry / Clear (FAILED gets both, DONE gets Clear only) ─────────
+        val showSecondary = item.status == ItemStatus.FAILED || item.status == ItemStatus.DONE
+        holder.secondaryActions.visibility = if (showSecondary) View.VISIBLE else View.GONE
+        holder.retry.visibility = if (item.status == ItemStatus.FAILED) View.VISIBLE else View.GONE
+        holder.retry.setOnClickListener { onRetry(item) }
+        holder.clear.setOnClickListener { onClear(item) }
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────
