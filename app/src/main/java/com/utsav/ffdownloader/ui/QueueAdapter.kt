@@ -125,20 +125,26 @@ class QueueAdapter(
 
         // ── Action buttons ────────────────────────────────────────────────
         val showActions = item.status == ItemStatus.DOWNLOADING || item.status == ItemStatus.PAUSED ||
-            item.status == ItemStatus.RETRYING
+            item.status == ItemStatus.RETRYING || item.status == ItemStatus.READY
         holder.actions.visibility = if (showActions) View.VISIBLE else View.GONE
         // No live connection to pause during an auto-retry backoff wait -- only Cancel applies.
         holder.pauseResume.visibility = if (item.status == ItemStatus.RETRYING) View.GONE else View.VISIBLE
-        holder.pauseResume.text = if (item.status == ItemStatus.PAUSED) {
-            context.getString(R.string.action_resume)
-        } else {
-            context.getString(R.string.action_pause)
+        holder.pauseResume.text = when (item.status) {
+            ItemStatus.READY  -> context.getString(R.string.action_start)
+            ItemStatus.PAUSED -> context.getString(R.string.action_resume)
+            else              -> context.getString(R.string.action_pause)
         }
         holder.pauseResume.setOnClickListener { onPauseResume(item) }
+        // Cancel only makes sense once a download is actually in flight -- a READY
+        // item has no live engine for DownloadService.cancelItem to act on, so its
+        // Cancel button used to just silently do nothing. Clear (below) covers
+        // removing it instead.
+        holder.cancel.visibility = if (item.status == ItemStatus.READY) View.GONE else View.VISIBLE
         holder.cancel.setOnClickListener { onCancel(item) }
 
-        // ── Retry / Clear (FAILED gets both, DONE gets Clear only) ─────────
-        val showSecondary = item.status == ItemStatus.FAILED || item.status == ItemStatus.DONE
+        // ── Retry / Clear (FAILED gets both, DONE/READY get Clear only) ────
+        val showSecondary = item.status == ItemStatus.FAILED || item.status == ItemStatus.DONE ||
+            item.status == ItemStatus.READY
         holder.secondaryActions.visibility = if (showSecondary) View.VISIBLE else View.GONE
         holder.retry.visibility = if (item.status == ItemStatus.FAILED) View.VISIBLE else View.GONE
         holder.retry.setOnClickListener { onRetry(item) }

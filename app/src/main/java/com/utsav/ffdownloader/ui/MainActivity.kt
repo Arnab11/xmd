@@ -214,6 +214,27 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
 
         checkStoragePermission()
         checkNotificationPermission()
+        autoResumePendingDownloads()
+    }
+
+    /**
+     * Items that were mid-download when the process died (phone restart,
+     * app killed, etc.) get rolled back to READY by
+     * QueueRepository.init()'s recovery logic -- but nothing was actually
+     * re-launching DownloadService to pick them back up, so they just sat
+     * at "Ready to download" forever with no live worker claiming them.
+     * QueueRepository.init() (called from FfApp.onCreate, before this)
+     * loads persisted state asynchronously off the main thread, so give it
+     * a moment to land before checking -- this only needs to happen once
+     * per process, not on every config change.
+     */
+    private fun autoResumePendingDownloads() {
+        lifecycleScope.launch {
+            delay(500)
+            if (QueueRepository.current().any { it.status == ItemStatus.READY }) {
+                DownloadService.start(this@MainActivity)
+            }
+        }
     }
 
     // ── Fragment switching ─────────────────────────────────────────────────

@@ -127,10 +127,10 @@ class DownloadsFragment : Fragment() {
     }
 
     private fun onItemPauseResume(item: QueueItem) {
-        if (item.status == ItemStatus.PAUSED) {
-            DownloadService.resumeItem(requireContext(), item.id)
-        } else {
-            DownloadService.pauseItem(requireContext(), item.id)
+        when (item.status) {
+            ItemStatus.READY -> DownloadService.start(requireContext())
+            ItemStatus.PAUSED -> DownloadService.resumeItem(requireContext(), item.id)
+            else -> DownloadService.pauseItem(requireContext(), item.id)
         }
     }
 }
