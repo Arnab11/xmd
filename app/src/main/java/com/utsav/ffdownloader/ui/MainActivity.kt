@@ -70,6 +70,14 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         }
     }
 
+    // Items explicitly sent through the Retry button, watched until they land
+    // on a terminal status. The actual download failure/success happens
+    // asynchronously in DownloadService (a background coroutine, not this
+    // suspend chain), so we can't just check the status right after calling
+    // retrySingle() -- we have to watch QueueRepository.items for the outcome
+    // and react only once, only for items the user explicitly retried.
+    private val pendingRetryIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
     // ── onCreate ──────────────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,6 +126,27 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
                 badge.number    = active
             } else {
                 badge.isVisible = false
+            }
+        }
+
+        // Watches items sent through the Retry button; pops an IDM-style
+        // "Link Expired" dialog (Clear / Fetch Link) the moment a retried
+        // item lands back on FAILED with an expired-link error, whether that
+        // failure happened at resolve-time or later during the actual
+        // download.
+        QueueRepository.items.observe(this) { list ->
+            list.forEach { item ->
+                if (item.id !in pendingRetryIds) return@forEach
+                when (item.status) {
+                    ItemStatus.FAILED -> {
+                        pendingRetryIds.remove(item.id)
+                        if (item.error?.contains("expired", ignoreCase = true) == true) {
+                            showExpiredLinkDialog(item)
+                        }
+                    }
+                    ItemStatus.DONE -> pendingRetryIds.remove(item.id) // succeeded, stop watching
+                    else -> {} // still resolving/downloading -- keep watching
+                }
             }
         }
 
@@ -170,6 +199,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
 
     override fun retryItem(itemId: String) {
         val item = QueueRepository.current().firstOrNull { it.id == itemId } ?: return
+        pendingRetryIds.add(itemId)
         lifecycleScope.launch { retrySingle(item) }
     }
 
@@ -209,6 +239,28 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         } else {
             DownloadService.start(this@MainActivity)
         }
+    }
+
+    /**
+     * IDM-style prompt shown when a retried download comes back with an
+     * expired/unavailable link: "Clear" drops the item entirely, "Fetch
+     * Link" retries again (re-resolving from the share link if there is
+     * one) -- looping back into this same check if it expires again.
+     */
+    private fun showExpiredLinkDialog(item: QueueItem) {
+        AlertDialog.Builder(this)
+            .setTitle("Link Expired")
+            .setMessage(
+                "${item.fileName ?: item.sourceUrl}\n\n" +
+                "This download link has expired or is no longer available."
+            )
+            .setPositiveButton("Fetch Link") { _, _ -> retryItem(item.id) }
+            .setNegativeButton("Clear") { _, _ ->
+                pendingRetryIds.remove(item.id)
+                QueueRepository.removeItem(item.id)
+            }
+            .setCancelable(true)
+            .show()
     }
 
     // ── Resolve logic (uses challengeLauncher — must live in Activity) ────
