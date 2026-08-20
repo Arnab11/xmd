@@ -38,7 +38,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
-class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragment.Callbacks, BrowserFragment.Callbacks {
+class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragment.Callbacks, BrowserFragment.Callbacks, HistoryFragment.Callbacks {
 
     // ── HTTP client (resolve step) ────────────────────────────────────────
     private val client = OkHttpClient.Builder()
@@ -138,6 +138,12 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         //     to exit the app outright instead of landing on Home.
         //  3. Already on the Home tab -> default behavior (exits the app).
         onBackPressedDispatcher.addCallback(this) {
+            // History (or any other overlay screen added via addToBackStack)
+            // is on top -- pop it first, same as it would in any other app.
+            if (supportFragmentManager.backStackEntryCount > 0) {
+                supportFragmentManager.popBackStack()
+                return@addCallback
+            }
             val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
             if (browser?.isVisible == true && browser.onBackPressed()) {
                 return@addCallback
@@ -238,8 +244,79 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
 
     // ── BrowserFragment.Callbacks ───────────────────────────────────────────
 
-    override fun openSettings() {
-        showSettingsDialog()
+    override fun openBrowserMenu() {
+        showBrowserMenuDialog()
+    }
+
+    private fun showBrowserMenuDialog() {
+        val items = arrayOf(getString(R.string.browser_menu_private_dns), getString(R.string.browser_menu_history))
+        AlertDialog.Builder(this)
+            .setTitle(R.string.browser_menu_title)
+            .setItems(items) { _, which ->
+                when (which) {
+                    0 -> showDnsSettingsDialog()
+                    1 -> openHistoryScreen()
+                }
+            }
+            .show()
+    }
+
+    private fun showDnsSettingsDialog() {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_dns_settings, null)
+        val group = dialogView.findViewById<RadioGroup>(R.id.dnsModeGroup)
+        val optionAdguard = dialogView.findViewById<RadioButton>(R.id.dnsOptionAdguard)
+        val optionOff = dialogView.findViewById<RadioButton>(R.id.dnsOptionOff)
+        val optionCustom = dialogView.findViewById<RadioButton>(R.id.dnsOptionCustom)
+        val customUrlInput = dialogView.findViewById<EditText>(R.id.dnsCustomUrlInput)
+
+        when (Settings.dnsMode()) {
+            Settings.DnsMode.ADGUARD -> optionAdguard.isChecked = true
+            Settings.DnsMode.OFF -> optionOff.isChecked = true
+            Settings.DnsMode.CUSTOM -> optionCustom.isChecked = true
+        }
+        customUrlInput.setText(Settings.dnsCustomUrl())
+        customUrlInput.visibility = if (optionCustom.isChecked) android.view.View.VISIBLE else android.view.View.GONE
+
+        group.setOnCheckedChangeListener { _, checkedId ->
+            customUrlInput.visibility =
+                if (checkedId == R.id.dnsOptionCustom) android.view.View.VISIBLE else android.view.View.GONE
+        }
+
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dns_settings_title)
+            .setView(dialogView)
+            .setPositiveButton(R.string.settings_save) { _, _ ->
+                when (group.checkedRadioButtonId) {
+                    R.id.dnsOptionOff -> Settings.setDnsMode(Settings.DnsMode.OFF)
+                    R.id.dnsOptionCustom -> {
+                        val url = customUrlInput.text?.toString()?.trim().orEmpty()
+                        if (url.isEmpty() || !(url.startsWith("http://") || url.startsWith("https://"))) {
+                            Toast.makeText(this, R.string.dns_custom_url_needed, Toast.LENGTH_SHORT).show()
+                            return@setPositiveButton
+                        }
+                        Settings.setDnsCustomUrl(url)
+                        Settings.setDnsMode(Settings.DnsMode.CUSTOM)
+                    }
+                    else -> Settings.setDnsMode(Settings.DnsMode.ADGUARD)
+                }
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun openHistoryScreen() {
+        supportFragmentManager.beginTransaction()
+            .add(R.id.fragmentContainer, HistoryFragment(), TAG_HISTORY)
+            .addToBackStack(TAG_HISTORY)
+            .commit()
+    }
+
+    // ── HistoryFragment.Callbacks ───────────────────────────────────────────
+
+    override fun openInBrowser(url: String) {
+        val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
+        browser?.openUrl(url)
+        findViewById<BottomNavigationView>(R.id.bottomNav).selectedItemId = R.id.nav_browser
     }
 
     // ── DownloadsFragment.Callbacks ─────────────────────────────────────────
@@ -461,5 +538,6 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         private const val TAG_HOME      = "home"
         private const val TAG_BROWSER   = "browser"
         private const val TAG_DOWNLOADS = "downloads"
+        private const val TAG_HISTORY   = "history"
     }
 }

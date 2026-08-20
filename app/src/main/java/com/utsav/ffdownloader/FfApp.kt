@@ -5,6 +5,7 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import com.utsav.ffdownloader.core.BookmarkRepository
+import com.utsav.ffdownloader.core.HistoryRepository
 import com.utsav.ffdownloader.core.QueueRepository
 import com.utsav.ffdownloader.core.Settings
 
@@ -21,6 +22,7 @@ class FfApp : Application() {
         // process restart (see QueueRepository's persistence docs).
         QueueRepository.init(this)
         BookmarkRepository.init(this)
+        HistoryRepository.init(this)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 DOWNLOAD_CHANNEL_ID,

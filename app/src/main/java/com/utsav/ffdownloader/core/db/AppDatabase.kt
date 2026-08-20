@@ -8,14 +8,16 @@ import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.room.migration.Migration
 import com.utsav.ffdownloader.core.Bookmark
+import com.utsav.ffdownloader.core.HistoryEntry
 import com.utsav.ffdownloader.core.QueueItem
 
-@Database(entities = [QueueItem::class, Bookmark::class], version = 2, exportSchema = false)
+@Database(entities = [QueueItem::class, Bookmark::class, HistoryEntry::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun queueItemDao(): QueueItemDao
     abstract fun bookmarkDao(): BookmarkDao
+    abstract fun historyDao(): HistoryDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
@@ -41,6 +43,22 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v2 -> v3: adds the history_entries table (Browser tab visited pages).
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `history_entries` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `url` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `visitedAtMs` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -48,7 +66,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "ff_queue.db"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     // Safety net only for schema drift beyond the explicit
                     // migrations above (shouldn't trigger in practice).
                     .fallbackToDestructiveMigration()

@@ -43,4 +43,27 @@ object Settings {
     fun setAutoRetryEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_RETRY, value).apply()
     }
+
+    // ── Browser: Private DNS (DNS-over-HTTPS for in-app browsing only) ────
+    enum class DnsMode { ADGUARD, OFF, CUSTOM }
+
+    private const val KEY_DNS_MODE = "browser_dns_mode"
+    private const val KEY_DNS_CUSTOM_URL = "browser_dns_custom_url"
+
+    fun dnsMode(): DnsMode =
+        when (prefs.getString(KEY_DNS_MODE, DnsMode.ADGUARD.name)) {
+            DnsMode.OFF.name -> DnsMode.OFF
+            DnsMode.CUSTOM.name -> DnsMode.CUSTOM
+            else -> DnsMode.ADGUARD
+        }
+
+    fun setDnsMode(value: DnsMode) {
+        prefs.edit().putString(KEY_DNS_MODE, value.name).apply()
+    }
+
+    /** The DoH endpoint URL when dnsMode() == CUSTOM. Blank if never set. */
+    fun dnsCustomUrl(): String = prefs.getString(KEY_DNS_CUSTOM_URL, "").orEmpty()
+    fun setDnsCustomUrl(value: String) {
+        prefs.edit().putString(KEY_DNS_CUSTOM_URL, value.trim()).apply()
+    }
 }

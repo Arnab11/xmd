@@ -53,4 +53,19 @@
     <string name="download_confirm_title">Add to downloads?</string>
     <string name="download_confirm_message">%1$s</string>
     <string name="bookmark_added_toast">Shortcut added</string>
+
+    <!-- Browser overflow menu (Private DNS + History; deliberately no download options) -->
+    <string name="browser_menu_title">Browser</string>
+    <string name="browser_menu_private_dns">Private DNS</string>
+    <string name="browser_menu_history">History</string>
+    <string name="dns_settings_title">Private DNS</string>
+    <string name="dns_mode_adguard">AdGuard (default)</string>
+    <string name="dns_mode_off">Off</string>
+    <string name="dns_mode_custom">Custom</string>
+    <string name="dns_custom_url_hint">DNS-over-HTTPS URL (e.g. https://dns.example.com/dns-query)</string>
+    <string name="dns_custom_url_needed">Enter a valid DoH URL</string>
+    <string name="history_title">History</string>
+    <string name="history_empty">No history yet</string>
+    <string name="history_clear_all">Clear all</string>
+    <string name="history_cleared_toast">History cleared</string>
 </resources>

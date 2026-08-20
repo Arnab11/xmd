@@ -28,7 +28,10 @@ import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.utsav.ffdownloader.R
 import com.utsav.ffdownloader.core.Bookmark
 import com.utsav.ffdownloader.core.BookmarkRepository
+import com.utsav.ffdownloader.core.DnsOverHttpsResolver
+import com.utsav.ffdownloader.core.HistoryRepository
 import com.utsav.ffdownloader.core.LinkParser
+import com.utsav.ffdownloader.core.Settings
 import com.utsav.ffdownloader.core.SuggestApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -36,6 +39,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
+import okhttp3.Request
 import java.util.concurrent.TimeUnit
 
 /**
@@ -47,15 +51,23 @@ import java.util.concurrent.TimeUnit
  * current page and surfaces a FAB to send them to the Home download
  * queue; also intercepts any file download the page itself triggers
  * (WebView's native download signal) behind a confirm dialog.
+ *
+ * The overflow (3-dot) menu is Browser-specific -- Private DNS and
+ * History only, deliberately with no download-related options, kept
+ * entirely separate from the app-wide download Settings dialog reachable
+ * from Home/Downloads. When Private DNS isn't off, every request the
+ * WebView makes (page + every sub-resource) is routed through an OkHttp
+ * client using DnsOverHttpsResolver instead of the system resolver.
  */
 class BrowserFragment : Fragment() {
 
     interface Callbacks {
         /** Same handoff HomeFragment uses for pasted links -- expands + queues + resolves. */
         fun triggerPrepare(lines: List<String>)
-        /** The browser's own toolbar has no options menu of its own -- its overflow
-         *  button opens the same Settings dialog the app toolbar's menu does. */
-        fun openSettings()
+        /** Opens the Browser's own overflow menu (Private DNS, History) --
+         *  deliberately separate from the app-wide download Settings dialog,
+         *  which the Browser's overflow no longer opens. */
+        fun openBrowserMenu()
     }
 
     /**
@@ -98,6 +110,46 @@ class BrowserFragment : Fragment() {
         .readTimeout(5, TimeUnit.SECONDS)
         .build()
 
+    // ── DNS-over-HTTPS client (Browser-only; see DnsOverHttpsResolver) ─────
+    // Rebuilt whenever the DNS setting changes (mode or custom URL) --
+    // cheap to construct, and this keeps every subsequent request using
+    // whatever the user picked without needing a restart. Null when DNS
+    // mode is OFF, in which case shouldInterceptRequest below lets WebView
+    // handle the request itself (system DNS) instead of intercepting.
+    // shouldInterceptRequest fires on WebView's own background thread and
+    // can run for several sub-resources concurrently, so this cache is
+    // guarded rather than plain vars.
+    @Volatile private var dohClient: OkHttpClient? = null
+    @Volatile private var dohClientSignature: String? = null
+    private val dohClientLock = Any()
+
+    /** (Re)builds dohClient only if the effective DNS setting actually changed. */
+    private fun currentDohClient(): OkHttpClient? {
+        val mode = Settings.dnsMode()
+        if (mode == Settings.DnsMode.OFF) {
+            return null
+        }
+        val dohUrl = if (mode == Settings.DnsMode.CUSTOM) {
+            Settings.dnsCustomUrl().ifBlank { DnsOverHttpsResolver.ADGUARD_DOH_URL }
+        } else {
+            DnsOverHttpsResolver.ADGUARD_DOH_URL
+        }
+        val signature = "$mode:$dohUrl"
+        if (signature == dohClientSignature) return dohClient
+
+        synchronized(dohClientLock) {
+            if (signature == dohClientSignature) return dohClient
+            val built = OkHttpClient.Builder()
+                .dns(DnsOverHttpsResolver(dohUrl))
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(20, TimeUnit.SECONDS)
+                .build()
+            dohClient = built
+            dohClientSignature = signature
+            return built
+        }
+    }
+
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View = inflater.inflate(R.layout.fragment_browser, container, false)
@@ -126,7 +178,7 @@ class BrowserFragment : Fragment() {
 
         newTabButton.setOnClickListener { addNewTab() }
         tabsButton.setOnClickListener { showTabsDialog() }
-        overflowButton.setOnClickListener { (activity as? Callbacks)?.openSettings() }
+        overflowButton.setOnClickListener { (activity as? Callbacks)?.openBrowserMenu() }
         addLinkFab.setOnClickListener { onAddLinkClicked() }
 
         // Start on the speed-dial ("new tab") page.
@@ -154,11 +206,66 @@ class BrowserFragment : Fragment() {
 
             override fun onPageFinished(view: WebView, url: String?) {
                 pageProgress.visibility = View.GONE
+                val title = view.title?.takeIf { t -> t.isNotBlank() } ?: url.orEmpty()
                 tabs.getOrNull(currentTabIndex)?.let {
                     it.url = url
-                    it.title = view.title?.takeIf { t -> t.isNotBlank() } ?: url.orEmpty()
+                    it.title = title
+                }
+                if (!url.isNullOrBlank() && url.startsWith("http")) {
+                    HistoryRepository.record(url, title)
                 }
                 url?.let { checkPageForLinks(it) }
+            }
+
+            /**
+             * Routes every request the page makes -- the page itself and
+             * every sub-resource (images, JS, CSS, XHR, etc.) -- through
+             * OkHttp using DnsOverHttpsResolver, so DNS resolution follows
+             * the Browser's Private DNS setting instead of the system
+             * resolver. Only GET requests with no body are intercepted;
+             * anything else (POST forms, main-frame navigations WebView
+             * needs to handle itself for redirects/cookies/etc.) is left
+             * to fall through to WebView's own network stack by returning
+             * null, same as if this override didn't exist. When DNS mode
+             * is OFF, currentDohClient() returns null and every request
+             * falls through untouched -- zero overhead in that mode.
+             */
+            override fun shouldInterceptRequest(
+                view: WebView, request: android.webkit.WebResourceRequest
+            ): android.webkit.WebResourceResponse? {
+                if (request.method != "GET") return null
+                val client = currentDohClient() ?: return null
+                val url = request.url.toString()
+                if (!url.startsWith("http")) return null
+
+                return try {
+                    val reqBuilder = Request.Builder().url(url)
+                    request.requestHeaders.forEach { (name, value) -> reqBuilder.header(name, value) }
+                    val response = client.newCall(reqBuilder.build()).execute()
+                    val body = response.body
+                    if (body == null) {
+                        response.close()
+                        return null
+                    }
+                    val mimeType = body.contentType()?.let { "${it.type}/${it.subtype}" }
+                    val charset = body.contentType()?.charset()?.name() ?: "utf-8"
+                    val responseHeaders = response.headers.toMultimap()
+                        .mapValues { it.value.joinToString(", ") }
+                    // WebResourceResponse requires a status code >= 100; a
+                    // malformed/unexpected response code from a broken DoH
+                    // path would otherwise crash the WebView renderer.
+                    val statusCode = response.code.takeIf { it in 100..599 } ?: 200
+                    android.webkit.WebResourceResponse(
+                        mimeType, charset, statusCode,
+                        response.message.ifBlank { "OK" },
+                        responseHeaders, body.byteStream()
+                    )
+                } catch (e: Exception) {
+                    // DoH lookup/connection failed for this specific request --
+                    // let WebView retry it through the normal system-DNS path
+                    // rather than breaking the whole page load over one asset.
+                    null
+                }
             }
         }
         webView.webChromeClient = object : android.webkit.WebChromeClient() {
@@ -264,6 +371,14 @@ class BrowserFragment : Fragment() {
     private fun hideSuggestions() {
         suggestJob?.cancel()
         suggestionsCard.visibility = View.GONE
+    }
+
+    /** Called from MainActivity (e.g. reopening a History entry) to load a
+     *  URL in the current tab, same as typing it into the address bar. */
+    fun openUrl(url: String) {
+        showWebView()
+        urlInput.setText(url)
+        loadUrl(url)
     }
 
     private fun loadUrl(raw: String) {
