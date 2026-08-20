@@ -21,6 +21,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.snackbar.Snackbar
 import com.utsav.ffdownloader.R
 import com.utsav.ffdownloader.core.ItemStatus
 import com.utsav.ffdownloader.core.LinkParser
@@ -66,6 +67,24 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
             Toast.makeText(
                 this,
                 "Storage permission denied — downloads will fail.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    // ── Notification permission (API 33+) ──────────────────────────────────
+    // Declaring POST_NOTIFICATIONS in the Manifest alone does nothing on
+    // Android 13+ -- it's a runtime permission like storage/location, so
+    // without an explicit request here the system silently drops every
+    // notification the download-progress channel tries to post (the user
+    // never even sees a system prompt, downloads just run "invisibly").
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (!granted) {
+            Toast.makeText(
+                this,
+                "Notifications denied — you won't see download progress.",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -194,6 +213,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
         }
 
         checkStoragePermission()
+        checkNotificationPermission()
     }
 
     // ── Fragment switching ─────────────────────────────────────────────────
@@ -229,6 +249,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
 
     override fun triggerDownloadReady() {
         DownloadService.start(this)
+        showDownloadStartedSnackbar()
     }
 
     override fun triggerDownloadDirect(lines: List<String>) {
@@ -240,6 +261,23 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
             }
         }
         DownloadService.start(this)
+        showDownloadStartedSnackbar()
+    }
+
+    /**
+     * Downloads kick off in the background with no screen change, so without
+     * this the user has no confirmation anything happened. Mirrors the
+     * "Starting download… VIEW" pattern from stock browsers: a brief
+     * Snackbar with a VIEW action that jumps straight to the Downloads tab.
+     */
+    private fun showDownloadStartedSnackbar() {
+        Snackbar.make(
+            findViewById(R.id.fragmentContainer),
+            R.string.download_started_toast,
+            Snackbar.LENGTH_LONG
+        ).setAction(R.string.action_view) {
+            findViewById<BottomNavigationView>(R.id.bottomNav).selectedItemId = R.id.nav_downloads
+        }.show()
     }
 
     // ── BrowserFragment.Callbacks ───────────────────────────────────────────
@@ -482,6 +520,19 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
                 storagePermissionLauncher.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+    }
+
+    // ── Notification permission ─────────────────────────────────────────
+
+    private fun checkNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             }
         }
     }

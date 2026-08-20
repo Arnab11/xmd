@@ -31,6 +31,8 @@
     <string name="action_add">Add</string>
     <string name="action_dismiss">Dismiss</string>
     <string name="clipboard_link_detected">Link detected in clipboard: %1$s</string>
+    <string name="download_started_toast">Starting download…</string>
+    <string name="action_view">VIEW</string>
 
     <!-- Browser tab -->
     <string name="hint_url">Search or type a URL</string>
