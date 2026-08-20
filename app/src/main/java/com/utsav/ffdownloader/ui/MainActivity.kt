@@ -303,21 +303,21 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
 
     // ── BrowserFragment.Callbacks ───────────────────────────────────────────
 
-    override fun openBrowserMenu() {
-        showBrowserMenuDialog()
-    }
-
-    private fun showBrowserMenuDialog() {
-        val items = arrayOf(getString(R.string.browser_menu_private_dns), getString(R.string.browser_menu_history))
-        AlertDialog.Builder(this)
-            .setTitle(R.string.browser_menu_title)
-            .setItems(items) { _, which ->
-                when (which) {
-                    0 -> showDnsSettingsDialog()
-                    1 -> openHistoryScreen()
-                }
+    // Chrome-style overflow: a PopupMenu anchored directly under the 3-dot
+    // button (right-aligned via Gravity.END) instead of a centered
+    // AlertDialog, so it drops down from the icon the way Chrome's overflow
+    // menu does rather than looking like a generic popup.
+    override fun openBrowserMenu(anchor: android.view.View) {
+        val popup = androidx.appcompat.widget.PopupMenu(this, anchor, android.view.Gravity.END)
+        popup.menuInflater.inflate(R.menu.browser_overflow_menu, popup.menu)
+        popup.setOnMenuItemClickListener { item ->
+            when (item.itemId) {
+                R.id.menu_private_dns -> { showDnsSettingsDialog(); true }
+                R.id.menu_history -> { openHistoryScreen(); true }
+                else -> false
             }
-            .show()
+        }
+        popup.show()
     }
 
     private fun showDnsSettingsDialog() {
@@ -373,6 +373,12 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
     // ── HistoryFragment.Callbacks ───────────────────────────────────────────
 
     override fun openInBrowser(url: String) {
+        // History was added via addToBackStack (see openHistoryScreen), so it's
+        // still layered on top of the tab fragments here -- without popping it
+        // first, tapping a history entry would open the link in Browser
+        // underneath while History stayed visible on top, making it look like
+        // the tap "went nowhere" / landed on the wrong screen.
+        supportFragmentManager.popBackStack(TAG_HISTORY, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
         val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
         browser?.openUrl(url)
         findViewById<BottomNavigationView>(R.id.bottomNav).selectedItemId = R.id.nav_browser
@@ -516,7 +522,7 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
                     .setTitle("Storage Permission Required")
                     .setMessage(
                         "This app needs 'All files access' to save downloads to the " +
-                        "\"umd\" folder in your internal storage.\n\nTap Allow on the next screen."
+                        "\"Xmd\" folder in your internal storage.\n\nTap Allow on the next screen."
                     )
                     .setPositiveButton("Allow") { _, _ ->
                         startActivity(

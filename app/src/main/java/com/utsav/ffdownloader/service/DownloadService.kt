@@ -243,13 +243,13 @@ class DownloadService : LifecycleService() {
                 // what was capping speed well below Chrome's. The private cache sits on
                 // the real filesystem with none of that overhead, so the download itself
                 // runs at full network speed. The finished file is then moved to
-                // /sdcard/umd/ in one continuous copy, which is far faster than paying
+                // /sdcard/Xmd/ in one continuous copy, which is far faster than paying
                 // the FUSE tax on every chunk of the download.
-                val tempDir = File(cacheDir, "umd_temp/${category.folderName}")
+                val tempDir = File(cacheDir, "xmd_temp/${category.folderName}")
                 val tempFile = File(tempDir, fileName)
                 destinationFile = tempFile
 
-                val finalDir = File(Environment.getExternalStorageDirectory(), "umd/${category.folderName}")
+                val finalDir = File(Environment.getExternalStorageDirectory(), "Xmd/${category.folderName}")
                 val finalFile = File(finalDir, fileName)
 
                 // Pause (engine.pause()) blocks in-place inside downloadAuto and never throws here --

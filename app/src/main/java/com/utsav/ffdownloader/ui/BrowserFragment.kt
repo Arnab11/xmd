@@ -67,8 +67,10 @@ class BrowserFragment : Fragment() {
         fun triggerPrepare(lines: List<String>)
         /** Opens the Browser's own overflow menu (Private DNS, History) --
          *  deliberately separate from the app-wide download Settings dialog,
-         *  which the Browser's overflow no longer opens. */
-        fun openBrowserMenu()
+         *  which the Browser's overflow no longer opens. [anchor] is the
+         *  3-dot button itself, so the menu can be anchored/dropped down
+         *  from it Chrome-style instead of popping up as a centered dialog. */
+        fun openBrowserMenu(anchor: View)
     }
 
     /**
@@ -187,7 +189,7 @@ class BrowserFragment : Fragment() {
 
         newTabButton.setOnClickListener { addNewTab() }
         tabsButton.setOnClickListener { showTabsDialog() }
-        overflowButton.setOnClickListener { (activity as? Callbacks)?.openBrowserMenu() }
+        overflowButton.setOnClickListener { (activity as? Callbacks)?.openBrowserMenu(overflowButton) }
         addLinkFab.setOnClickListener { onAddLinkClicked() }
 
         // Start on the speed-dial ("new tab") page.
