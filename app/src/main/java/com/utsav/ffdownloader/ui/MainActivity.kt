@@ -304,6 +304,14 @@ class MainActivity : AppCompatActivity(), HomeFragment.Callbacks, DownloadsFragm
             QueueRepository.update(item.id) {
                 it.copy(directUrl = item.sourceUrl, status = ItemStatus.READY)
             }
+            // Same as the share-link branch below: without this, an item that
+            // becomes READY after the worker pool has already exhausted the
+            // queue (or was never started) sits at READY forever -- no live
+            // worker left to claim it. This branch was missing the call,
+            // which is why plain direct-download links (pixeldrain, hubcloud
+            // generated links, etc.) got stuck on "Ready to download" while
+            // share links (which do call this) downloaded fine.
+            DownloadService.start(this@MainActivity)
             return
         }
         if (!LinkParser.isShareLink(item.sourceUrl)) {
