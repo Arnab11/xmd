@@ -18,20 +18,34 @@ import android.widget.ProgressBar
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.card.MaterialCardView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.utsav.ffdownloader.R
 import com.utsav.ffdownloader.core.Bookmark
 import com.utsav.ffdownloader.core.BookmarkRepository
 import com.utsav.ffdownloader.core.LinkParser
+import com.utsav.ffdownloader.core.SuggestApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 
 /**
  * Mini in-app browser: address bar + WebView, with a Chrome-style
  * speed-dial grid shown in place of the WebView on "new tab" (i.e.
- * whenever there's no URL loaded). Auto-detects fuckingfast/fitgirl
- * links on the current page and surfaces a FAB to send them to the
- * Home download queue.
+ * whenever there's no URL loaded). Typing in the address bar shows
+ * generic DuckDuckGo suggest results (see SuggestApi) -- no site list is
+ * bundled with this app. Auto-detects fuckingfast/fitgirl links on the
+ * current page and surfaces a FAB to send them to the Home download
+ * queue; also intercepts any file download the page itself triggers
+ * (WebView's native download signal) behind a confirm dialog.
  */
 class BrowserFragment : Fragment() {
 
@@ -49,9 +63,21 @@ class BrowserFragment : Fragment() {
     private lateinit var speedDialContainer: View
     private lateinit var speedDialGrid: RecyclerView
     private lateinit var addLinkFab: FloatingActionButton
+    private lateinit var suggestionsCard: MaterialCardView
+    private lateinit var suggestionsList: RecyclerView
 
     private lateinit var adapter: BookmarkAdapter
+    private lateinit var suggestionAdapter: SuggestionAdapter
     private var lastDetectedLink: String? = null
+    private var suggestJob: Job? = null
+
+    // Own client instead of reusing MainActivity's -- this is a short-timeout,
+    // fire-and-forget lookup that shouldn't share connection pool pressure
+    // with the resolve/download clients.
+    private val suggestClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
 
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
@@ -69,10 +95,13 @@ class BrowserFragment : Fragment() {
         speedDialContainer = view.findViewById(R.id.speedDialContainer)
         speedDialGrid = view.findViewById(R.id.speedDialGrid)
         addLinkFab = view.findViewById(R.id.addLinkFab)
+        suggestionsCard = view.findViewById(R.id.suggestionsCard)
+        suggestionsList = view.findViewById(R.id.suggestionsList)
 
         setupWebView()
         setupSpeedDial()
         setupAddressBar()
+        setupSuggestions()
 
         addLinkFab.setOnClickListener { onAddLinkClicked() }
 
@@ -140,12 +169,69 @@ class BrowserFragment : Fragment() {
                 true
             } else false
         }
+
+        urlInput.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                if (!urlInput.hasFocus()) return // programmatic sets (e.g. onPageStarted) shouldn't trigger suggest
+                scheduleSuggest(s?.toString().orEmpty())
+            }
+        })
+
+        urlInput.setOnFocusChangeListener { _, hasFocus ->
+            if (!hasFocus) hideSuggestions()
+        }
+    }
+
+    private fun setupSuggestions() {
+        suggestionAdapter = SuggestionAdapter(
+            onTap = { phrase -> urlInput.setText(phrase); loadUrl(phrase) },
+            onAddTap = { phrase ->
+                val url = normalizeToUrl(phrase)
+                BookmarkRepository.add(title = phrase, url = url)
+                Toast.makeText(requireContext(), R.string.bookmark_added_toast, Toast.LENGTH_SHORT).show()
+            }
+        )
+        suggestionsList.layoutManager = LinearLayoutManager(requireContext())
+        suggestionsList.adapter = suggestionAdapter
+    }
+
+    /**
+     * 2-3 letters is enough to start querying, debounced ~300ms so we're not
+     * firing a network request on every keystroke. Query text and results
+     * come entirely from DuckDuckGo's public suggest endpoint -- nothing
+     * here is a list this app ships or maintains (see SuggestApi's doc).
+     */
+    private fun scheduleSuggest(query: String) {
+        suggestJob?.cancel()
+        if (query.trim().length < 2) {
+            hideSuggestions()
+            return
+        }
+        suggestJob = viewLifecycleOwner.lifecycleScope.launch {
+            delay(300)
+            val results = withContext(Dispatchers.IO) { SuggestApi.suggest(query, suggestClient) }
+            if (!isAdded) return@launch
+            if (results.isEmpty()) {
+                hideSuggestions()
+            } else {
+                suggestionAdapter.submitList(results)
+                suggestionsCard.visibility = View.VISIBLE
+            }
+        }
+    }
+
+    private fun hideSuggestions() {
+        suggestJob?.cancel()
+        suggestionsCard.visibility = View.GONE
     }
 
     private fun loadUrl(raw: String) {
         val input = raw.trim()
         if (input.isEmpty()) return
         val url = normalizeToUrl(input)
+        hideSuggestions()
         showWebView()
         webView.loadUrl(url)
         // Drop keyboard focus so the address bar doesn't stay expanded.
@@ -184,6 +270,7 @@ class BrowserFragment : Fragment() {
         speedDialContainer.visibility = View.VISIBLE
         webView.visibility = View.GONE
         urlInput.setText("")
+        hideSuggestions()
         clearDetectedLink()
         backButton.isEnabled = webView.canGoBack()
         forwardButton.isEnabled = webView.canGoForward()

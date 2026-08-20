@@ -124,6 +124,26 @@
                     android:paddingHorizontal="8dp"
                     android:paddingBottom="16dp" />
             </LinearLayout>
+
+            <!-- Address-bar suggestions dropdown -- floats over WebView/speed-dial
+                 while the user is typing; hidden otherwise. -->
+            <com.google.android.material.card.MaterialCardView
+                android:id="@+id/suggestionsCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top"
+                android:layout_margin="8dp"
+                app:cardBackgroundColor="@color/ff_surface"
+                app:cardCornerRadius="12dp"
+                app:cardElevation="6dp"
+                android:visibility="gone">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/suggestionsList"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:maxHeight="280dp" />
+            </com.google.android.material.card.MaterialCardView>
         </FrameLayout>
     </LinearLayout>
 
