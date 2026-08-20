@@ -125,7 +125,7 @@
                     android:paddingBottom="16dp" />
             </LinearLayout>
 
-            <!-- Address-bar suggestions dropdown -- floats over WebView/speed-dial
+            <!-- Address-bar suggestions dropdown: floats over WebView/speed-dial
                  while the user is typing; hidden otherwise. -->
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/suggestionsCard"
