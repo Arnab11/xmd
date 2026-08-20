@@ -1,9 +1,11 @@
 package com.utsav.ffdownloader.core
 
+import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
+import java.io.IOException
 import java.io.RandomAccessFile
 import java.net.URI
 import java.net.URLDecoder
@@ -34,6 +36,17 @@ class DownloadEngine(
     private val cancelled = AtomicBoolean(false)
     private val lastProgressEmitNanos = AtomicLong(0L)
     private val limiter   = RateLimiter(speedLimitBytesPerSec)
+
+    // Every in-flight OkHttp Call (single-connection download, each segment of
+    // a multi-connection download, and the range-support probe) registers
+    // itself here while running. Cancel.() closes them all directly instead
+    // of only flipping a flag -- a blocked InputStream.read() on a stalled
+    // connection (e.g. server trickling a byte every 20s, well under the
+    // read timeout) never returns to re-check that flag on its own, so the
+    // old flag-only cancel() could leave a "stuck" download completely
+    // unresponsive to Cancel/Cancel All. Forcing the socket closed makes the
+    // blocked read throw immediately.
+    private val activeCalls = java.util.concurrent.ConcurrentHashMap.newKeySet<Call>()
 
     // ── Rate limiter (unchanged) ──────────────────────────────────────────
     private class RateLimiter(private val bytesPerSecond: Long) {
@@ -100,7 +113,13 @@ class DownloadEngine(
     // ── Public control ────────────────────────────────────────────────────
     fun pause()  { paused.set(true) }
     fun resume() { paused.set(false) }
-    fun cancel() { cancelled.set(true); paused.set(false) }
+    fun cancel() {
+        cancelled.set(true)
+        paused.set(false)
+        // Force-close every in-flight connection so a blocked read on a
+        // stalled/trickling download is interrupted immediately.
+        activeCalls.forEach { it.cancel() }
+    }
 
     private fun checkpoint() {
         if (cancelled.get()) throw DownloadCancelledException()
@@ -150,6 +169,11 @@ class DownloadEngine(
         val alreadyPartial = destination.isFile && destination.length() > 0
         if (connections > 1 && !alreadyPartial) {
             val probe = probeRangeSupport(url)
+            // probeRangeSupport() swallows every exception (including a
+            // cancellation-triggered IOException) internally, so re-check the
+            // flag explicitly here in case Cancel landed while the probe
+            // itself was in flight.
+            checkpoint()
             if (probe.supportsRanges && probe.totalSize >= MULTI_CONNECTION_MIN_BYTES) {
                 try {
                     log("Downloading with $connections parallel connections")
@@ -171,9 +195,11 @@ class DownloadEngine(
     private data class RangeProbe(val totalSize: Long, val supportsRanges: Boolean)
 
     private fun probeRangeSupport(url: String): RangeProbe {
+        val request = Request.Builder().url(url).header("Range", "bytes=0-0").build()
+        val call = client.newCall(request)
+        activeCalls.add(call)
         return try {
-            val request = Request.Builder().url(url).header("Range", "bytes=0-0").build()
-            client.newCall(request).execute().use { response ->
+            call.execute().use { response ->
                 when (response.code) {
                     206 -> {
                         val contentRange = response.header("Content-Range").orEmpty()
@@ -190,6 +216,8 @@ class DownloadEngine(
             }
         } catch (e: Exception) {
             RangeProbe(-1L, false)
+        } finally {
+            activeCalls.remove(call)
         }
     }
 
@@ -249,28 +277,41 @@ class DownloadEngine(
         speedMeter: SpeedMeter          // ← shared across all segment workers
     ) {
         val request = Request.Builder().url(url).header("Range", "bytes=$start-$end").build()
-        client.newCall(request).execute().use { response ->
-            if (response.code != 206 && response.code != 200) {
-                throw RuntimeException("Segment $start-$end failed (HTTP ${response.code})")
-            }
-            val body = response.body ?: throw RuntimeException("Empty segment body")
-            RandomAccessFile(destination, "rw").use { raf ->
-                raf.seek(start)
-                body.byteStream().use { input ->
-                    val buffer = ByteArray(STREAM_BLOCK_SIZE)
-                    while (true) {
-                        checkpoint()
-                        val read = input.read(buffer)
-                        if (read == -1) break
-                        if (read == 0) continue
-                        raf.write(buffer, 0, read)
-                        val done = doneCounter.addAndGet(read.toLong())
-                        limiter.acquire(read)
-                        speedMeter.record(read.toLong())          // ← sliding window
-                        emitProgress(done, totalSize, speedMeter.bps())
+        val call = client.newCall(request)
+        activeCalls.add(call)
+        try {
+            call.execute().use { response ->
+                if (response.code != 206 && response.code != 200) {
+                    throw RuntimeException("Segment $start-$end failed (HTTP ${response.code})")
+                }
+                val body = response.body ?: throw RuntimeException("Empty segment body")
+                RandomAccessFile(destination, "rw").use { raf ->
+                    raf.seek(start)
+                    body.byteStream().use { input ->
+                        val buffer = ByteArray(STREAM_BLOCK_SIZE)
+                        while (true) {
+                            checkpoint()
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            if (read == 0) continue
+                            raf.write(buffer, 0, read)
+                            val done = doneCounter.addAndGet(read.toLong())
+                            limiter.acquire(read)
+                            speedMeter.record(read.toLong())          // ← sliding window
+                            emitProgress(done, totalSize, speedMeter.bps())
+                        }
                     }
                 }
             }
+        } catch (e: IOException) {
+            // A cancelled Call closes the socket, which surfaces here as a
+            // plain IOException (e.g. "Canceled") rather than our own
+            // DownloadCancelledException -- translate it back so callers see
+            // a clean cancellation instead of a confusing network error.
+            if (cancelled.get()) throw DownloadCancelledException()
+            throw e
+        } finally {
+            activeCalls.remove(call)
         }
     }
 
@@ -284,45 +325,58 @@ class DownloadEngine(
         val requestBuilder  = Request.Builder().url(url)
         if (existingSize > 0) requestBuilder.header("Range", "bytes=$existingSize-")
 
-        client.newCall(requestBuilder.build()).execute().use { response ->
-            when (response.code) {
-                416 -> {
-                    log("File already complete: ${destination.name}")
-                    return
-                }
-                206 -> {
-                    val contentRange = response.header("Content-Range").orEmpty()
-                    val matcher = CONTENT_RANGE_TOTAL.matcher(contentRange)
-                    val totalSize = if (matcher.find()) {
-                        matcher.group(1)!!.toLong()
-                    } else {
-                        existingSize + (response.header("content-length")?.toLongOrNull() ?: 0L)
+        val call = client.newCall(requestBuilder.build())
+        activeCalls.add(call)
+        try {
+            call.execute().use { response ->
+                when (response.code) {
+                    416 -> {
+                        log("File already complete: ${destination.name}")
+                        return
                     }
-                    if (totalSize > 0 && existingSize >= totalSize) {
-                        log("File already complete: ${destination.name}"); return
+                    206 -> {
+                        val contentRange = response.header("Content-Range").orEmpty()
+                        val matcher = CONTENT_RANGE_TOTAL.matcher(contentRange)
+                        val totalSize = if (matcher.find()) {
+                            matcher.group(1)!!.toLong()
+                        } else {
+                            existingSize + (response.header("content-length")?.toLongOrNull() ?: 0L)
+                        }
+                        if (totalSize > 0 && existingSize >= totalSize) {
+                            log("File already complete: ${destination.name}"); return
+                        }
+                        log("Resuming ${destination.name} from $existingSize bytes")
+                        streamToFile(response, destination, existingSize, totalSize, append = true)
                     }
-                    log("Resuming ${destination.name} from $existingSize bytes")
-                    streamToFile(response, destination, existingSize, totalSize, append = true)
-                }
-                200 -> {
-                    val totalSize = response.header("content-length")?.toLongOrNull() ?: 0L
-                    if (existingSize > 0 && totalSize > 0 && existingSize >= totalSize) {
-                        log("File already complete: ${destination.name}"); return
+                    200 -> {
+                        val totalSize = response.header("content-length")?.toLongOrNull() ?: 0L
+                        if (existingSize > 0 && totalSize > 0 && existingSize >= totalSize) {
+                            log("File already complete: ${destination.name}"); return
+                        }
+                        if (existingSize > 0) log("Server ignored resume; restarting ${destination.name}")
+                        streamToFile(response, destination, 0L, totalSize, append = false)
                     }
-                    if (existingSize > 0) log("Server ignored resume; restarting ${destination.name}")
-                    streamToFile(response, destination, 0L, totalSize, append = false)
-                }
-                else -> {
-                    val host = runCatching { URI(url).host }.getOrNull()
-                    if (host == "dl.fuckingfast.co" && response.code in setOf(401, 403, 404, 410)) {
-                        throw RuntimeException(
-                            "This direct link has expired or is unavailable. Paste the original " +
-                            "share link to prepare a fresh download URL."
-                        )
+                    else -> {
+                        val host = runCatching { URI(url).host }.getOrNull()
+                        if (host == "dl.fuckingfast.co" && response.code in setOf(401, 403, 404, 410)) {
+                            throw RuntimeException(
+                                "This direct link has expired or is unavailable. Paste the original " +
+                                "share link to prepare a fresh download URL."
+                            )
+                        }
+                        throw RuntimeException("Failed to download file (HTTP ${response.code})")
                     }
-                    throw RuntimeException("Failed to download file (HTTP ${response.code})")
                 }
             }
+        } catch (e: IOException) {
+            // Cancelling closes the socket, which surfaces here as a plain
+            // IOException rather than DownloadCancelledException directly --
+            // translate it so a Cancel tap reads as "Cancelled", not a
+            // confusing network error.
+            if (cancelled.get()) throw DownloadCancelledException()
+            throw e
+        } finally {
+            activeCalls.remove(call)
         }
         log("Downloaded ${destination.name}")
     }
