@@ -132,6 +132,16 @@
             android:layout_weight="1" />
     </LinearLayout>
 
+    <!-- Phase 5 (Browser): host for MainActivity-owned Compose dialogs
+         (DnsSettingsDialog first); see BrowserFragment's browserDialogHost
+         for the precedent this follows. Not a visible content area, just a
+         composition root; sized match_parent because AlertDialog renders in
+         its own Dialog window regardless of this host's own bounds. -->
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/mainDialogHost"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
     <!-- Google Photos style Modern Material Expressive Floating Pill Navbar + Circle Action -->
     <LinearLayout
         android:id="@+id/navBarLayout"

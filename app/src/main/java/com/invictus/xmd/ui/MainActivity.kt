@@ -12,10 +12,6 @@ import android.view.GestureDetector
 import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
-import android.text.SpannableString
-import android.text.Spanned
-import android.text.style.ForegroundColorSpan
-import android.text.style.RelativeSizeSpan
 import android.widget.EditText
 import android.widget.RadioButton
 import android.widget.RadioGroup
@@ -24,9 +20,14 @@ import android.widget.Toast
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.appcompat.widget.AppCompatRadioButton
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
@@ -201,6 +202,19 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     private lateinit var headerSearchLayout: View
     private lateinit var headerSearchInput: EditText
     private lateinit var headerSearchClearButton: View
+    // Phase 5 (Browser): composition root for Compose dialogs owned by
+    // MainActivity rather than BrowserFragment -- deliberately touches this
+    // Phase-6 file ahead of schedule, see COMPOSE_MIGRATION.md's
+    // DnsSettingsDialog writeup for why. Same bare-composition-root pattern
+    // BrowserFragment's browserDialogHost established (match_parent because
+    // AlertDialog renders in its own Dialog window regardless of this
+    // host's own bounds).
+    private lateinit var mainDialogHost: androidx.compose.ui.platform.ComposeView
+    // Compose State so mainDialogHost's setContent lambda recomposes when
+    // this flips -- same `by mutableStateOf` pattern BrowserFragment uses
+    // for sniffedSheetStreams/suggestionItems (see that file's comments for
+    // the extension-function-import lesson this relies on).
+    private var dnsSettingsDialogOpen: Boolean by mutableStateOf(false)
 
     private fun openHeaderSearch() {
         headerNormalLayout.visibility = View.GONE
@@ -430,6 +444,32 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         setContentView(R.layout.activity_main)
         applySystemBarColors()
 
+        mainDialogHost = findViewById(R.id.mainDialogHost)
+        mainDialogHost.setViewCompositionStrategy(
+            androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
+        )
+        mainDialogHost.setContent {
+            com.invictus.xmd.ui.theme.XmdTheme {
+                if (dnsSettingsDialogOpen) {
+                    DnsSettingsDialog(
+                        currentMode = Settings.dnsMode(),
+                        currentCustomUrl = Settings.dnsCustomUrl(),
+                        onDismiss = { dnsSettingsDialogOpen = false },
+                        onSave = { mode, customUrl ->
+                            if (mode == Settings.DnsMode.CUSTOM) {
+                                Settings.setDnsCustomUrl(customUrl)
+                            }
+                            Settings.setDnsMode(mode)
+                            dnsSettingsDialogOpen = false
+                        },
+                        onInvalidCustomUrl = {
+                            Toast.makeText(this, R.string.dns_custom_url_needed, Toast.LENGTH_SHORT).show()
+                        },
+                    )
+                }
+            }
+        }
+
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
         this.toolbar = toolbar
         setSupportActionBar(toolbar)
@@ -592,12 +632,16 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         }
 
         // Active-download badge on the Downloads tab
-        QueueRepository.items.observe(this) { list ->
-            val active = list.count {
-                it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
-                it.status == ItemStatus.SAVING || it.status == ItemStatus.RETRYING
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                QueueRepository.items.collect { list ->
+                    val active = list.count {
+                        it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
+                        it.status == ItemStatus.SAVING || it.status == ItemStatus.RETRYING
+                    }
+                    bottomNav.updateBadge(active)
+                }
             }
-            bottomNav.updateBadge(active)
         }
 
         // Watches items sent through the Retry button; pops an IDM-style
@@ -605,18 +649,22 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         // item lands back on FAILED with an expired-link error, whether that
         // failure happened at resolve-time or later during the actual
         // download.
-        QueueRepository.items.observe(this) { list ->
-            list.forEach { item ->
-                if (item.id !in pendingRetryIds) return@forEach
-                when (item.status) {
-                    ItemStatus.FAILED -> {
-                        pendingRetryIds.remove(item.id)
-                        if (item.error?.contains("expired", ignoreCase = true) == true) {
-                            showExpiredLinkDialog(item)
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                QueueRepository.items.collect { list ->
+                    list.forEach { item ->
+                        if (item.id !in pendingRetryIds) return@forEach
+                        when (item.status) {
+                            ItemStatus.FAILED -> {
+                                pendingRetryIds.remove(item.id)
+                                if (item.error?.contains("expired", ignoreCase = true) == true) {
+                                    showExpiredLinkDialog(item)
+                                }
+                            }
+                            ItemStatus.DONE -> pendingRetryIds.remove(item.id) // succeeded, stop watching
+                            else -> {} // still resolving/downloading -- keep watching
                         }
                     }
-                    ItemStatus.DONE -> pendingRetryIds.remove(item.id) // succeeded, stop watching
-                    else -> {} // still resolving/downloading -- keep watching
                 }
             }
         }
@@ -1778,82 +1826,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             .show()
     }
 
-    /** Builds a two-line radio-row label: the provider name on top and its
-     *  DoH address underneath in a smaller, dimmer style (mirrors Android's
-     *  own Private DNS picker, which shows the resolved host under each option). */
-    private fun labelWithAddress(title: String, address: String): SpannableString {
-        val full = "$title\n$address"
-        val spannable = SpannableString(full)
-        val addressStart = title.length + 1
-        spannable.setSpan(
-            RelativeSizeSpan(0.8f),
-            addressStart, full.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-        spannable.setSpan(
-            ForegroundColorSpan(ContextCompat.getColor(this, R.color.m3_on_surface_variant)),
-            addressStart, full.length,
-            Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-        return spannable
-    }
-
+    /** Opens the Compose DnsSettingsDialog (see mainDialogHost's setContent
+     *  in onCreate) -- this used to build+show a MaterialAlertDialogBuilder
+     *  wrapping dialog_dns_settings.xml right here; all of that now lives in
+     *  ui/DnsSettingsDialog.kt, this function is just the open trigger. */
     private fun showDnsSettingsDialog() {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_dns_settings, null)
-        val group = dialogView.findViewById<RadioGroup>(R.id.dnsModeGroup)
-        val optionAdguard = dialogView.findViewById<RadioButton>(R.id.dnsOptionAdguard)
-        val optionGoogle = dialogView.findViewById<RadioButton>(R.id.dnsOptionGoogle)
-        val optionCloudflare = dialogView.findViewById<RadioButton>(R.id.dnsOptionCloudflare)
-        val optionCloudflareAdblock = dialogView.findViewById<RadioButton>(R.id.dnsOptionCloudflareAdblock)
-        val optionOff = dialogView.findViewById<RadioButton>(R.id.dnsOptionOff)
-        val optionCustom = dialogView.findViewById<RadioButton>(R.id.dnsOptionCustom)
-        val customUrlInput = dialogView.findViewById<EditText>(R.id.dnsCustomUrlInput)
-        val customUrlLayout = dialogView.findViewById<com.google.android.material.textfield.TextInputLayout>(R.id.dnsCustomUrlLayout)
-
-        optionAdguard.text = labelWithAddress(getString(R.string.dns_mode_adguard), DnsOverHttpsResolver.ADGUARD_DOH_URL)
-        optionGoogle.text = labelWithAddress(getString(R.string.dns_mode_google), DnsOverHttpsResolver.GOOGLE_DOH_URL)
-        optionCloudflare.text = labelWithAddress(getString(R.string.dns_mode_cloudflare), DnsOverHttpsResolver.CLOUDFLARE_DOH_URL)
-        optionCloudflareAdblock.text = labelWithAddress(getString(R.string.dns_mode_cloudflare_adblock), DnsOverHttpsResolver.CLOUDFLARE_ADBLOCK_DOH_URL)
-
-        when (Settings.dnsMode()) {
-            Settings.DnsMode.ADGUARD -> optionAdguard.isChecked = true
-            Settings.DnsMode.GOOGLE -> optionGoogle.isChecked = true
-            Settings.DnsMode.CLOUDFLARE -> optionCloudflare.isChecked = true
-            Settings.DnsMode.CLOUDFLARE_ADBLOCK -> optionCloudflareAdblock.isChecked = true
-            Settings.DnsMode.OFF -> optionOff.isChecked = true
-            Settings.DnsMode.CUSTOM -> optionCustom.isChecked = true
-        }
-        customUrlInput.setText(Settings.dnsCustomUrl())
-        customUrlLayout.visibility = if (optionCustom.isChecked) android.view.View.VISIBLE else android.view.View.GONE
-
-        group.setOnCheckedChangeListener { _, checkedId ->
-            customUrlLayout.visibility =
-                if (checkedId == R.id.dnsOptionCustom) android.view.View.VISIBLE else android.view.View.GONE
-        }
-
-        MaterialAlertDialogBuilder(this)
-            .setTitle(R.string.dns_settings_title)
-            .setView(dialogView)
-            .setPositiveButton(R.string.settings_save) { _, _ ->
-                when (group.checkedRadioButtonId) {
-                    R.id.dnsOptionOff -> Settings.setDnsMode(Settings.DnsMode.OFF)
-                    R.id.dnsOptionGoogle -> Settings.setDnsMode(Settings.DnsMode.GOOGLE)
-                    R.id.dnsOptionCloudflare -> Settings.setDnsMode(Settings.DnsMode.CLOUDFLARE)
-                    R.id.dnsOptionCloudflareAdblock -> Settings.setDnsMode(Settings.DnsMode.CLOUDFLARE_ADBLOCK)
-                    R.id.dnsOptionCustom -> {
-                        val url = customUrlInput.text?.toString()?.trim().orEmpty()
-                        if (url.isEmpty() || !(url.startsWith("http://") || url.startsWith("https://"))) {
-                            Toast.makeText(this, R.string.dns_custom_url_needed, Toast.LENGTH_SHORT).show()
-                            return@setPositiveButton
-                        }
-                        Settings.setDnsCustomUrl(url)
-                        Settings.setDnsMode(Settings.DnsMode.CUSTOM)
-                    }
-                    else -> Settings.setDnsMode(Settings.DnsMode.ADGUARD)
-                }
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        dnsSettingsDialogOpen = true
     }
 
     private fun openHistoryScreen() {

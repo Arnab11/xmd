@@ -215,82 +215,30 @@
                     android:layout_height="match_parent" />
             </androidx.swiperefreshlayout.widget.SwipeRefreshLayout>
 
-            <!-- Speed-dial "new tab" page -->
-            <LinearLayout
+            <!-- Speed-dial "new tab" page: ShortcutsScreen (see
+                 ShortcutsScreen.kt), set up in BrowserFragment.onViewCreated.
+                 Same id/visibility contract as before: showSpeedDial()/
+                 showWebView() just flip this VISIBLE/GONE. -->
+            <androidx.compose.ui.platform.ComposeView
                 android:id="@+id/speedDialContainer"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:orientation="vertical"
                 android:background="?android:attr/colorBackground"
-                android:visibility="visible">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical"
-                    android:layout_marginHorizontal="16dp"
-                    android:layout_marginVertical="16dp">
-
-                    <View
-                        android:layout_width="4dp"
-                        android:layout_height="14dp"
-                        android:layout_marginEnd="8dp"
-                        android:background="@drawable/bg_section_accent" />
-
-                    <TextView
-                        android:layout_width="0dp"
-                        android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:text="@string/label_shortcuts"
-                        android:textColor="?attr/colorOnSurfaceVariant"
-                        android:textStyle="bold"
-                        android:textSize="11sp"
-                        android:letterSpacing="0.12" />
-
-                    <TextView
-                        android:id="@+id/shortcutReorderToggle"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:padding="6dp"
-                        android:text="@string/action_reorder"
-                        android:textColor="?attr/colorPrimary"
-                        android:textStyle="bold"
-                        android:textSize="12sp"
-                        android:clickable="true"
-                        android:focusable="true" />
-                </LinearLayout>
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/speedDialGrid"
-                    android:layout_width="match_parent"
-                    android:layout_height="0dp"
-                    android:layout_weight="1"
-                    android:clipToPadding="false"
-                    android:paddingHorizontal="8dp"
-                    android:paddingBottom="16dp" />
-            </LinearLayout>
+                android:visibility="visible" />
 
             <!-- Address-bar suggestions dropdown: floats over WebView/speed-dial
-                 while the user is typing; hidden otherwise. -->
-            <com.google.android.material.card.MaterialCardView
+                 while the user is typing; hidden otherwise. Phase 5: now a
+                 ComposeView hosting AddressBarSuggestions (was a
+                 MaterialCardView wrapping a RecyclerView + SuggestionAdapter);
+                 same id, same top+8dp-margin position. The composable
+                 renders nothing (zero height) when its suggestion list is
+                 empty, replacing the old visibility="gone" default. -->
+            <androidx.compose.ui.platform.ComposeView
                 android:id="@+id/suggestionsCard"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_gravity="top"
-                android:layout_margin="8dp"
-                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                app:shapeAppearance="@style/ShapeAppearance.Xmd.Medium"
-                app:cardElevation="6dp"
-                android:visibility="gone">
-
-                <androidx.recyclerview.widget.RecyclerView
-                    android:id="@+id/suggestionsList"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:maxHeight="280dp" />
-            </com.google.android.material.card.MaterialCardView>
+                android:layout_margin="8dp" />
 
             <!-- Find-in-page overlay: Chrome-style search bar that floats over
                  the WebView/speed-dial while active, hidden otherwise. -->
@@ -418,5 +366,26 @@
         android:src="@drawable/ic_download_link"
         android:contentDescription="@string/action_add_to_downloads"
         android:visibility="gone" />
+
+    <!-- Phase 5: host for Browser's Compose-native dialogs/sheets
+         (SniffedMediaSheet first, more to follow as the rest of this
+         Fragment's chrome converts); unlike speedDialContainer this
+         isn't a visible content area, just a composition root. Sized
+         match_parent because ModalBottomSheet/AlertDialog render in
+         their own Dialog window regardless of this host's own bounds. -->
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/browserDialogHost"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
+
+    <!-- Phase 5: tabs tray, Compose-native (TabsListOverlay.kt). Was a
+         BottomSheetDialog built in showTabsDialog(); now a full-bleed
+         overlay, real on-screen bounds anchored here, not a Dialog
+         window, topmost so it covers the FABs and browserDialogHost's
+         dialogs too, same as the old dialog visually sat above everything. -->
+    <androidx.compose.ui.platform.ComposeView
+        android:id="@+id/tabsListOverlay"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent" />
 
 </FrameLayout>
