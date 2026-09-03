@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.weight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Icon
@@ -22,8 +21,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -332,14 +337,14 @@ private fun AppearanceRoute(activity: ComponentActivity) {
     // the source of truth for every persisted value. Same behavior as the
     // retired SettingsAppearanceFragment; ComponentActivity.recreate() is
     // the same API AppCompatActivity inherited it from.
-    var currentTheme by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.appTheme())
+    var currentTheme by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.appTheme())
     }
-    var isDark by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.isDarkMode())
+    var isDark by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.isDarkMode())
     }
-    var isAmoled by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.isAmoledMode())
+    var isAmoled by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.isAmoledMode())
     }
 
     SettingsAppearanceScreen(
@@ -372,7 +377,7 @@ private fun AppearanceRoute(activity: ComponentActivity) {
 
 @Composable
 private fun ConnectionsRoute() {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     SettingsConnectionsScreen(
         initialConnections = com.invictus.xmd.core.Settings.connectionsPerDownload(),
         initialSpeedLimitKBps = com.invictus.xmd.core.Settings.speedLimitKBps(),
@@ -388,15 +393,15 @@ private fun ConnectionsRoute() {
 
 @Composable
 private fun DownloadsRoute() {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    var autoRetry by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.autoRetryEnabled())
+    val context = LocalContext.current
+    var autoRetry by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.autoRetryEnabled())
     }
-    var saveToDownloads by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.saveToDownloadsFolder())
+    var saveToDownloads by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.saveToDownloadsFolder())
     }
-    var wifiOnly by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.wifiOnlyDownloads())
+    var wifiOnly by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.wifiOnlyDownloads())
     }
 
     SettingsDownloadsScreen(
@@ -428,8 +433,8 @@ private fun DownloadsRoute() {
 
 @Composable
 private fun BrowserRoute(onImportWebsites: () -> Unit, onExportWebsites: () -> Unit) {
-    var adblockEnabled by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.adblockEnabled())
+    var adblockEnabled by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.adblockEnabled())
     }
     SettingsBrowserScreen(
         adblockEnabled = adblockEnabled,
@@ -444,8 +449,8 @@ private fun BrowserRoute(onImportWebsites: () -> Unit, onExportWebsites: () -> U
 
 @Composable
 private fun YoutubeRoute() {
-    val context = androidx.compose.ui.platform.LocalContext.current
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
 
     val containerOptions = listOf(
         stringResource(R.string.preset_any) to com.invictus.xmd.core.Settings.ContainerPreset.ANY,
@@ -492,30 +497,30 @@ private fun YoutubeRoute() {
         }
     }
 
-    var selectedQualityLabel by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(resolveInitialQualityLabel())
+    var selectedQualityLabel by remember {
+        mutableStateOf(resolveInitialQualityLabel())
     }
-    var selectedContainerLabel by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(containerOptions.first { it.second == com.invictus.xmd.core.Settings.presetContainer() }.first)
+    var selectedContainerLabel by remember {
+        mutableStateOf(containerOptions.first { it.second == com.invictus.xmd.core.Settings.presetContainer() }.first)
     }
-    var selectedFpsLabel by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(fpsOptions.first { it.second == com.invictus.xmd.core.Settings.presetFps() }.first)
+    var selectedFpsLabel by remember {
+        mutableStateOf(fpsOptions.first { it.second == com.invictus.xmd.core.Settings.presetFps() }.first)
     }
-    var selectedCodecLabel by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(codecOptions.first { it.second == com.invictus.xmd.core.Settings.presetCodec() }.first)
+    var selectedCodecLabel by remember {
+        mutableStateOf(codecOptions.first { it.second == com.invictus.xmd.core.Settings.presetCodec() }.first)
     }
-    var selectedAudioFormatLabel by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(audioFormatOptions.first { it.second == com.invictus.xmd.core.Settings.presetAudioFormat() }.first)
+    var selectedAudioFormatLabel by remember {
+        mutableStateOf(audioFormatOptions.first { it.second == com.invictus.xmd.core.Settings.presetAudioFormat() }.first)
     }
 
-    var ytDlpInstalled by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.YtDlpManager.isInstalled(context))
+    var ytDlpInstalled by remember {
+        mutableStateOf(com.invictus.xmd.core.YtDlpManager.isInstalled(context))
     }
-    var ytDlpUsingNightly by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf(com.invictus.xmd.core.Settings.ytDlpUseNightly())
+    var ytDlpUsingNightly by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.ytDlpUseNightly())
     }
-    var ytDlpOpState by androidx.compose.runtime.remember {
-        androidx.compose.runtime.mutableStateOf<YtDlpOpState>(YtDlpOpState.Idle)
+    var ytDlpOpState by remember {
+        mutableStateOf<YtDlpOpState>(YtDlpOpState.Idle)
     }
 
     fun refreshYtDlpStatus() {
@@ -619,7 +624,7 @@ private fun YoutubeRoute() {
 
 @Composable
 private fun AboutRoute() {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val developers = listOf(
         "Utsav Rajput" to "Developer",
         "Arnab Sadhukhan" to "Developer",
