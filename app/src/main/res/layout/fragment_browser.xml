@@ -117,7 +117,7 @@
         </FrameLayout>
     </LinearLayout>
 
-    <!-- Phase F: sniffedMediaFab (video/audio sniffer chip -- appears with a
+    <!-- Phase F: sniffedMediaFab (video/audio sniffer chip, appears with a
          live count when MediaSniffer picks up a stream on the current page)
          and addLinkFab (appears when a downloadable link is found on the
          page) were two separate FloatingActionButtons; now one shared
