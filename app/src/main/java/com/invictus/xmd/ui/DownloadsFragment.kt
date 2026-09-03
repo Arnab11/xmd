@@ -75,6 +75,8 @@ class DownloadsFragment : Fragment() {
                     onCancelAll = { DownloadService.cancelAll(requireContext()) },
                     onRetryAll = { (activity as? Callbacks)?.retryAll() },
                     onClearAllFinished = { QueueRepository.clearFinishedAndFailed() },
+                    onPauseAll = { items -> DownloadService.pauseAll(requireContext(), items.map { it.id }) },
+                    onResumeAll = { items -> DownloadService.resumeAll(requireContext(), items.map { it.id }) },
                 )
             }
         }

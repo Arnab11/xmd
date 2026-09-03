@@ -52,10 +52,13 @@ class DownloadService : LifecycleService() {
         const val ACTION_START = "com.invictus.xmd.action.START"
         const val ACTION_PAUSE_ITEM = "com.invictus.xmd.action.PAUSE_ITEM"
         const val ACTION_RESUME_ITEM = "com.invictus.xmd.action.RESUME_ITEM"
+        const val ACTION_PAUSE_ALL = "com.invictus.xmd.action.PAUSE_ALL"
+        const val ACTION_RESUME_ALL = "com.invictus.xmd.action.RESUME_ALL"
         const val ACTION_CANCEL_ITEM = "com.invictus.xmd.action.CANCEL_ITEM"
         const val ACTION_CANCEL_ALL = "com.invictus.xmd.action.CANCEL_ALL"
         const val ACTION_WIFI_ONLY_ENABLED = "com.invictus.xmd.action.WIFI_ONLY_ENABLED"
         const val EXTRA_ITEM_ID = "extra_item_id"
+        const val EXTRA_ITEM_IDS = "extra_item_ids"
         private const val NOTIFICATION_ID = 42
         private const val BETWEEN_CLAIM_DELAY_MS = 500L
         private const val MAX_AUTO_RETRIES = 3
@@ -79,6 +82,28 @@ class DownloadService : LifecycleService() {
                 Intent(context, DownloadService::class.java)
                     .setAction(ACTION_RESUME_ITEM)
                     .putExtra(EXTRA_ITEM_ID, itemId)
+            )
+        }
+
+        /** Pauses every id in [itemIds] -- caller (DownloadsScreen's overflow
+         *  menu) decides the scope, e.g. only the items visible under the
+         *  currently selected filter tab + search query. */
+        fun pauseAll(context: Context, itemIds: List<String>) {
+            if (itemIds.isEmpty()) return
+            context.startService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_PAUSE_ALL)
+                    .putStringArrayListExtra(EXTRA_ITEM_IDS, ArrayList(itemIds))
+            )
+        }
+
+        /** Resumes every id in [itemIds] -- same scoping story as [pauseAll]. */
+        fun resumeAll(context: Context, itemIds: List<String>) {
+            if (itemIds.isEmpty()) return
+            context.startService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_RESUME_ALL)
+                    .putStringArrayListExtra(EXTRA_ITEM_IDS, ArrayList(itemIds))
             )
         }
 
@@ -238,45 +263,28 @@ class DownloadService : LifecycleService() {
                 topUpWorkers()
             }
             ACTION_PAUSE_ITEM -> intent.getStringExtra(EXTRA_ITEM_ID)?.let { id ->
-                // yt-dlp has no native pause -- QueueItemRow (DownloadsScreen.kt) already hides the
-                // Pause button for YouTube items, this is just a defensive
-                // no-op in case this action fires for one some other way.
-                val current = QueueRepository.current().firstOrNull { it.id == id }
-                if (current?.platform != MediaPlatform.YOUTUBE) {
-                    engines[id]?.pause()
-                    torrentEngines[id]?.pause()
-                    QueueRepository.update(id) { it.copy(status = ItemStatus.PAUSED) }
-                }
+                pauseSingleItem(id)
                 updateNotification()
             }
             ACTION_RESUME_ITEM -> intent.getStringExtra(EXTRA_ITEM_ID)?.let { id ->
-                val liveEngine = engines[id] != null || torrentEngines[id] != null
-                if (liveEngine) {
-                    // Same app session, engine's coroutine is still alive and
-                    // just spinning in its pause-checkpoint loop -- flip the
-                    // flag and it picks the exact same connection back up.
-                    engines[id]?.resume()
-                    torrentEngines[id]?.resume()
-                    QueueRepository.update(id) { it.copy(status = ItemStatus.DOWNLOADING) }
-                } else {
-                    // No live engine -- the process was killed while this item
-                    // sat paused (very possible over "long hours": Doze,
-                    // battery optimization, user swipe-kill). There's no
-                    // coroutine left to un-pause. Route it back through READY
-                    // instead of marking DOWNLOADING with nothing behind it --
-                    // a fresh worker claims it and downloadAuto() picks the
-                    // temp file back up via Range: bytes=<existingSize>-, so
-                    // already-downloaded bytes aren't wasted.
-                    val current = QueueRepository.current().firstOrNull { it.id == id }
-                    if (current?.directUrl != null) {
-                        QueueRepository.update(id) { it.copy(status = ItemStatus.READY, error = null) }
-                        startForeground(NOTIFICATION_ID, buildNotification())
-                        topUpWorkers()
-                    } else {
-                        // No resolved direct link cached either -- needs a
-                        // full re-resolve, not just a restarted download.
-                        QueueRepository.update(id) { it.copy(status = ItemStatus.PENDING, error = null) }
-                    }
+                if (resumeSingleItem(id)) {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                    topUpWorkers()
+                }
+                updateNotification()
+            }
+            ACTION_PAUSE_ALL -> {
+                intent.getStringArrayListExtra(EXTRA_ITEM_IDS)?.forEach { id -> pauseSingleItem(id) }
+                updateNotification()
+            }
+            ACTION_RESUME_ALL -> {
+                val ids = intent.getStringArrayListExtra(EXTRA_ITEM_IDS).orEmpty()
+                // Only call startForeground/topUpWorkers once for the whole
+                // batch, not per id -- same effect, no redundant churn.
+                val needsTopUp = ids.fold(false) { acc, id -> resumeSingleItem(id) || acc }
+                if (needsTopUp) {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                    topUpWorkers()
                 }
                 updateNotification()
             }
@@ -321,6 +329,54 @@ class DownloadService : LifecycleService() {
             }
         }
         return START_NOT_STICKY
+    }
+
+    /** Pauses one item by id -- shared by [ACTION_PAUSE_ITEM] and [ACTION_PAUSE_ALL].
+     *  yt-dlp has no native pause -- QueueItemRow (DownloadsScreen.kt) already hides the
+     *  Pause button for YouTube items, this is just a defensive no-op in case
+     *  this action fires for one some other way. */
+    private fun pauseSingleItem(id: String) {
+        val current = QueueRepository.current().firstOrNull { it.id == id }
+        if (current?.platform != MediaPlatform.YOUTUBE) {
+            engines[id]?.pause()
+            torrentEngines[id]?.pause()
+            QueueRepository.update(id) { it.copy(status = ItemStatus.PAUSED) }
+        }
+    }
+
+    /** Resumes one item by id -- shared by [ACTION_RESUME_ITEM] and [ACTION_RESUME_ALL].
+     *  Returns true if the caller needs to (re-)start the foreground
+     *  notification and top up workers, i.e. this item had no live engine
+     *  left and was routed back through READY/PENDING instead. */
+    private fun resumeSingleItem(id: String): Boolean {
+        val liveEngine = engines[id] != null || torrentEngines[id] != null
+        if (liveEngine) {
+            // Same app session, engine's coroutine is still alive and
+            // just spinning in its pause-checkpoint loop -- flip the
+            // flag and it picks the exact same connection back up.
+            engines[id]?.resume()
+            torrentEngines[id]?.resume()
+            QueueRepository.update(id) { it.copy(status = ItemStatus.DOWNLOADING) }
+            return false
+        }
+        // No live engine -- the process was killed while this item
+        // sat paused (very possible over "long hours": Doze,
+        // battery optimization, user swipe-kill). There's no
+        // coroutine left to un-pause. Route it back through READY
+        // instead of marking DOWNLOADING with nothing behind it --
+        // a fresh worker claims it and downloadAuto() picks the
+        // temp file back up via Range: bytes=<existingSize>-, so
+        // already-downloaded bytes aren't wasted.
+        val current = QueueRepository.current().firstOrNull { it.id == id }
+        return if (current?.directUrl != null) {
+            QueueRepository.update(id) { it.copy(status = ItemStatus.READY, error = null) }
+            true
+        } else {
+            // No resolved direct link cached either -- needs a
+            // full re-resolve, not just a restarted download.
+            QueueRepository.update(id) { it.copy(status = ItemStatus.PENDING, error = null) }
+            false
+        }
     }
 
     /** Launches enough fresh worker loops to bring the live count up to the configured max. */

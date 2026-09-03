@@ -110,6 +110,8 @@ fun DownloadsScreen(
     onCancelAll: () -> Unit,
     onRetryAll: () -> Unit,
     onClearAllFinished: () -> Unit,
+    onPauseAll: (List<QueueItem>) -> Unit,
+    onResumeAll: (List<QueueItem>) -> Unit,
 ) {
     // Same filter as DownloadsFragment.renderList: filename OR sourceUrl,
     // case-insensitive substring.
@@ -148,6 +150,14 @@ fun DownloadsScreen(
     val hasClearable = list.any { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
     val showCancelOrRetry = hasActive || hasFailed
 
+    // Pause All / Resume All operate on `list` too -- same "currently
+    // visible" scope as Cancel All/Retry All/Clear above, i.e. whatever the
+    // selected filter tab + search query narrow it down to.
+    val pausableItems = list.filter {
+        it.status == ItemStatus.DOWNLOADING && it.platform != MediaPlatform.YOUTUBE
+    }
+    val resumableItems = list.filter { it.status == ItemStatus.PAUSED }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -169,6 +179,11 @@ fun DownloadsScreen(
                 ) {
                     DownloadFilter.entries.forEach { filter ->
                         val count = queryMatches.count(filter::matches)
+                        // All always shows (it's the reset-to-everything
+                        // chip); the rest only show once they'd actually
+                        // have something in them, so a Waiting/Completed/
+                        // Failed chip stuck at 0 doesn't just sit there.
+                        if (filter != DownloadFilter.All && count == 0) return@forEach
                         FilterChip(
                             selected = selectedFilter == filter,
                             onClick = { selectedFilterName = filter.name },
@@ -203,7 +218,9 @@ fun DownloadsScreen(
                 // bottom of the screen (was visually disconnected from
                 // everything else and left a lot of dead space below a
                 // short list).
-                if (list.isNotEmpty() && (showCancelOrRetry || hasClearable)) {
+                if (list.isNotEmpty() &&
+                    (showCancelOrRetry || hasClearable || pausableItems.isNotEmpty() || resumableItems.isNotEmpty())
+                ) {
                     Box {
                         IconButton(onClick = { overflowMenuExpanded = true }) {
                             Icon(
@@ -215,6 +232,20 @@ fun DownloadsScreen(
                             expanded = overflowMenuExpanded,
                             onDismissRequest = { overflowMenuExpanded = false },
                         ) {
+                            if (pausableItems.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_pause_all)) },
+                                    leadingIcon = { Icon(imageVector = Icons.Pause, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onPauseAll(pausableItems) },
+                                )
+                            }
+                            if (resumableItems.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_resume_all)) },
+                                    leadingIcon = { Icon(imageVector = Icons.Play, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onResumeAll(resumableItems) },
+                                )
+                            }
                             if (hasActive) {
                                 DropdownMenuItem(
                                     text = {
