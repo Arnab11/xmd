@@ -139,6 +139,7 @@ internal fun MainShell(
         topBar = {
             if (destination != MainDestination.Browser) {
                 DownloadsTopBar(
+                    destination = destination,
                     searchActive = searchActive,
                     searchQuery = searchQuery,
                     onSearchActiveChange = onSearchActiveChange,
@@ -189,6 +190,7 @@ internal fun MainShell(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun DownloadsTopBar(
+    destination: MainDestination,
     searchActive: Boolean,
     searchQuery: String,
     onSearchActiveChange: (Boolean) -> Unit,
@@ -283,11 +285,13 @@ private fun DownloadsTopBar(
             )
         },
         actions = {
-            IconButton(onClick = { onSearchActiveChange(true) }) {
-                Icon(
-                    imageVector = Icons.Search,
-                    contentDescription = stringResource(R.string.action_search),
-                )
+            if (destination == MainDestination.Downloads) {
+                IconButton(onClick = { onSearchActiveChange(true) }) {
+                    Icon(
+                        imageVector = Icons.Search,
+                        contentDescription = stringResource(R.string.action_search),
+                    )
+                }
             }
             IconButton(onClick = onOpenSettings) {
                 Icon(

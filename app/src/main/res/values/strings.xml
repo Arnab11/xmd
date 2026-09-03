@@ -53,6 +53,7 @@
     <string name="action_pause_all">Pause All</string>
     <string name="action_resume_all">Resume All</string>
     <string name="action_add">Add</string>
+    <string name="action_paste">Paste</string>
     <string name="action_dismiss">Dismiss</string>
     <string name="action_view">View</string>
     <string name="action_delete">Delete</string>

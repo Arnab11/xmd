@@ -62,6 +62,7 @@ internal fun HomeScreen(
     needsPrepare: Boolean,
     onClipboardAdd: () -> Unit,
     onClipboardDismiss: () -> Unit,
+    onPasteClipboard: () -> Unit,
     onAddTorrent: () -> Unit,
     onPrepare: () -> Unit,
     onDownload: () -> Unit,
@@ -94,6 +95,9 @@ internal fun HomeScreen(
                 Column(modifier = Modifier.padding(16.dp)) {
                     // URL input row -- plain borderless multiline field, no
                     // box/outline of its own; the card itself is the outline.
+                    // Trailing icon: manual paste from clipboard into the
+                    // field (any text). The banner above handles
+                    // auto-detected recognized links separately.
                     Row(modifier = Modifier.fillMaxWidth()) {
                         Icon(
                             imageVector = Icons.Link,
@@ -127,6 +131,17 @@ internal fun HomeScreen(
                                     }
                                     innerTextField()
                                 },
+                            )
+                        }
+                        IconButton(
+                            onClick = onPasteClipboard,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Paste,
+                                contentDescription = stringResource(R.string.action_paste),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(18.dp),
                             )
                         }
                     }
