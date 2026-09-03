@@ -118,10 +118,10 @@ fun SettingsAppearanceScreen(
 private data class TabMeta(val iconRes: Int, val labelRes: Int)
 
 private val TAB_META = mapOf(
-    Settings.TabId.HOME to TabMeta(R.drawable.ic_tab_home, R.string.tab_home),
-    Settings.TabId.DOWNLOADS to TabMeta(R.drawable.ic_tab_downloads, R.string.tab_downloads),
+    Settings.TabId.HOME to TabMeta(R.drawable.ic_home, R.string.tab_home),
+    Settings.TabId.DOWNLOADS to TabMeta(R.drawable.ic_downloads, R.string.tab_downloads),
     Settings.TabId.ADD to TabMeta(R.drawable.ic_add, R.string.tab_add),
-    Settings.TabId.BROWSER to TabMeta(R.drawable.ic_tab_browser, R.string.tab_browser),
+    Settings.TabId.BROWSER to TabMeta(R.drawable.ic_browser, R.string.tab_browser),
 )
 
 @Composable
