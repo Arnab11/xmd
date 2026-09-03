@@ -9,18 +9,23 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -28,9 +33,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
@@ -41,6 +48,9 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.invictus.xmd.R
 import com.invictus.xmd.core.ShortcutRepository
+import com.invictus.xmd.ui.icons.Icon
+import com.invictus.xmd.ui.icons.Icons
+import com.invictus.xmd.ui.theme.LocalThemeTransitionState
 import com.invictus.xmd.ui.theme.XmdTheme
 import com.invictus.xmd.ui.theme.resolveCurrentXmdColorScheme
 import kotlinx.coroutines.Dispatchers
@@ -146,51 +156,147 @@ class SettingsActivity : ComponentActivity() {
         onImportWebsites: () -> Unit,
         onExportWebsites: () -> Unit,
     ) {
-        val backStackEntry by navController.currentBackStackEntryAsState()
-        val currentRoute = backStackEntry?.destination?.route ?: startRoute
-        val titleRes = routeTitles[currentRoute] ?: R.string.settings_title
+        val configuration = LocalConfiguration.current
+        val isTablet = configuration.smallestScreenWidthDp >= 600
 
-        Surface(color = MaterialTheme.colorScheme.background) {
-            Column {
-                TopAppBar(
-                    title = { Text(stringResource(titleRes)) },
-                    navigationIcon = {
-                        IconButton(onClick = onBack) {
-                            Icon(
-                                painter = painterResource(XmdIcons.ArrowBack),
-                                contentDescription = stringResource(R.string.action_back),
+        if (isTablet) {
+            var selectedRoute by remember {
+                mutableStateOf(if (startRoute == Route.ROOT) Route.APPEARANCE else startRoute)
+            }
+
+            Surface(color = MaterialTheme.colorScheme.background) {
+                Row(modifier = Modifier.fillMaxSize()) {
+                    // Left Pane (Master: Category List)
+                    Column(
+                        modifier = Modifier
+                            .weight(0.38f)
+                            .fillMaxHeight(),
+                    ) {
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = stringResource(R.string.settings_title),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            },
+                            navigationIcon = {
+                                IconButton(onClick = onBack) {
+                                    Icon(
+                                        imageVector = Icons.ArrowBack,
+                                        contentDescription = stringResource(R.string.action_back),
+                                    )
+                                }
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ),
+                        )
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            SettingsRootScreen(
+                                showYoutubeRow = com.invictus.xmd.BuildConfig.HAS_YOUTUBE_SUPPORT,
+                                selectedRoute = selectedRoute,
+                                onOpenAppearance = { selectedRoute = Route.APPEARANCE },
+                                onOpenConnections = { selectedRoute = Route.CONNECTIONS },
+                                onOpenBrowser = { selectedRoute = Route.BROWSER },
+                                onOpenDownloads = { selectedRoute = Route.DOWNLOADS },
+                                onOpenYoutube = { selectedRoute = Route.YOUTUBE },
+                                onOpenAbout = { selectedRoute = Route.ABOUT },
                             )
                         }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                    ),
-                )
+                    }
 
-                NavHost(
-                    navController = navController,
-                    startDestination = startRoute,
-                    modifier = Modifier.weight(1f, fill = true).fillMaxWidth(),
-                ) {
-                    composable(Route.ROOT) {
-                        SettingsRootScreen(
-                            showYoutubeRow = com.invictus.xmd.BuildConfig.HAS_YOUTUBE_SUPPORT,
-                            onOpenAppearance = { navController.navigate(Route.APPEARANCE) },
-                            onOpenConnections = { navController.navigate(Route.CONNECTIONS) },
-                            onOpenBrowser = { navController.navigate(Route.BROWSER) },
-                            onOpenDownloads = { navController.navigate(Route.DOWNLOADS) },
-                            onOpenYoutube = { navController.navigate(Route.YOUTUBE) },
-                            onOpenAbout = { navController.navigate(Route.ABOUT) },
+                    // Vertical Divider between Master and Detail panes
+                    VerticalDivider(
+                        modifier = Modifier.fillMaxHeight(),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        thickness = 1.dp,
+                    )
+
+                    // Right Pane (Detail: Active Settings Screen)
+                    Column(
+                        modifier = Modifier
+                            .weight(0.62f)
+                            .fillMaxHeight(),
+                    ) {
+                        val detailTitleRes = routeTitles[selectedRoute] ?: R.string.settings_title
+                        TopAppBar(
+                            title = {
+                                Text(
+                                    text = stringResource(detailTitleRes),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                            },
+                            colors = TopAppBarDefaults.topAppBarColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                            ),
                         )
+                        Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                            when (selectedRoute) {
+                                Route.APPEARANCE -> AppearanceRoute()
+                                Route.CONNECTIONS -> ConnectionsRoute()
+                                Route.DOWNLOADS -> DownloadsRoute()
+                                Route.BROWSER -> BrowserRoute(
+                                    onImportWebsites = onImportWebsites,
+                                    onExportWebsites = onExportWebsites,
+                                )
+                                Route.YOUTUBE -> YoutubeRoute()
+                                Route.ABOUT -> AboutRoute()
+                                else -> AppearanceRoute()
+                            }
+                        }
                     }
-                    composable(Route.APPEARANCE) { AppearanceRoute(this@SettingsActivity) }
-                    composable(Route.CONNECTIONS) { ConnectionsRoute() }
-                    composable(Route.DOWNLOADS) { DownloadsRoute() }
-                    composable(Route.BROWSER) {
-                        BrowserRoute(onImportWebsites = onImportWebsites, onExportWebsites = onExportWebsites)
+                }
+            }
+        } else {
+            val backStackEntry by navController.currentBackStackEntryAsState()
+            val currentRoute = backStackEntry?.destination?.route ?: startRoute
+            val titleRes = routeTitles[currentRoute] ?: R.string.settings_title
+
+            Surface(color = MaterialTheme.colorScheme.background) {
+                Column {
+                    TopAppBar(
+                        title = { Text(stringResource(titleRes)) },
+                        navigationIcon = {
+                            IconButton(onClick = onBack) {
+                                Icon(
+                                    imageVector = Icons.ArrowBack,
+                                    contentDescription = stringResource(R.string.action_back),
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                        ),
+                    )
+
+                    NavHost(
+                        navController = navController,
+                        startDestination = startRoute,
+                        modifier = Modifier.weight(1f, fill = true).fillMaxWidth(),
+                    ) {
+                        composable(Route.ROOT) {
+                            SettingsRootScreen(
+                                showYoutubeRow = com.invictus.xmd.BuildConfig.HAS_YOUTUBE_SUPPORT,
+                                selectedRoute = null,
+                                onOpenAppearance = { navController.navigate(Route.APPEARANCE) },
+                                onOpenConnections = { navController.navigate(Route.CONNECTIONS) },
+                                onOpenBrowser = { navController.navigate(Route.BROWSER) },
+                                onOpenDownloads = { navController.navigate(Route.DOWNLOADS) },
+                                onOpenYoutube = { navController.navigate(Route.YOUTUBE) },
+                                onOpenAbout = { navController.navigate(Route.ABOUT) },
+                            )
+                        }
+                        composable(Route.APPEARANCE) { AppearanceRoute() }
+                        composable(Route.CONNECTIONS) { ConnectionsRoute() }
+                        composable(Route.DOWNLOADS) { DownloadsRoute() }
+                        composable(Route.BROWSER) {
+                            BrowserRoute(onImportWebsites = onImportWebsites, onExportWebsites = onExportWebsites)
+                        }
+                        composable(Route.YOUTUBE) { YoutubeRoute() }
+                        composable(Route.ABOUT) { AboutRoute() }
                     }
-                    composable(Route.YOUTUBE) { YoutubeRoute() }
-                    composable(Route.ABOUT) { AboutRoute() }
                 }
             }
         }
@@ -299,7 +405,7 @@ class SettingsActivity : ComponentActivity() {
 }
 
 /** NavHost route strings, one per Settings category screen. */
-private object Route {
+internal object Route {
     const val ROOT = "root"
     const val APPEARANCE = "appearance"
     const val CONNECTIONS = "connections"
@@ -310,7 +416,7 @@ private object Route {
 }
 
 /** Route -> header title, replaces the old syncHeaderTitle()'s Fragment-type switch. */
-private val routeTitles: Map<String, Int> = mapOf(
+internal val routeTitles: Map<String, Int> = mapOf(
     Route.APPEARANCE to R.string.settings_category_appearance,
     Route.CONNECTIONS to R.string.settings_category_connections,
     Route.BROWSER to R.string.settings_category_browser,
@@ -327,26 +433,14 @@ private val routeTitles: Map<String, Int> = mapOf(
 // The *Screen.kt composables themselves are untouched -- same signatures.
 
 @Composable
-private fun AppearanceRoute(activity: ComponentActivity) {
-    // Local state exists only so the screen doesn't visibly lag between tap
-    // and activity.recreate() actually repainting -- recreate() is still
-    // the source of truth for every persisted value. Same behavior as the
-    // retired SettingsAppearanceFragment; ComponentActivity.recreate() is
-    // the same API AppCompatActivity inherited it from.
-    var currentTheme by remember {
-        mutableStateOf(com.invictus.xmd.core.Settings.appTheme())
-    }
-    var isDark by remember {
-        mutableStateOf(com.invictus.xmd.core.Settings.isDarkMode())
-    }
-    var isAmoled by remember {
-        mutableStateOf(com.invictus.xmd.core.Settings.isAmoledMode())
-    }
-    // Tab config doesn't need activity.recreate() from here -- this screen
-    // doesn't show the nav bar itself; MainActivity notices the change and
-    // recreates on its own next onResume (same mechanism as the theme
-    // fields above), so this just needs to persist + keep local state fresh
-    // for immediate visual feedback while still on this screen.
+private fun AppearanceRoute() {
+    val themeTransition = LocalThemeTransitionState.current
+    val coroutineScope = rememberCoroutineScope()
+
+    val currentTheme by com.invictus.xmd.core.Settings.themeFlow.collectAsState()
+    val isDark by com.invictus.xmd.core.Settings.darkModeFlow.collectAsState()
+    val isAmoled by com.invictus.xmd.core.Settings.amoledModeFlow.collectAsState()
+
     var tabOrder by remember {
         mutableStateOf(com.invictus.xmd.core.Settings.tabOrder())
     }
@@ -361,25 +455,31 @@ private fun AppearanceRoute(activity: ComponentActivity) {
         currentTheme = currentTheme,
         isDark = isDark,
         isAmoled = isAmoled,
-        onThemeSelected = { theme ->
-            if (theme != com.invictus.xmd.core.Settings.appTheme()) {
-                currentTheme = theme
-                com.invictus.xmd.core.Settings.setAppTheme(theme)
-                activity.recreate()
+        onThemeSelected = { theme, position ->
+            if (theme != currentTheme && themeTransition?.isAnimating != true) {
+                themeTransition?.startTransition(position)
+                coroutineScope.launch {
+                    kotlinx.coroutines.delay(50)
+                    com.invictus.xmd.core.Settings.setAppTheme(theme)
+                }
             }
         },
         onDarkModeChanged = { checked ->
-            if (checked != com.invictus.xmd.core.Settings.isDarkMode()) {
-                isDark = checked
-                com.invictus.xmd.core.Settings.setDarkMode(checked)
-                activity.recreate()
+            if (themeTransition?.isAnimating != true) {
+                themeTransition?.startTransition(androidx.compose.ui.geometry.Offset.Zero)
+                coroutineScope.launch {
+                    kotlinx.coroutines.delay(50)
+                    com.invictus.xmd.core.Settings.setDarkMode(checked)
+                }
             }
         },
         onAmoledModeChanged = { checked ->
-            if (checked != com.invictus.xmd.core.Settings.isAmoledMode()) {
-                isAmoled = checked
-                com.invictus.xmd.core.Settings.setAmoledMode(checked)
-                activity.recreate()
+            if (themeTransition?.isAnimating != true) {
+                themeTransition?.startTransition(androidx.compose.ui.geometry.Offset.Zero)
+                coroutineScope.launch {
+                    kotlinx.coroutines.delay(50)
+                    com.invictus.xmd.core.Settings.setAmoledMode(checked)
+                }
             }
         },
         tabOrder = tabOrder,

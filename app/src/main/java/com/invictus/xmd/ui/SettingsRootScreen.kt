@@ -7,21 +7,19 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.invictus.xmd.R
+import com.invictus.xmd.ui.icons.Icons
 
 /**
- * Root of the Settings screen: category rows that push the matching
- * sub-fragment via the [onOpen*] callbacks (still wired to
- * [SettingsActivity.openCategory] / the existing FragmentManager back
- * stack -- only this screen's own rendering moved to Compose, navigation
- * between settings screens is unchanged).
+ * Root of the Settings screen: category rows with dividers, styled
+ * after mpvRx with tablet dual-pane selection highlight support.
  */
 @Composable
 fun SettingsRootScreen(
     showYoutubeRow: Boolean,
+    selectedRoute: String? = null,
     onOpenAppearance: () -> Unit,
     onOpenConnections: () -> Unit,
     onOpenBrowser: () -> Unit,
@@ -37,41 +35,46 @@ fun SettingsRootScreen(
     ) {
         SettingsSectionCard {
             CategoryRow(
-                icon = painterResource(XmdIcons.Palette),
+                icon = Icons.Palette,
                 title = stringResource(R.string.settings_category_appearance),
                 subtitle = stringResource(R.string.settings_category_appearance_desc),
+                isSelected = selectedRoute == Route.APPEARANCE,
+                isFirst = true,
                 onClick = onOpenAppearance,
             )
             CategoryRowGap()
             CategoryRow(
-                icon = painterResource(XmdIcons.Sync),
+                icon = Icons.Sync,
                 title = stringResource(R.string.settings_category_connections),
                 subtitle = stringResource(R.string.settings_category_connections_desc),
+                isSelected = selectedRoute == Route.CONNECTIONS,
                 onClick = onOpenConnections,
             )
             CategoryRowGap()
             CategoryRow(
-                icon = painterResource(XmdIcons.Public),
+                icon = Icons.Public,
                 title = stringResource(R.string.settings_category_browser),
                 subtitle = stringResource(R.string.settings_category_browser_desc),
+                isSelected = selectedRoute == Route.BROWSER,
                 onClick = onOpenBrowser,
             )
             CategoryRowGap()
             CategoryRow(
-                icon = painterResource(XmdIcons.Downloads),
+                icon = Icons.Downloads,
                 title = stringResource(R.string.settings_category_downloads),
                 subtitle = stringResource(R.string.settings_category_downloads_desc),
+                isSelected = selectedRoute == Route.DOWNLOADS,
+                isLast = !showYoutubeRow,
                 onClick = onOpenDownloads,
             )
-            // Lite build has no yt-dlp engine behind this screen -- row is
-            // dropped entirely rather than shown leading nowhere useful,
-            // same BuildConfig.HAS_YOUTUBE_SUPPORT gate as before.
             if (showYoutubeRow) {
                 CategoryRowGap()
                 CategoryRow(
-                    icon = painterResource(XmdIcons.Youtube),
+                    icon = Icons.Youtube,
                     title = stringResource(R.string.settings_category_youtube),
                     subtitle = stringResource(R.string.settings_category_youtube_desc),
+                    isSelected = selectedRoute == Route.YOUTUBE,
+                    isLast = true,
                     onClick = onOpenYoutube,
                 )
             }
@@ -80,9 +83,12 @@ fun SettingsRootScreen(
         Column(modifier = Modifier.padding(top = 16.dp)) {
             SettingsSectionCard {
                 CategoryRow(
-                    icon = painterResource(XmdIcons.Info),
+                    icon = Icons.Info,
                     title = stringResource(R.string.settings_category_about),
                     subtitle = stringResource(R.string.settings_category_about_desc),
+                    isSelected = selectedRoute == Route.ABOUT,
+                    isFirst = true,
+                    isLast = true,
                     onClick = onOpenAbout,
                 )
             }

@@ -68,17 +68,12 @@ android {
 
     buildTypes {
         release {
-            // Minification/shrinking turned OFF: libtorrent4j and
-            // youtubedl-android/ffmpeg both do heavy reflection/JNI-name
-            // lookups internally, and R8 keeps finding new classes to
-            // strip/rename that break them at runtime (NoClassDefFoundError
-            // etc.) even with targeted -keep rules added after each crash.
-            // APK size cost is small in context -- the native yt-dlp/ffmpeg/
-            // libtorrent4j binaries already dominate the size, not app code
-            // -- and "always works" beats "a few MB smaller, breaks
-            // unpredictably." Revisit only with real on-device testing.
-            isMinifyEnabled = false
-            isShrinkResources = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
             // No signingConfig here on purpose: this build type produces an
             // unsigned APK (app-release-unsigned.apk). Signing is done
             // explicitly with apksigner in .github/workflows/android-build.yml
@@ -151,7 +146,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("com.composables:icons-material-symbols-rounded-filled-android:2.2.1")
+    implementation("com.composables:icons-material-symbols-cmp:2.2.1")
+    implementation("com.composables:icons-material-symbols-rounded-filled-cmp:2.2.1")
 
     // Activity/Fragment <-> Compose interop (setContent {}, ComposeView) and
     // typed navigation between Compose screens, replacing the Fragment-based
