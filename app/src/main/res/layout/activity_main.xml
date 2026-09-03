@@ -127,7 +127,7 @@
 
         <!-- Phase D: fragmentContainer wrapped in a plain FrameLayout so
              overlayNavHost (below) can occupy the exact same bounds as a
-             layered sibling -- a LinearLayout can't overlap same-weight
+             layered sibling: a LinearLayout can't overlap same-weight
              children, so the wrap is required to keep the History/Bookmarks
              overlay under the toolbar, matching the old Fragment-in-
              fragmentContainer visual exactly. -->
@@ -141,7 +141,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent" />
 
-            <!-- Phase D: host for the History/Bookmarks NavHost -- GONE
+            <!-- Phase D: host for the History/Bookmarks NavHost. GONE
                  unless a route is pushed (see MainActivity's
                  overlayNavController destination listener). Replaces
                  HistoryFragment/BookmarkFragment's old
