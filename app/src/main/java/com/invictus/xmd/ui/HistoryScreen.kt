@@ -8,7 +8,8 @@ import com.invictus.xmd.core.HistoryEntry
 
 /** History screen -- thin wrapper around [SavedPagesScreen] with the
  *  history-specific icon/strings. Filtering (title/URL substring) happens
- *  in [HistoryFragment] same as before, this just renders. */
+ *  in MainActivity's overlayNavHost NavHost route (Phase D; previously in
+ *  HistoryFragment, retired), this just renders. */
 @Composable
 fun HistoryScreen(
     entries: List<HistoryEntry>,

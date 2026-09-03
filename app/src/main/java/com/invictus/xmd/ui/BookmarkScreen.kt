@@ -8,7 +8,8 @@ import com.invictus.xmd.core.Bookmark
 
 /** Bookmarks screen -- thin wrapper around [SavedPagesScreen] with the
  *  bookmark-specific icon/strings. Filtering (title/URL substring) happens
- *  in [BookmarkFragment] same as before, this just renders. */
+ *  in MainActivity's overlayNavHost NavHost route (Phase D; previously in
+ *  BookmarkFragment, retired), this just renders. */
 @Composable
 fun BookmarkScreen(
     entries: List<Bookmark>,

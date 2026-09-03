@@ -18,9 +18,23 @@ import android.widget.Toast
 import androidx.activity.addCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.invictus.xmd.core.Bookmark
+import com.invictus.xmd.core.BookmarkRepository
+import com.invictus.xmd.core.HistoryEntry
+import com.invictus.xmd.core.HistoryRepository
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -84,7 +98,7 @@ import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 
-class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFragment.Callbacks, HistoryFragment.Callbacks, BookmarkFragment.Callbacks {
+class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFragment.Callbacks {
 
     data class NavMenuItem(val itemId: Int)
 
@@ -209,6 +223,16 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     // for sniffedSheetStreams/suggestionItems (see that file's comments for
     // the extension-function-import lesson this relies on).
     private var dnsSettingsDialogOpen: Boolean by mutableStateOf(false)
+
+    // Phase D: History/Bookmarks overlay -- replaces the old
+    // HistoryFragment/BookmarkFragment pushed onto fragmentContainer via
+    // supportFragmentManager + addToBackStack. Own ComposeView (see
+    // overlayNavHost in activity_main.xml) rather than a branch in
+    // mainDialogHost, since these are full screens, not Dialog-window
+    // popups -- same reasoning AddressBarSuggestions/DnsSettingsDialog
+    // split followed in Phase 5/A.
+    private lateinit var overlayNavHost: androidx.compose.ui.platform.ComposeView
+    private lateinit var overlayNavController: androidx.navigation.NavHostController
 
     // Phase A: state for the 3 dialogs converted this phase, same
     // `by mutableStateOf` + null-means-closed pattern as dnsSettingsDialogOpen.
@@ -616,6 +640,8 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             }
         }
 
+        setUpOverlayNavHost()
+
         val toolbar = findViewById<androidx.appcompat.widget.Toolbar>(R.id.toolbar)
         this.toolbar = toolbar
         setSupportActionBar(toolbar)
@@ -752,12 +778,20 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         }
 
         // Back handling, gesture or button:
-        //  1. Browser tab with page history / a loaded page -> step back through it.
-        //  2. Browser tab -> jump to Downloads tab first before exiting.
-        //  3. Already on Downloads tab -> exit the app.
+        //  1. History/Bookmarks overlay open (Phase D) -> pop its own stack.
+        //  2. Browser tab with page history / a loaded page -> step back through it.
+        //  3. Browser tab -> jump to Downloads tab first before exiting.
+        //  4. Already on Downloads tab -> exit the app.
         onBackPressedDispatcher.addCallback(this) {
             if (::headerSearchLayout.isInitialized && headerSearchLayout.visibility == View.VISIBLE) {
                 closeHeaderSearch()
+                return@addCallback
+            }
+            // Overlay's own back stack first -- checked ahead of
+            // supportFragmentManager's, since History/Bookmarks no longer
+            // live there (Phase D).
+            if (::overlayNavController.isInitialized && overlayNavHost.visibility == View.VISIBLE) {
+                overlayNavController.popBackStack()
                 return@addCallback
             }
             if (supportFragmentManager.backStackEntryCount > 0) {
@@ -1455,43 +1489,160 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         dnsSettingsDialogOpen = true
     }
 
-    private fun openHistoryScreen() {
-        supportFragmentManager.beginTransaction()
-            .add(R.id.fragmentContainer, HistoryFragment(), TAG_HISTORY)
-            .addToBackStack(TAG_HISTORY)
-            .commit()
+    // ── Phase D: History/Bookmarks overlay (NavHost) ────────────────────────
+    // Replaces the old openHistoryScreen()/openBookmarksScreen() Fragment
+    // pushes + HistoryFragment.Callbacks/BookmarkFragment.Callbacks. See
+    // overlayNavHost in activity_main.xml and the overlayNavController
+    // destination listener below for how the ComposeView's GONE/VISIBLE
+    // state tracks the back stack.
+
+    private fun setUpOverlayNavHost() {
+        overlayNavHost = findViewById(R.id.overlayNavHost)
+        overlayNavHost.setViewCompositionStrategy(
+            androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
+        )
+        overlayNavHost.setContent {
+            val navController = rememberNavController()
+            overlayNavController = navController
+
+            // Toggle the host's own View visibility to GONE/VISIBLE in step
+            // with the back stack -- an empty Compose route wouldn't itself
+            // consume touches, but a stray full-bleed ComposeView left
+            // VISIBLE is a trap for hit-testing/accessibility over
+            // BrowserFragment's WebView underneath, so track it explicitly.
+            // Registered here (inside composition, via DisposableEffect)
+            // rather than right after setContent() below -- navController
+            // is only assigned once composition actually runs, which isn't
+            // guaranteed synchronous with the setContent() call itself.
+            DisposableEffect(navController) {
+                val listener = androidx.navigation.NavController.OnDestinationChangedListener { _, destination, _ ->
+                    overlayNavHost.visibility = if (destination.route == OverlayRoute.EMPTY) View.GONE else View.VISIBLE
+                }
+                navController.addOnDestinationChangedListener(listener)
+                onDispose { navController.removeOnDestinationChangedListener(listener) }
+            }
+
+            com.invictus.xmd.ui.theme.XmdTheme {
+                NavHost(
+                    navController = navController,
+                    startDestination = OverlayRoute.EMPTY,
+                ) {
+                    composable(OverlayRoute.EMPTY) { /* never visible -- common root, see reasoning above */ }
+
+                    composable(OverlayRoute.HISTORY) {
+                        val allEntries by HistoryRepository.entries.collectAsStateWithLifecycle()
+                        var query by remember { mutableStateOf("") }
+                        var confirmingClearAll by remember { mutableStateOf(false) }
+
+                        val trimmedQuery = query.trim()
+                        val visible = if (trimmedQuery.isEmpty()) {
+                            allEntries
+                        } else {
+                            allEntries.filter { entry ->
+                                entry.title.contains(trimmedQuery, ignoreCase = true) ||
+                                    entry.url.contains(trimmedQuery, ignoreCase = true)
+                            }
+                        }
+
+                        HistoryScreen(
+                            entries = visible,
+                            query = query,
+                            onQueryChange = { query = it },
+                            onBack = { navController.popBackStack() },
+                            onClearAll = { confirmingClearAll = true },
+                            onTap = { entry: HistoryEntry ->
+                                navController.popBackStack(OverlayRoute.EMPTY, false)
+                                val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
+                                browser?.openUrl(entry.url)
+                                bottomNav.selectedItemId = R.id.nav_browser
+                            },
+                            onDelete = { entry -> HistoryRepository.remove(entry) },
+                        )
+
+                        if (confirmingClearAll) {
+                            AlertDialog(
+                                onDismissRequest = { confirmingClearAll = false },
+                                title = { Text(stringResource(R.string.history_clear_all)) },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        confirmingClearAll = false
+                                        HistoryRepository.clearAll()
+                                        Toast.makeText(this@MainActivity, R.string.history_cleared_toast, Toast.LENGTH_SHORT).show()
+                                    }) {
+                                        Text(stringResource(R.string.history_clear_all))
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { confirmingClearAll = false }) {
+                                        Text(stringResource(android.R.string.cancel))
+                                    }
+                                },
+                            )
+                        }
+                    }
+
+                    composable(OverlayRoute.BOOKMARKS) {
+                        val allBookmarks by BookmarkRepository.bookmarks.collectAsStateWithLifecycle()
+                        var query by remember { mutableStateOf("") }
+                        var confirmingClearAll by remember { mutableStateOf(false) }
+
+                        val trimmedQuery = query.trim()
+                        val visible = if (trimmedQuery.isEmpty()) {
+                            allBookmarks
+                        } else {
+                            allBookmarks.filter { entry ->
+                                entry.title.contains(trimmedQuery, ignoreCase = true) ||
+                                    entry.url.contains(trimmedQuery, ignoreCase = true)
+                            }
+                        }
+
+                        BookmarkScreen(
+                            entries = visible,
+                            query = query,
+                            onQueryChange = { query = it },
+                            onBack = { navController.popBackStack() },
+                            onClearAll = { confirmingClearAll = true },
+                            onTap = { bookmark: Bookmark ->
+                                navController.popBackStack(OverlayRoute.EMPTY, false)
+                                val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
+                                browser?.openUrl(bookmark.url)
+                                bottomNav.selectedItemId = R.id.nav_browser
+                            },
+                            onDelete = { bookmark -> BookmarkRepository.remove(bookmark) },
+                        )
+
+                        if (confirmingClearAll) {
+                            AlertDialog(
+                                onDismissRequest = { confirmingClearAll = false },
+                                title = { Text(stringResource(R.string.bookmarks_clear_all)) },
+                                confirmButton = {
+                                    TextButton(onClick = {
+                                        confirmingClearAll = false
+                                        BookmarkRepository.clearAll()
+                                        Toast.makeText(this@MainActivity, R.string.bookmarks_cleared_toast, Toast.LENGTH_SHORT).show()
+                                    }) {
+                                        Text(stringResource(R.string.bookmarks_clear_all))
+                                    }
+                                },
+                                dismissButton = {
+                                    TextButton(onClick = { confirmingClearAll = false }) {
+                                        Text(stringResource(android.R.string.cancel))
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    // ── HistoryFragment.Callbacks ───────────────────────────────────────────
-
-    override fun openInBrowser(url: String) {
-        // History was added via addToBackStack (see openHistoryScreen), so it's
-        // still layered on top of the tab fragments here -- without popping it
-        // first, tapping a history entry would open the link in Browser
-        // underneath while History stayed visible on top, making it look like
-        // the tap "went nowhere" / landed on the wrong screen.
-        supportFragmentManager.popBackStack(TAG_HISTORY, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
-        val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
-        browser?.openUrl(url)
-        bottomNav.selectedItemId = R.id.nav_browser
+    private fun openHistoryScreen() {
+        overlayNavController.navigate(OverlayRoute.HISTORY) { popUpTo(OverlayRoute.EMPTY) }
     }
 
     private fun openBookmarksScreen() {
-        supportFragmentManager.beginTransaction()
-            .add(R.id.fragmentContainer, BookmarkFragment(), TAG_BOOKMARKS)
-            .addToBackStack(TAG_BOOKMARKS)
-            .commit()
-    }
-
-    // ── BookmarkFragment.Callbacks ──────────────────────────────────────────
-
-    override fun openBookmarkInBrowser(url: String) {
-        // Same reasoning as openInBrowser() above -- pop Bookmarks off the
-        // back stack first so the navigation is visibly landing on Browser.
-        supportFragmentManager.popBackStack(TAG_BOOKMARKS, androidx.fragment.app.FragmentManager.POP_BACK_STACK_INCLUSIVE)
-        val browser = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
-        browser?.openUrl(url)
-        bottomNav.selectedItemId = R.id.nav_browser
+        overlayNavController.navigate(OverlayRoute.BOOKMARKS) { popUpTo(OverlayRoute.EMPTY) }
     }
 
     // ── DownloadsFragment.Callbacks ─────────────────────────────────────────
@@ -1869,7 +2020,14 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     companion object {
         private const val TAG_BROWSER   = "browser"
         private const val TAG_DOWNLOADS = "downloads"
-        private const val TAG_HISTORY   = "history"
-        private const val TAG_BOOKMARKS = "bookmarks"
     }
+}
+
+/** overlayNavHost's NavHost route strings (Phase D). EMPTY is the common
+ *  root -- never itself rendered, see setUpOverlayNavHost()'s destination
+ *  listener, which uses it to know when to hide overlayNavHost again. */
+private object OverlayRoute {
+    const val EMPTY = "empty"
+    const val HISTORY = "history"
+    const val BOOKMARKS = "bookmarks"
 }
