@@ -4,11 +4,9 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
-import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.inputmethod.EditorInfo
 import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -16,7 +14,6 @@ import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageButton
-import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -31,7 +28,6 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
-import com.google.android.material.progressindicator.LinearProgressIndicator
 import com.invictus.xmd.R
 import com.invictus.xmd.core.BookmarkRepository
 import com.invictus.xmd.core.ShortcutRepository
@@ -82,9 +78,13 @@ class BrowserFragment : Fragment() {
         fun triggerPrepare(lines: List<String>)
         /** Opens the Browser's own overflow menu (Private DNS, History) --
          *  deliberately separate from the app-wide download Settings dialog,
-         *  which the Browser's overflow no longer opens. [anchor] is the
-         *  3-dot button itself, so the menu can be anchored/dropped down
-         *  from it Chrome-style instead of popping up as a centered dialog. */
+         *  which the Browser's overflow no longer opens. [anchor] used to be
+         *  the 3-dot button itself; since Phase E moved that button into
+         *  Compose (BrowserToolbarRow -- no longer a real View to anchor a
+         *  framework PopupMenu to), it's now the browserToolbar ComposeView
+         *  that hosts it instead -- Gravity.END still right-aligns the menu
+         *  under it, close enough to the old per-button anchor for this
+         *  still-native (out of scope for Phase E) PopupMenu. */
         fun openBrowserMenu(anchor: View)
         /** A stream MediaSniffer picked up was tapped in the "videos found"
          *  sheet. HLS/DASH ([needsPicker] true) routes through the same
@@ -133,15 +133,14 @@ class BrowserFragment : Fragment() {
     // of this class -- see webViews/webViewStates below and the "WebView
     // pool" section for why those stayed Fragment-side.
 
-    private lateinit var newTabButton: ImageButton
-    private lateinit var homeButton: ImageButton
-    private lateinit var urlInput: EditText
-    private lateinit var tabsButton: FrameLayout
-    private lateinit var tabsCount: android.widget.TextView
-    private lateinit var overflowButton: ImageButton
-    private lateinit var pageProgress: LinearProgressIndicator
-    private lateinit var siteSecurityIcon: ImageView
-    private lateinit var bookmarkStarButton: ImageButton
+    // Phase E: home/address-pill/new-tab/tabs/overflow buttons + the
+    // progress line all now live in one ComposeView hosting
+    // BrowserToolbarRow (see BrowserToolbar.kt) -- was 9 separate
+    // findViewById'd Views (newTabButton, homeButton, urlInput, tabsButton,
+    // tabsCount, overflowButton, pageProgress, siteSecurityIcon,
+    // bookmarkStarButton). Their state now lives in the `by mutableStateOf`
+    // fields below instead of on the Views themselves.
+    private lateinit var browserToolbar: androidx.compose.ui.platform.ComposeView
     private lateinit var webViewSwipeRefresh: SwipeRefreshLayout
     private lateinit var webViewContainer: FrameLayout
     private lateinit var navLoadingVeil: View
@@ -217,6 +216,34 @@ class BrowserFragment : Fragment() {
     // every tab switch -- kept in sync by the observer in setupSpeedDial().
     private var bookmarkedUrls: Set<String> = emptySet()
 
+    // ── Phase E: browserToolbar's state ──────────────────────────────────
+    // Drives BrowserToolbarRow's setContent lambda below -- same "field on
+    // the Fragment, composable reads it" pattern sniffedSheetStreams/
+    // linkContextMenuState/suggestionItems above already use. Mirrors what
+    // urlInput/pageProgress/siteSecurityIcon/bookmarkStarButton/tabsCount
+    // used to hold directly on their Views.
+    private var addressBarText: String by mutableStateOf("")
+    // Read-only mirror of BrowserToolbarRow's TextField focus state,
+    // reported up via its onAddressFocusChange callback -- same gate
+    // urlInput.hasFocus() used to provide in the old TextWatcher, so a
+    // programmatic addressBarText set (onPageStarted, applyTabUiState,
+    // etc.) still doesn't trigger scheduleSuggest. Plain var, not Compose
+    // state: nothing renders off this directly.
+    private var addressBarFocused: Boolean = false
+    // Bumped (never read for its value, just its change) to tell
+    // BrowserToolbarRow's composition to clear focus + hide the IME --
+    // replaces the old urlInput.clearFocus() + hideSoftInputFromWindow()
+    // calls at the end of loadUrl(); see BrowserToolbar.kt's doc comment
+    // for why this can't just be an imperative call from here anymore.
+    private var addressBarClearFocusSignal: Int by mutableStateOf(0)
+    private var securityIconVisible: Boolean by mutableStateOf(false)
+    private var siteIsSecure: Boolean by mutableStateOf(true)
+    private var bookmarkStarVisible: Boolean by mutableStateOf(false)
+    private var bookmarkStarFilled: Boolean by mutableStateOf(false)
+    private var toolbarProgress: Int by mutableStateOf(0)
+    private var toolbarProgressVisible: Boolean by mutableStateOf(false)
+    private var tabsCountValue: Int by mutableStateOf(1)
+
     private val browserViewModel: BrowserViewModel by viewModels()
 
     // Thin pass-through onto browserViewModel's fields -- keeps every
@@ -275,15 +302,45 @@ class BrowserFragment : Fragment() {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
 
-        newTabButton = view.findViewById(R.id.newTabButton)
-        homeButton = view.findViewById(R.id.homeButton)
-        urlInput = view.findViewById(R.id.urlInput)
-        tabsButton = view.findViewById(R.id.tabsButton)
-        tabsCount = view.findViewById(R.id.tabsCount)
-        overflowButton = view.findViewById(R.id.overflowButton)
-        pageProgress = view.findViewById(R.id.pageProgress)
-        siteSecurityIcon = view.findViewById(R.id.siteSecurityIcon)
-        bookmarkStarButton = view.findViewById(R.id.bookmarkStarButton)
+        browserToolbar = view.findViewById(R.id.browserToolbar)
+        browserToolbar.setViewCompositionStrategy(
+            androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
+        )
+        browserToolbar.setContent {
+            com.invictus.xmd.ui.theme.XmdTheme {
+                BrowserToolbarRow(
+                    addressText = addressBarText,
+                    onAddressTextChange = { text ->
+                        addressBarText = text
+                        // Same guard the old TextWatcher's afterTextChanged
+                        // had ("programmatic sets shouldn't trigger
+                        // suggest") -- see addressBarFocused's doc comment.
+                        if (addressBarFocused) scheduleSuggest(text)
+                    },
+                    onAddressFocusChange = { focused ->
+                        addressBarFocused = focused
+                        if (!focused) hideSuggestions()
+                    },
+                    onGo = { loadUrl(addressBarText) },
+                    clearFocusSignal = addressBarClearFocusSignal,
+                    securityIconVisible = securityIconVisible,
+                    isSecure = siteIsSecure,
+                    bookmarkVisible = bookmarkStarVisible,
+                    bookmarkFilled = bookmarkStarFilled,
+                    onBookmarkTap = { onBookmarkStarTapped() },
+                    onHomeTap = { goHome() },
+                    onNewTabTap = { addNewTab() },
+                    onTabsTap = { showTabsOverlay() },
+                    tabsCount = tabsCountValue,
+                    // browserToolbar itself (a real View) stands in for the
+                    // old overflowButton as the PopupMenu anchor -- see
+                    // Callbacks.openBrowserMenu's doc comment above.
+                    onOverflowTap = { (activity as? Callbacks)?.openBrowserMenu(browserToolbar) },
+                    progress = toolbarProgress,
+                    progressVisible = toolbarProgressVisible,
+                )
+            }
+        }
         webViewSwipeRefresh = view.findViewById(R.id.webViewSwipeRefresh)
         webViewContainer = view.findViewById(R.id.webViewContainer)
         navLoadingVeil = view.findViewById(R.id.navLoadingVeil)
@@ -295,7 +352,7 @@ class BrowserFragment : Fragment() {
             com.invictus.xmd.ui.theme.XmdTheme {
                 ShortcutsScreen(
                     viewModel = shortcutsViewModel,
-                    onOpenUrl = { shortcut -> urlInput.setText(shortcut.url); loadUrl(shortcut.url) },
+                    onOpenUrl = { shortcut -> addressBarText = shortcut.url; loadUrl(shortcut.url) },
                     onPickIcon = { pickIconLauncher.launch("image/*") },
                 )
             }
@@ -345,11 +402,11 @@ class BrowserFragment : Fragment() {
                     onTap = { item ->
                         when (item) {
                             is Suggestion.History -> {
-                                urlInput.setText(item.url)
+                                addressBarText = item.url
                                 loadUrl(item.url)
                             }
                             is Suggestion.Search -> {
-                                urlInput.setText(item.text)
+                                addressBarText = item.text
                                 loadUrl(item.text)
                             }
                         }
@@ -398,17 +455,17 @@ class BrowserFragment : Fragment() {
         findInPageClose = view.findViewById(R.id.findInPageClose)
 
         setupSpeedDial()
-        setupAddressBar()
         setupPullToRefresh()
         setupFindInPage()
 
-        newTabButton.setOnClickListener { addNewTab() }
-        homeButton.setOnClickListener { goHome() }
-        tabsButton.setOnClickListener { showTabsOverlay() }
-        overflowButton.setOnClickListener { (activity as? Callbacks)?.openBrowserMenu(overflowButton) }
+        // newTabButton/homeButton/tabsButton/overflowButton/
+        // bookmarkStarButton click wiring, and urlInput's editor-action/
+        // text-watcher/focus-change listeners (the old setupAddressBar()),
+        // all moved into BrowserToolbarRow's onClick/onGo/onAddressTextChange/
+        // onAddressFocusChange lambdas above -- same destination functions,
+        // just no longer separate View listeners.
         addLinkFab.setOnClickListener { onAddLinkClicked() }
         sniffedMediaFab.setOnClickListener { showSniffedMediaSheet() }
-        bookmarkStarButton.setOnClickListener { onBookmarkStarTapped() }
 
         // Start on the speed-dial ("new tab") page.
         showSpeedDial()
@@ -622,9 +679,9 @@ class BrowserFragment : Fragment() {
                 tab.progress = 0
                 tab.sniffedMedia.clear()
                 if (isCurrentTab(tab)) {
-                    pageProgress.setProgressCompat(0, false)
-                    pageProgress.show()
-                    urlInput.setText(url)
+                    toolbarProgress = 0
+                    toolbarProgressVisible = true
+                    addressBarText = url.orEmpty()
                     updateSecurityIcon(tab)
                     clearDetectedLink()
                     updateSniffedMediaFab(tab)
@@ -640,7 +697,7 @@ class BrowserFragment : Fragment() {
                     HistoryRepository.record(url, title)
                 }
                 if (isCurrentTab(tab)) {
-                    pageProgress.hide()
+                    toolbarProgressVisible = false
                     webViewSwipeRefresh.isRefreshing = false
                     hideNavLoadingVeil()
                     url?.let { checkPageForLinks(it) }
@@ -846,9 +903,10 @@ class BrowserFragment : Fragment() {
                     // waiting for onPageFinished (which can lag behind on
                     // pages that keep loading subresources after DOM-ready).
                     if (newProgress >= 100) {
-                        pageProgress.hide()
+                        toolbarProgressVisible = false
                     } else {
-                        pageProgress.setProgressCompat(newProgress, true)
+                        toolbarProgress = newProgress
+                        toolbarProgressVisible = true
                     }
                 }
             }
@@ -953,38 +1011,10 @@ class BrowserFragment : Fragment() {
     }
 
     // ── Address bar ──────────────────────────────────────────────────────
-
-    private fun setupAddressBar() {
-        urlInput.setOnEditorActionListener { _, actionId, event ->
-            val isGo = actionId == EditorInfo.IME_ACTION_GO ||
-                (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)
-            if (isGo) {
-                loadUrl(urlInput.text?.toString().orEmpty())
-                true
-            } else false
-        }
-
-        urlInput.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                if (!urlInput.hasFocus()) return // programmatic sets (e.g. onPageStarted) shouldn't trigger suggest
-                scheduleSuggest(s?.toString().orEmpty())
-            }
-        })
-
-        // Chrome-style collapse: while not focused, show just the domain so
-        // the bar reads clean; focusing expands it back to the full URL for
-        // editing (full text is always what's actually in the EditText --
-        // this only swaps the *displayed* selection/cursor state on focus).
-        urlInput.setOnFocusChangeListener { _, hasFocus ->
-            if (!hasFocus) {
-                hideSuggestions()
-            } else {
-                urlInput.selectAll()
-            }
-        }
-    }
+    // setupAddressBar() (urlInput's editor-action listener, TextWatcher,
+    // focus-change listener) is gone -- that logic now lives in
+    // BrowserToolbarRow's onGo/onAddressTextChange/onAddressFocusChange
+    // lambdas, wired once in onViewCreated's browserToolbar.setContent.
 
     /**
      * 2-3 letters is enough to start querying, debounced ~150ms so we're not
@@ -1091,13 +1121,11 @@ class BrowserFragment : Fragment() {
     private fun updateSecurityIcon(tab: BrowserTab) {
         val url = tab.url
         if (url.isNullOrBlank() || !url.startsWith("http")) {
-            siteSecurityIcon.visibility = View.GONE
+            securityIconVisible = false
             return
         }
-        siteSecurityIcon.visibility = View.VISIBLE
-        siteSecurityIcon.setImageResource(
-            if (url.startsWith("https")) R.drawable.ic_lock else R.drawable.ic_lock_open
-        )
+        securityIconVisible = true
+        siteIsSecure = url.startsWith("https")
     }
 
     /** Filled star when the loaded page's URL is already saved as a
@@ -1106,13 +1134,11 @@ class BrowserFragment : Fragment() {
     private fun updateBookmarkStar(tab: BrowserTab) {
         val url = tab.url
         if (url.isNullOrBlank() || !url.startsWith("http")) {
-            bookmarkStarButton.visibility = View.GONE
+            bookmarkStarVisible = false
             return
         }
-        bookmarkStarButton.visibility = View.VISIBLE
-        bookmarkStarButton.setImageResource(
-            if (url in bookmarkedUrls) R.drawable.ic_star_filled else R.drawable.ic_star_outline
-        )
+        bookmarkStarVisible = true
+        bookmarkStarFilled = url in bookmarkedUrls
     }
 
     /** Star tapped: adds the current page as a bookmark (via the Add
@@ -1136,11 +1162,11 @@ class BrowserFragment : Fragment() {
      *  stop icon, download-link FAB) from [tab]'s own state. Call whenever
      *  [tab] becomes the active one. */
     private fun applyTabUiState(tab: BrowserTab) {
-        urlInput.setText(tab.url)
+        addressBarText = tab.url.orEmpty()
         updateSecurityIcon(tab)
         updateBookmarkStar(tab)
-        pageProgress.setProgressCompat(tab.progress, false)
-        if (tab.isLoading) pageProgress.show() else pageProgress.hide()
+        toolbarProgress = tab.progress
+        toolbarProgressVisible = tab.isLoading
         webViewSwipeRefresh.isRefreshing = false
         val url = tab.url
         if (url != null) checkPageForLinks(url) else clearDetectedLink()
@@ -1177,10 +1203,11 @@ class BrowserFragment : Fragment() {
         view.visibility = View.VISIBLE
         view.loadUrl(url)
 
-        // Drop keyboard focus so the address bar doesn't stay expanded.
-        urlInput.clearFocus()
-        val imm = requireContext().getSystemService(android.view.inputmethod.InputMethodManager::class.java)
-        imm?.hideSoftInputFromWindow(urlInput.windowToken, 0)
+        // Drop keyboard focus so the address bar doesn't stay expanded --
+        // browserToolbar's TextField owns focus now, so this is a signal
+        // bump its LaunchedEffect reacts to (see BrowserToolbar.kt) instead
+        // of a direct View.clearFocus() + hideSoftInputFromWindow() call.
+        addressBarClearFocusSignal++
     }
 
     /** Bare host/search text -> https URL; anything already URL-shaped is passed through. */
@@ -1217,10 +1244,10 @@ class BrowserFragment : Fragment() {
 
     private fun showSpeedDial() {
         speedDialContainer.visibility = View.VISIBLE
-        urlInput.setText("")
-        siteSecurityIcon.visibility = View.GONE
-        bookmarkStarButton.visibility = View.GONE
-        pageProgress.hide()
+        addressBarText = ""
+        securityIconVisible = false
+        bookmarkStarVisible = false
+        toolbarProgressVisible = false
         webViewSwipeRefresh.isRefreshing = false
         hideSuggestions()
         clearDetectedLink()
@@ -1291,7 +1318,7 @@ class BrowserFragment : Fragment() {
     // ── Tabs ─────────────────────────────────────────────────────────────
 
     private fun updateTabsCount() {
-        tabsCount.text = tabs.size.toString()
+        tabsCountValue = tabs.size
     }
 
     private fun addNewTab() {

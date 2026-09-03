@@ -1413,10 +1413,13 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
 
     // ── BrowserFragment.Callbacks ───────────────────────────────────────────
 
-    // Chrome-style overflow: a PopupMenu anchored directly under the 3-dot
-    // button (right-aligned via Gravity.END) instead of a centered
-    // AlertDialog, so it drops down from the icon the way Chrome's overflow
-    // menu does rather than looking like a generic popup.
+    // Chrome-style overflow: a PopupMenu right-aligned (Gravity.END) under
+    // [anchor] instead of a centered AlertDialog, so it drops down near the
+    // 3-dot icon the way Chrome's overflow menu does rather than looking
+    // like a generic popup. Phase E moved the 3-dot button itself into
+    // Compose (BrowserToolbarRow), so [anchor] is now the whole toolbar row's
+    // ComposeView rather than the button alone -- Gravity.END still lands the
+    // menu at the row's right edge, right where the button sits.
     override fun openBrowserMenu(anchor: android.view.View) {
         val browserFragment = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
         val popup = androidx.appcompat.widget.PopupMenu(this, anchor, android.view.Gravity.END)

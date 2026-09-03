@@ -1,0 +1,1170 @@
+From 701c4d1a2dbe5108b2b36dc2285853455224e5c2 Mon Sep 17 00:00:00 2001
+From: Claude <claude@anthropic.com>
+Date: Thu, 3 Sep 2026 07:17:08 +0000
+Subject: [PATCH] Phase E: BrowserFragment toolbar/address-bar row -> Compose
+
+Toolbar/address-bar row (home, address pill w/ lock icon + text field +
+bookmark star, new-tab, tabs w/ count badge, overflow, progress line) is
+now a single ComposeView hosting a new BrowserToolbarRow composable
+(BrowserToolbar.kt), replacing 9 findViewById'd Views in fragment_browser.xml
+(newTabButton, homeButton, urlInput, tabsButton, tabsCount, overflowButton,
+pageProgress, siteSecurityIcon, bookmarkStarButton).
+
+- New BrowserToolbar.kt: BrowserToolbarRow + private AddressPill/
+  ToolbarIconButton/TabsButton, Material3, matches AddressBarSuggestions/
+  TabsListOverlay conventions.
+- fragment_browser.xml: old MaterialCardView + LinearProgressIndicator
+  block replaced with a single browserToolbar ComposeView.
+- BrowserFragment.kt: 9 lateinit View fields -> 1 ComposeView field + a
+  block of mutableStateOf toolbar state fields; every call site that
+  touched the old Views updated to read/write the new state
+  (onPageStarted/onProgressChanged, updateSecurityIcon, updateBookmarkStar,
+  applyTabUiState, loadUrl, showSpeedDial, updateTabsCount,
+  AddressBarSuggestions.onTap, ShortcutsScreen.onOpenUrl). setupAddressBar()
+  removed -- its editor-action/TextWatcher/focus-change logic now lives in
+  BrowserToolbarRow's onGo/onAddressTextChange/onAddressFocusChange
+  callbacks, wired once in onViewCreated.
+- MainActivity.kt: openBrowserMenu's anchor is now the browserToolbar
+  ComposeView itself (a real View) instead of the old overflow ImageButton,
+  since the button is no longer a real View to anchor a PopupMenu to.
+- Deleted app/src/main/res/drawable/bg_tabs_counter.xml (orphaned --
+  reproduced as a Modifier.border in TabsButton).
+- COMPOSE_MIGRATION_V2-2.md: Phase E marked DONE with implementation notes
+  and deviations from the original plan (direct XML replacement instead of
+  a togglable dual-path, once cross-reference grep came back clean).
+
+Cross-reference grep after: zero remaining references anywhere in
+app/src/main/java or app/src/main/res to the 9 old view IDs or the deleted
+drawable. Not verified against a real build -- no local Android SDK/Gradle
+in this environment; flagged for the project's GitHub Actions CI same as
+every prior phase.
+---
+ COMPOSE_MIGRATION_V2-2.md                     | 104 ++++-
+ .../com/invictus/xmd/ui/BrowserFragment.kt    | 215 ++++++-----
+ .../com/invictus/xmd/ui/BrowserToolbar.kt     | 362 ++++++++++++++++++
+ .../java/com/invictus/xmd/ui/MainActivity.kt  |  11 +-
+ app/src/main/res/drawable/bg_tabs_counter.xml |   9 -
+ app/src/main/res/layout/fragment_browser.xml  | 185 +--------
+ 6 files changed, 594 insertions(+), 292 deletions(-)
+ create mode 100644 app/src/main/java/com/invictus/xmd/ui/BrowserToolbar.kt
+ delete mode 100644 app/src/main/res/drawable/bg_tabs_counter.xml
+
+diff --git a/COMPOSE_MIGRATION_V2-2.md b/COMPOSE_MIGRATION_V2-2.md
+index 5eebd71..e1664ba 100644
+--- a/COMPOSE_MIGRATION_V2-2.md
++++ b/COMPOSE_MIGRATION_V2-2.md
+@@ -29,13 +29,16 @@ against the actual files first.
+   `HistoryFragment.Callbacks`/`BookmarkFragment.Callbacks` interface
+   implementations on `MainActivity`. See Phase D section below for
+   details/caveats.
++- **Phase E done** — `BrowserFragment.kt`'s toolbar/address-bar row (home,
++  address pill w/ lock icon + text field + bookmark star, new-tab, tabs w/
++  count badge, overflow, progress line) is now a `ComposeView` hosting a
++  new `BrowserToolbarRow` (`BrowserToolbar.kt`); the 9 old Views + their
++  XML are gone. See Phase E section below for details/caveats.
+ - Still XML/Fragment-based, confirmed by grep, nothing Compose yet:
+-  - `BrowserFragment.kt` (1694 lines) + `fragment_browser.xml` — still has
+-    9 real XML view types alongside its 5 existing ComposeView hosts
+-    (EditText, FrameLayout, ImageButton, ImageView, LinearLayout,
+-    ProgressBar, TextView, View, SwipeRefreshLayout, MaterialCardView,
+-    FAB×2, LinearProgressIndicator — full list, minus the ComposeViews
+-    already there)
++  - `BrowserFragment.kt` (now ~1720 lines, toolbar row out, other chrome
++    remains) + `fragment_browser.xml` — still has real XML view types for
++    everything Phase E left out of scope (WebView container/pool, speed
++    dial's host FrameLayout, find-in-page bar, nav loading veil, both FABs)
+   - `DownloadsFragment.kt` — already a ComposeView wrapper internally, but
+     still lives on `fragmentContainer`'s manual Fragment
+     add/hide/show — never became a NavHost route
+@@ -264,10 +267,13 @@ themselves are untouched — same signatures, now called from NavHost route
+ bodies instead of Fragment `onCreateView`. Cross-reference grep after: zero
+ remaining code refs to `HistoryFragment`/`BookmarkFragment` anywhere in
+ `app/src/main/java` or `app/src/main/res` — only historical doc-comments
+-(updated to point at the new NavHost route instead). Not independently
+-verified — no local Android SDK/Gradle in this environment; unlike Phase C,
+-this has **not yet been run through the project's GitHub Actions CI** as of
+-this writeup, so treat it as unverified until that comes back clean.
++(updated to point at the new NavHost route instead). Verified via the
++project's GitHub Actions CI (`assembleRelease`): first pass caught a real
++error — two of this phase's new XML comments used `--` as a dash, which
++XML comments can't contain anywhere inside them, not just at the
++delimiters (`packageFullReleaseResources`/`mergeFullReleaseResources`
++both failed on it). Fixed by rewording those two comments; re-run built
++successfully, no further failures reported.
+ 
+ **Scope:** depends on Phase C being done first (reuses the same
+ navigation-compose dependency/pattern). `HistoryFragment.kt` and
+@@ -323,6 +329,76 @@ code, high risk, no benefit this phase).
+ 
+ ## Phase E — BrowserFragment chrome, part 1: toolbar + address bar row
+ 
++**Status: DONE.** The toolbar/address-bar row — home button, the address
++pill (lock icon + text field + bookmark star), new-tab button, tabs
++button w/ live count badge, overflow button — plus the
++`LinearProgressIndicator` that used to sit on the card's bottom edge, are
++now a single `ComposeView` (`browserToolbar` in `fragment_browser.xml`)
++hosting a new `BrowserToolbarRow` composable (`BrowserToolbar.kt`), hosted
++the same way `AddressBarSuggestions` already is — own `ComposeView`,
++anchored in the same position the old `MaterialCardView` + progress line
++occupied. `BrowserViewModel`'s `tabs` list is still a plain
++`mutableListOf` (confirmed by reading it this phase, per Step 4's own
++instruction to check first) — not Flow-backed, so no `StateFlow`
++conversion was needed; the new composable reads plain `by mutableStateOf`
++fields on `BrowserFragment` itself (`addressBarText`, `securityIconVisible`,
++`bookmarkStarVisible`, `toolbarProgress`, `tabsCountValue`, etc.), same
++"field on the Fragment, composable renders it" pattern
++`browserDialogHost`/`suggestionsCard`/`tabsListOverlay` already use
++elsewhere in this file — this is Fragment-local UI state, not repository
++data, so the Bookmark/History/Queue-repository `StateFlow` treatment
++doesn't apply here. Every tap routes back to the exact same functions the
++old View listeners called (`addNewTab()`, `goHome()`, `showTabsOverlay()`,
++`onBookmarkStarTapped()`, `Callbacks.openBrowserMenu()`) — none of that
++destination logic moved, only how it's triggered. One real adaptation:
++`overflowButton.setOnClickListener { openBrowserMenu(overflowButton) }`
++anchored a framework `PopupMenu` to itself; the overflow button is no
++longer a real `View` once it's a Compose `IconButton`, so
++`openBrowserMenu`'s anchor is now the `browserToolbar` `ComposeView`
++itself (still a real `View`, `Gravity.END` still right-aligns the menu
++under it). `EditText`'s built-in `selectAllOnFocus`/`setOnFocusChangeListener`
++select-all-on-focus is reproduced inside the composable's own
++`onFocusChanged` (mutates its local `TextFieldValue` selection directly)
++rather than being reported up to the Fragment — nothing outside the
++composable needs to know the selection range. The old
++`urlInput.clearFocus()` + `hideSoftInputFromWindow()` pair at the end of
++`loadUrl()` couldn't stay an imperative call once focus lives inside a
++child composable, so it's now a one-shot `addressBarClearFocusSignal++`
++the composable's own `LaunchedEffect` reacts to.
++
++Deviation from the original plan below: **the old XML was replaced
++directly**, not left in place togglable behind a visibility flag as
++"Not deletable this phase" originally called for. Cross-reference grep
++after the rewrite found zero remaining references anywhere in
++`app/src/main/java` or `app/src/main/res` to the nine old IDs
++(`newTabButton`, `homeButton`, `urlInput`, `tabsButton`, `tabsCount`,
++`overflowButton`, `pageProgress`, `siteSecurityIcon`,
++`bookmarkStarButton`) — every call site in `BrowserFragment.kt` that used
++to touch one of those Views (`onPageStarted`/`onProgressChanged` in the
++`WebViewClient`/`WebChromeClient`, `updateSecurityIcon`,
++`updateBookmarkStar`, `applyTabUiState`, `loadUrl`, `showSpeedDial`,
++`updateTabsCount`, the `AddressBarSuggestions.onTap` lambda,
++`ShortcutsScreen.onOpenUrl`) was updated in the same pass to read/write
++the new Compose state fields instead, so there was nothing left for a
++toggle to protect — same direct-replacement approach Phase 5's earlier
++`AddressBarSuggestions`/`TabsListOverlay` conversions and this doc's own
++Phase D used once a cross-reference check came back clean, rather than
++carrying a temporary dual-path. `bg_tabs_counter.xml` (the tab-count
++badge's stroke background) is now orphaned — its 1.6dp stroke/6dp corner
++radius is reproduced with a plain Compose `Modifier.border`, so the
++drawable was deleted rather than left unused. Caught and fixed the same
++XML-comment `--` pitfall Phase D's CI run flagged (one new comment in
++`fragment_browser.xml` used it as a dash) before it could repeat that
++failure. **Not verified against a real build** — no local Android
++SDK/Gradle in this environment; verify via the project's GitHub Actions
++CI (`assembleRelease`) same as every prior phase, and pay particular
++attention to `BasicTextField`'s `KeyboardOptions`/`ImeAction.Go` behavior
++and the `LinearProgressIndicator` lambda-`progress` overload (needs
++Material3 1.2+, present via this project's compose-bom 2024.09.00) on a
++real device/emulator, since neither could be exercised here.
++
++Original plan (kept for context):
++
+ **Scope:** first real cut into `BrowserFragment.kt`. Do NOT attempt the
+ whole file in one phase — 1694 lines, WebView pool, tabs, DNS, sniffer all
+ live here. This phase is toolbar + address bar row ONLY.
+@@ -351,9 +427,11 @@ live here. This phase is toolbar + address bar row ONLY.
+ sniffer trigger, speed dial — those stay wired to the existing chrome for
+ now, only their host row's rendering changes.
+ 
+-**Not deletable this phase** — do not remove any XML yet, this phase only
+-adds a ComposeView row; old row's visibility may need to stay togglable
+-until Phase F confirms nothing else depends on it.
++**Not deletable this phase (original plan; superseded — see Status above):**
++old row's visibility was planned to stay togglable until Phase F confirmed
++nothing else depends on it; in practice the cross-reference grep after
++conversion came back clean immediately, so the old XML was removed
++directly instead.
+ 
+ ---
+ 
+diff --git a/app/src/main/java/com/invictus/xmd/ui/BrowserFragment.kt b/app/src/main/java/com/invictus/xmd/ui/BrowserFragment.kt
+index 18ba89b..6d7fcec 100644
+--- a/app/src/main/java/com/invictus/xmd/ui/BrowserFragment.kt
++++ b/app/src/main/java/com/invictus/xmd/ui/BrowserFragment.kt
+@@ -4,11 +4,9 @@ import android.annotation.SuppressLint
+ import android.os.Bundle
+ import android.text.Editable
+ import android.text.TextWatcher
+-import android.view.KeyEvent
+ import android.view.LayoutInflater
+ import android.view.View
+ import android.view.ViewGroup
+-import android.view.inputmethod.EditorInfo
+ import android.webkit.CookieManager
+ import android.webkit.WebSettings
+ import android.webkit.WebView
+@@ -16,7 +14,6 @@ import android.webkit.WebViewClient
+ import android.widget.EditText
+ import android.widget.FrameLayout
+ import android.widget.ImageButton
+-import android.widget.ImageView
+ import android.widget.LinearLayout
+ import android.widget.Toast
+ import com.google.android.material.dialog.MaterialAlertDialogBuilder
+@@ -31,7 +28,6 @@ import androidx.lifecycle.repeatOnLifecycle
+ import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
+ import com.google.android.material.card.MaterialCardView
+ import com.google.android.material.floatingactionbutton.FloatingActionButton
+-import com.google.android.material.progressindicator.LinearProgressIndicator
+ import com.invictus.xmd.R
+ import com.invictus.xmd.core.BookmarkRepository
+ import com.invictus.xmd.core.ShortcutRepository
+@@ -82,9 +78,13 @@ class BrowserFragment : Fragment() {
+         fun triggerPrepare(lines: List<String>)
+         /** Opens the Browser's own overflow menu (Private DNS, History) --
+          *  deliberately separate from the app-wide download Settings dialog,
+-         *  which the Browser's overflow no longer opens. [anchor] is the
+-         *  3-dot button itself, so the menu can be anchored/dropped down
+-         *  from it Chrome-style instead of popping up as a centered dialog. */
++         *  which the Browser's overflow no longer opens. [anchor] used to be
++         *  the 3-dot button itself; since Phase E moved that button into
++         *  Compose (BrowserToolbarRow -- no longer a real View to anchor a
++         *  framework PopupMenu to), it's now the browserToolbar ComposeView
++         *  that hosts it instead -- Gravity.END still right-aligns the menu
++         *  under it, close enough to the old per-button anchor for this
++         *  still-native (out of scope for Phase E) PopupMenu. */
+         fun openBrowserMenu(anchor: View)
+         /** A stream MediaSniffer picked up was tapped in the "videos found"
+          *  sheet. HLS/DASH ([needsPicker] true) routes through the same
+@@ -133,15 +133,14 @@ class BrowserFragment : Fragment() {
+     // of this class -- see webViews/webViewStates below and the "WebView
+     // pool" section for why those stayed Fragment-side.
+ 
+-    private lateinit var newTabButton: ImageButton
+-    private lateinit var homeButton: ImageButton
+-    private lateinit var urlInput: EditText
+-    private lateinit var tabsButton: FrameLayout
+-    private lateinit var tabsCount: android.widget.TextView
+-    private lateinit var overflowButton: ImageButton
+-    private lateinit var pageProgress: LinearProgressIndicator
+-    private lateinit var siteSecurityIcon: ImageView
+-    private lateinit var bookmarkStarButton: ImageButton
++    // Phase E: home/address-pill/new-tab/tabs/overflow buttons + the
++    // progress line all now live in one ComposeView hosting
++    // BrowserToolbarRow (see BrowserToolbar.kt) -- was 9 separate
++    // findViewById'd Views (newTabButton, homeButton, urlInput, tabsButton,
++    // tabsCount, overflowButton, pageProgress, siteSecurityIcon,
++    // bookmarkStarButton). Their state now lives in the `by mutableStateOf`
++    // fields below instead of on the Views themselves.
++    private lateinit var browserToolbar: androidx.compose.ui.platform.ComposeView
+     private lateinit var webViewSwipeRefresh: SwipeRefreshLayout
+     private lateinit var webViewContainer: FrameLayout
+     private lateinit var navLoadingVeil: View
+@@ -217,6 +216,34 @@ class BrowserFragment : Fragment() {
+     // every tab switch -- kept in sync by the observer in setupSpeedDial().
+     private var bookmarkedUrls: Set<String> = emptySet()
+ 
++    // ── Phase E: browserToolbar's state ──────────────────────────────────
++    // Drives BrowserToolbarRow's setContent lambda below -- same "field on
++    // the Fragment, composable reads it" pattern sniffedSheetStreams/
++    // linkContextMenuState/suggestionItems above already use. Mirrors what
++    // urlInput/pageProgress/siteSecurityIcon/bookmarkStarButton/tabsCount
++    // used to hold directly on their Views.
++    private var addressBarText: String by mutableStateOf("")
++    // Read-only mirror of BrowserToolbarRow's TextField focus state,
++    // reported up via its onAddressFocusChange callback -- same gate
++    // urlInput.hasFocus() used to provide in the old TextWatcher, so a
++    // programmatic addressBarText set (onPageStarted, applyTabUiState,
++    // etc.) still doesn't trigger scheduleSuggest. Plain var, not Compose
++    // state: nothing renders off this directly.
++    private var addressBarFocused: Boolean = false
++    // Bumped (never read for its value, just its change) to tell
++    // BrowserToolbarRow's composition to clear focus + hide the IME --
++    // replaces the old urlInput.clearFocus() + hideSoftInputFromWindow()
++    // calls at the end of loadUrl(); see BrowserToolbar.kt's doc comment
++    // for why this can't just be an imperative call from here anymore.
++    private var addressBarClearFocusSignal: Int by mutableStateOf(0)
++    private var securityIconVisible: Boolean by mutableStateOf(false)
++    private var siteIsSecure: Boolean by mutableStateOf(true)
++    private var bookmarkStarVisible: Boolean by mutableStateOf(false)
++    private var bookmarkStarFilled: Boolean by mutableStateOf(false)
++    private var toolbarProgress: Int by mutableStateOf(0)
++    private var toolbarProgressVisible: Boolean by mutableStateOf(false)
++    private var tabsCountValue: Int by mutableStateOf(1)
++
+     private val browserViewModel: BrowserViewModel by viewModels()
+ 
+     // Thin pass-through onto browserViewModel's fields -- keeps every
+@@ -275,15 +302,45 @@ class BrowserFragment : Fragment() {
+     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
+         super.onViewCreated(view, savedInstanceState)
+ 
+-        newTabButton = view.findViewById(R.id.newTabButton)
+-        homeButton = view.findViewById(R.id.homeButton)
+-        urlInput = view.findViewById(R.id.urlInput)
+-        tabsButton = view.findViewById(R.id.tabsButton)
+-        tabsCount = view.findViewById(R.id.tabsCount)
+-        overflowButton = view.findViewById(R.id.overflowButton)
+-        pageProgress = view.findViewById(R.id.pageProgress)
+-        siteSecurityIcon = view.findViewById(R.id.siteSecurityIcon)
+-        bookmarkStarButton = view.findViewById(R.id.bookmarkStarButton)
++        browserToolbar = view.findViewById(R.id.browserToolbar)
++        browserToolbar.setViewCompositionStrategy(
++            androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
++        )
++        browserToolbar.setContent {
++            com.invictus.xmd.ui.theme.XmdTheme {
++                BrowserToolbarRow(
++                    addressText = addressBarText,
++                    onAddressTextChange = { text ->
++                        addressBarText = text
++                        // Same guard the old TextWatcher's afterTextChanged
++                        // had ("programmatic sets shouldn't trigger
++                        // suggest") -- see addressBarFocused's doc comment.
++                        if (addressBarFocused) scheduleSuggest(text)
++                    },
++                    onAddressFocusChange = { focused ->
++                        addressBarFocused = focused
++                        if (!focused) hideSuggestions()
++                    },
++                    onGo = { loadUrl(addressBarText) },
++                    clearFocusSignal = addressBarClearFocusSignal,
++                    securityIconVisible = securityIconVisible,
++                    isSecure = siteIsSecure,
++                    bookmarkVisible = bookmarkStarVisible,
++                    bookmarkFilled = bookmarkStarFilled,
++                    onBookmarkTap = { onBookmarkStarTapped() },
++                    onHomeTap = { goHome() },
++                    onNewTabTap = { addNewTab() },
++                    onTabsTap = { showTabsOverlay() },
++                    tabsCount = tabsCountValue,
++                    // browserToolbar itself (a real View) stands in for the
++                    // old overflowButton as the PopupMenu anchor -- see
++                    // Callbacks.openBrowserMenu's doc comment above.
++                    onOverflowTap = { (activity as? Callbacks)?.openBrowserMenu(browserToolbar) },
++                    progress = toolbarProgress,
++                    progressVisible = toolbarProgressVisible,
++                )
++            }
++        }
+         webViewSwipeRefresh = view.findViewById(R.id.webViewSwipeRefresh)
+         webViewContainer = view.findViewById(R.id.webViewContainer)
+         navLoadingVeil = view.findViewById(R.id.navLoadingVeil)
+@@ -295,7 +352,7 @@ class BrowserFragment : Fragment() {
+             com.invictus.xmd.ui.theme.XmdTheme {
+                 ShortcutsScreen(
+                     viewModel = shortcutsViewModel,
+-                    onOpenUrl = { shortcut -> urlInput.setText(shortcut.url); loadUrl(shortcut.url) },
++                    onOpenUrl = { shortcut -> addressBarText = shortcut.url; loadUrl(shortcut.url) },
+                     onPickIcon = { pickIconLauncher.launch("image/*") },
+                 )
+             }
+@@ -345,11 +402,11 @@ class BrowserFragment : Fragment() {
+                     onTap = { item ->
+                         when (item) {
+                             is Suggestion.History -> {
+-                                urlInput.setText(item.url)
++                                addressBarText = item.url
+                                 loadUrl(item.url)
+                             }
+                             is Suggestion.Search -> {
+-                                urlInput.setText(item.text)
++                                addressBarText = item.text
+                                 loadUrl(item.text)
+                             }
+                         }
+@@ -398,17 +455,17 @@ class BrowserFragment : Fragment() {
+         findInPageClose = view.findViewById(R.id.findInPageClose)
+ 
+         setupSpeedDial()
+-        setupAddressBar()
+         setupPullToRefresh()
+         setupFindInPage()
+ 
+-        newTabButton.setOnClickListener { addNewTab() }
+-        homeButton.setOnClickListener { goHome() }
+-        tabsButton.setOnClickListener { showTabsOverlay() }
+-        overflowButton.setOnClickListener { (activity as? Callbacks)?.openBrowserMenu(overflowButton) }
++        // newTabButton/homeButton/tabsButton/overflowButton/
++        // bookmarkStarButton click wiring, and urlInput's editor-action/
++        // text-watcher/focus-change listeners (the old setupAddressBar()),
++        // all moved into BrowserToolbarRow's onClick/onGo/onAddressTextChange/
++        // onAddressFocusChange lambdas above -- same destination functions,
++        // just no longer separate View listeners.
+         addLinkFab.setOnClickListener { onAddLinkClicked() }
+         sniffedMediaFab.setOnClickListener { showSniffedMediaSheet() }
+-        bookmarkStarButton.setOnClickListener { onBookmarkStarTapped() }
+ 
+         // Start on the speed-dial ("new tab") page.
+         showSpeedDial()
+@@ -622,9 +679,9 @@ class BrowserFragment : Fragment() {
+                 tab.progress = 0
+                 tab.sniffedMedia.clear()
+                 if (isCurrentTab(tab)) {
+-                    pageProgress.setProgressCompat(0, false)
+-                    pageProgress.show()
+-                    urlInput.setText(url)
++                    toolbarProgress = 0
++                    toolbarProgressVisible = true
++                    addressBarText = url.orEmpty()
+                     updateSecurityIcon(tab)
+                     clearDetectedLink()
+                     updateSniffedMediaFab(tab)
+@@ -640,7 +697,7 @@ class BrowserFragment : Fragment() {
+                     HistoryRepository.record(url, title)
+                 }
+                 if (isCurrentTab(tab)) {
+-                    pageProgress.hide()
++                    toolbarProgressVisible = false
+                     webViewSwipeRefresh.isRefreshing = false
+                     hideNavLoadingVeil()
+                     url?.let { checkPageForLinks(it) }
+@@ -846,9 +903,10 @@ class BrowserFragment : Fragment() {
+                     // waiting for onPageFinished (which can lag behind on
+                     // pages that keep loading subresources after DOM-ready).
+                     if (newProgress >= 100) {
+-                        pageProgress.hide()
++                        toolbarProgressVisible = false
+                     } else {
+-                        pageProgress.setProgressCompat(newProgress, true)
++                        toolbarProgress = newProgress
++                        toolbarProgressVisible = true
+                     }
+                 }
+             }
+@@ -953,38 +1011,10 @@ class BrowserFragment : Fragment() {
+     }
+ 
+     // ── Address bar ──────────────────────────────────────────────────────
+-
+-    private fun setupAddressBar() {
+-        urlInput.setOnEditorActionListener { _, actionId, event ->
+-            val isGo = actionId == EditorInfo.IME_ACTION_GO ||
+-                (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)
+-            if (isGo) {
+-                loadUrl(urlInput.text?.toString().orEmpty())
+-                true
+-            } else false
+-        }
+-
+-        urlInput.addTextChangedListener(object : TextWatcher {
+-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+-            override fun afterTextChanged(s: Editable?) {
+-                if (!urlInput.hasFocus()) return // programmatic sets (e.g. onPageStarted) shouldn't trigger suggest
+-                scheduleSuggest(s?.toString().orEmpty())
+-            }
+-        })
+-
+-        // Chrome-style collapse: while not focused, show just the domain so
+-        // the bar reads clean; focusing expands it back to the full URL for
+-        // editing (full text is always what's actually in the EditText --
+-        // this only swaps the *displayed* selection/cursor state on focus).
+-        urlInput.setOnFocusChangeListener { _, hasFocus ->
+-            if (!hasFocus) {
+-                hideSuggestions()
+-            } else {
+-                urlInput.selectAll()
+-            }
+-        }
+-    }
++    // setupAddressBar() (urlInput's editor-action listener, TextWatcher,
++    // focus-change listener) is gone -- that logic now lives in
++    // BrowserToolbarRow's onGo/onAddressTextChange/onAddressFocusChange
++    // lambdas, wired once in onViewCreated's browserToolbar.setContent.
+ 
+     /**
+      * 2-3 letters is enough to start querying, debounced ~150ms so we're not
+@@ -1091,13 +1121,11 @@ class BrowserFragment : Fragment() {
+     private fun updateSecurityIcon(tab: BrowserTab) {
+         val url = tab.url
+         if (url.isNullOrBlank() || !url.startsWith("http")) {
+-            siteSecurityIcon.visibility = View.GONE
++            securityIconVisible = false
+             return
+         }
+-        siteSecurityIcon.visibility = View.VISIBLE
+-        siteSecurityIcon.setImageResource(
+-            if (url.startsWith("https")) R.drawable.ic_lock else R.drawable.ic_lock_open
+-        )
++        securityIconVisible = true
++        siteIsSecure = url.startsWith("https")
+     }
+ 
+     /** Filled star when the loaded page's URL is already saved as a
+@@ -1106,13 +1134,11 @@ class BrowserFragment : Fragment() {
+     private fun updateBookmarkStar(tab: BrowserTab) {
+         val url = tab.url
+         if (url.isNullOrBlank() || !url.startsWith("http")) {
+-            bookmarkStarButton.visibility = View.GONE
++            bookmarkStarVisible = false
+             return
+         }
+-        bookmarkStarButton.visibility = View.VISIBLE
+-        bookmarkStarButton.setImageResource(
+-            if (url in bookmarkedUrls) R.drawable.ic_star_filled else R.drawable.ic_star_outline
+-        )
++        bookmarkStarVisible = true
++        bookmarkStarFilled = url in bookmarkedUrls
+     }
+ 
+     /** Star tapped: adds the current page as a bookmark (via the Add
+@@ -1136,11 +1162,11 @@ class BrowserFragment : Fragment() {
+      *  stop icon, download-link FAB) from [tab]'s own state. Call whenever
+      *  [tab] becomes the active one. */
+     private fun applyTabUiState(tab: BrowserTab) {
+-        urlInput.setText(tab.url)
++        addressBarText = tab.url.orEmpty()
+         updateSecurityIcon(tab)
+         updateBookmarkStar(tab)
+-        pageProgress.setProgressCompat(tab.progress, false)
+-        if (tab.isLoading) pageProgress.show() else pageProgress.hide()
++        toolbarProgress = tab.progress
++        toolbarProgressVisible = tab.isLoading
+         webViewSwipeRefresh.isRefreshing = false
+         val url = tab.url
+         if (url != null) checkPageForLinks(url) else clearDetectedLink()
+@@ -1177,10 +1203,11 @@ class BrowserFragment : Fragment() {
+         view.visibility = View.VISIBLE
+         view.loadUrl(url)
+ 
+-        // Drop keyboard focus so the address bar doesn't stay expanded.
+-        urlInput.clearFocus()
+-        val imm = requireContext().getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+-        imm?.hideSoftInputFromWindow(urlInput.windowToken, 0)
++        // Drop keyboard focus so the address bar doesn't stay expanded --
++        // browserToolbar's TextField owns focus now, so this is a signal
++        // bump its LaunchedEffect reacts to (see BrowserToolbar.kt) instead
++        // of a direct View.clearFocus() + hideSoftInputFromWindow() call.
++        addressBarClearFocusSignal++
+     }
+ 
+     /** Bare host/search text -> https URL; anything already URL-shaped is passed through. */
+@@ -1217,10 +1244,10 @@ class BrowserFragment : Fragment() {
+ 
+     private fun showSpeedDial() {
+         speedDialContainer.visibility = View.VISIBLE
+-        urlInput.setText("")
+-        siteSecurityIcon.visibility = View.GONE
+-        bookmarkStarButton.visibility = View.GONE
+-        pageProgress.hide()
++        addressBarText = ""
++        securityIconVisible = false
++        bookmarkStarVisible = false
++        toolbarProgressVisible = false
+         webViewSwipeRefresh.isRefreshing = false
+         hideSuggestions()
+         clearDetectedLink()
+@@ -1291,7 +1318,7 @@ class BrowserFragment : Fragment() {
+     // ── Tabs ─────────────────────────────────────────────────────────────
+ 
+     private fun updateTabsCount() {
+-        tabsCount.text = tabs.size.toString()
++        tabsCountValue = tabs.size
+     }
+ 
+     private fun addNewTab() {
+diff --git a/app/src/main/java/com/invictus/xmd/ui/BrowserToolbar.kt b/app/src/main/java/com/invictus/xmd/ui/BrowserToolbar.kt
+new file mode 100644
+index 0000000..09f95af
+--- /dev/null
++++ b/app/src/main/java/com/invictus/xmd/ui/BrowserToolbar.kt
+@@ -0,0 +1,362 @@
++package com.invictus.xmd.ui
++
++import androidx.compose.animation.core.animateFloatAsState
++import androidx.compose.foundation.border
++import androidx.compose.foundation.layout.Box
++import androidx.compose.foundation.layout.Row
++import androidx.compose.foundation.layout.fillMaxWidth
++import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.padding
++import androidx.compose.foundation.layout.size
++import androidx.compose.foundation.shape.RoundedCornerShape
++import androidx.compose.foundation.text.BasicTextField
++import androidx.compose.foundation.text.KeyboardActions
++import androidx.compose.foundation.text.KeyboardOptions
++import androidx.compose.material3.Icon
++import androidx.compose.material3.IconButton
++import androidx.compose.material3.LinearProgressIndicator
++import androidx.compose.material3.MaterialTheme
++import androidx.compose.material3.Surface
++import androidx.compose.material3.Text
++import androidx.compose.runtime.Composable
++import androidx.compose.runtime.LaunchedEffect
++import androidx.compose.runtime.getValue
++import androidx.compose.runtime.mutableStateOf
++import androidx.compose.runtime.remember
++import androidx.compose.runtime.setValue
++import androidx.compose.ui.Alignment
++import androidx.compose.ui.Modifier
++import androidx.compose.ui.draw.clip
++import androidx.compose.ui.focus.onFocusChanged
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.SolidColor
++import androidx.compose.ui.platform.LocalFocusManager
++import androidx.compose.ui.platform.LocalSoftwareKeyboardController
++import androidx.compose.ui.res.painterResource
++import androidx.compose.ui.res.stringResource
++import androidx.compose.ui.semantics.contentDescription
++import androidx.compose.ui.semantics.semantics
++import androidx.compose.ui.text.TextRange
++import androidx.compose.ui.text.font.FontWeight
++import androidx.compose.ui.text.input.ImeAction
++import androidx.compose.ui.text.input.KeyboardType
++import androidx.compose.ui.text.input.TextFieldValue
++import androidx.compose.ui.text.style.TextOverflow
++import androidx.compose.ui.unit.dp
++import androidx.compose.ui.unit.sp
++import com.invictus.xmd.R
++
++/**
++ * Phase E of the Compose migration: the toolbar/address-bar row that used
++ * to be fragment_browser.xml's top MaterialCardView (home button, the
++ * address pill -- lock icon + EditText + bookmark star -- new-tab button,
++ * tabs button w/ count badge, overflow button) plus the
++ * LinearProgressIndicator overlapping its bottom edge. Hosted the same way
++ * AddressBarSuggestions already is: its own ComposeView (`browserToolbar`
++ * in fragment_browser.xml), anchored in the same position the old
++ * MaterialCardView + progress line occupied -- see
++ * BrowserFragment.onViewCreated's browserToolbar.setContent.
++ *
++ * Everything here is purely presentational + input-handling for the row
++ * itself; every tap routes back to the exact same BrowserFragment
++ * functions the old View listeners called (addNewTab(), goHome(),
++ * showTabsOverlay(), onBookmarkStarTapped(), Callbacks.openBrowserMenu()) --
++ * none of that logic moved or changed. [onOverflowTap] doesn't take a View
++ * argument like the old overflowButton.setOnClickListener did: the
++ * individual overflow button is no longer a real View to anchor a
++ * PopupMenu to, so BrowserFragment's lambda passes the browserToolbar
++ * ComposeView itself (a real View) as Callbacks.openBrowserMenu's anchor
++ * instead -- see that call site's comment in BrowserFragment.kt.
++ *
++ * [addressText]/[onAddressTextChange] mirror what urlInput.setText()/its
++ * TextWatcher used to do. BrowserFragment still owns the actual text as a
++ * `by mutableStateOf` field (addressBarText) and passes it down each
++ * recomposition; this composable renders it and reports edits back up,
++ * same "field on the Fragment, composable renders it" pattern
++ * browserDialogHost/suggestionsCard/tabsListOverlay already use elsewhere
++ * in that file. [clearFocusSignal] replaces the old
++ * urlInput.clearFocus() + hideSoftInputFromWindow() call at the end of
++ * loadUrl(): a plain Fragment function can't reach into a child
++ * composable's internal focus state directly, so BrowserFragment just
++ * bumps an Int and this composable's LaunchedEffect reacts to the change.
++ * Select-all-on-focus (the old urlInput.setOnFocusChangeListener's `else`
++ * branch) is handled entirely inside this composable's own
++ * onFocusChanged instead of being reported up to the Fragment -- unlike
++ * the old EditText, nothing outside this composable needs to know the
++ * current selection range.
++ *
++ * Not independently verified -- no local Android SDK/Gradle in this
++ * environment, same caveat every prior phase's summary notes.
++ */
++@Composable
++fun BrowserToolbarRow(
++    addressText: String,
++    onAddressTextChange: (String) -> Unit,
++    onAddressFocusChange: (Boolean) -> Unit,
++    onGo: () -> Unit,
++    clearFocusSignal: Int,
++    securityIconVisible: Boolean,
++    isSecure: Boolean,
++    bookmarkVisible: Boolean,
++    bookmarkFilled: Boolean,
++    onBookmarkTap: () -> Unit,
++    onHomeTap: () -> Unit,
++    onNewTabTap: () -> Unit,
++    onTabsTap: () -> Unit,
++    tabsCount: Int,
++    onOverflowTap: () -> Unit,
++    progress: Int,
++    progressVisible: Boolean,
++) {
++    Box(modifier = Modifier.fillMaxWidth()) {
++        Surface(
++            modifier = Modifier
++                .fillMaxWidth()
++                .padding(8.dp),
++            shape = RoundedCornerShape(28.dp),
++            color = MaterialTheme.colorScheme.surfaceContainerLow,
++            tonalElevation = 3.dp,
++            shadowElevation = 3.dp,
++        ) {
++            Row(
++                modifier = Modifier
++                    .fillMaxWidth()
++                    .padding(horizontal = 6.dp, vertical = 8.dp),
++                verticalAlignment = Alignment.CenterVertically,
++            ) {
++                ToolbarIconButton(
++                    iconRes = R.drawable.ic_home,
++                    contentDescription = stringResource(R.string.action_home),
++                    onClick = onHomeTap,
++                )
++                AddressPill(
++                    modifier = Modifier
++                        .weight(1f)
++                        .padding(start = 6.dp),
++                    text = addressText,
++                    onTextChange = onAddressTextChange,
++                    onFocusChange = onAddressFocusChange,
++                    onGo = onGo,
++                    clearFocusSignal = clearFocusSignal,
++                    securityIconVisible = securityIconVisible,
++                    isSecure = isSecure,
++                    bookmarkVisible = bookmarkVisible,
++                    bookmarkFilled = bookmarkFilled,
++                    onBookmarkTap = onBookmarkTap,
++                )
++                ToolbarIconButton(
++                    iconRes = R.drawable.ic_add,
++                    contentDescription = stringResource(R.string.action_new_tab),
++                    onClick = onNewTabTap,
++                    modifier = Modifier.padding(start = 2.dp),
++                )
++                TabsButton(
++                    count = tabsCount,
++                    contentDescription = stringResource(R.string.action_tabs),
++                    onClick = onTabsTap,
++                )
++                ToolbarIconButton(
++                    iconRes = R.drawable.ic_more_vert,
++                    contentDescription = stringResource(R.string.action_more),
++                    onClick = onOverflowTap,
++                )
++            }
++        }
++        // Chrome-style thin progress line sitting on the address bar
++        // card's own bottom edge -- same 8dp side margins + 8dp bottom
++        // margin the old pageProgress had, so it spans the same width.
++        // Track is transparent so only the moving indicator line shows.
++        if (progressVisible) {
++            val animatedProgress by animateFloatAsState(
++                targetValue = (progress / 100f).coerceIn(0f, 1f),
++                label = "toolbarProgress",
++            )
++            LinearProgressIndicator(
++                progress = { animatedProgress },
++                modifier = Modifier
++                    .align(Alignment.BottomCenter)
++                    .fillMaxWidth()
++                    .padding(horizontal = 8.dp)
++                    .padding(bottom = 8.dp)
++                    .height(3.dp)
++                    .clip(RoundedCornerShape(2.dp)),
++                color = MaterialTheme.colorScheme.primary,
++                trackColor = Color.Transparent,
++            )
++        }
++    }
++}
++
++@Composable
++private fun AddressPill(
++    modifier: Modifier = Modifier,
++    text: String,
++    onTextChange: (String) -> Unit,
++    onFocusChange: (Boolean) -> Unit,
++    onGo: () -> Unit,
++    clearFocusSignal: Int,
++    securityIconVisible: Boolean,
++    isSecure: Boolean,
++    bookmarkVisible: Boolean,
++    bookmarkFilled: Boolean,
++    onBookmarkTap: () -> Unit,
++) {
++    val focusManager = LocalFocusManager.current
++    val keyboardController = LocalSoftwareKeyboardController.current
++
++    // Local cursor/selection state, re-synced from [text] only when it
++    // changed from *outside* this composable (onPageStarted,
++    // applyTabUiState, a tapped suggestion, etc. -- see
++    // BrowserFragment.addressBarText) so a real edit in progress here
++    // doesn't get its cursor position clobbered on every recomposition.
++    var fieldValue by remember { mutableStateOf(TextFieldValue(text)) }
++    LaunchedEffect(text) {
++        if (text != fieldValue.text) {
++            fieldValue = TextFieldValue(text, selection = TextRange(text.length))
++        }
++    }
++    // Old urlInput.clearFocus() + hideSoftInputFromWindow(), now driven by
++    // a one-shot signal bump from BrowserFragment.loadUrl() -- see this
++    // file's doc comment above.
++    LaunchedEffect(clearFocusSignal) {
++        if (clearFocusSignal > 0) {
++            focusManager.clearFocus()
++            keyboardController?.hide()
++        }
++    }
++
++    Surface(
++        modifier = modifier,
++        shape = RoundedCornerShape(50),
++        color = MaterialTheme.colorScheme.surfaceContainerHigh,
++    ) {
++        Row(
++            modifier = Modifier
++                .fillMaxWidth()
++                .height(40.dp),
++            verticalAlignment = Alignment.CenterVertically,
++        ) {
++            if (securityIconVisible) {
++                Icon(
++                    painter = painterResource(if (isSecure) R.drawable.ic_lock else R.drawable.ic_lock_open),
++                    contentDescription = null,
++                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
++                    modifier = Modifier
++                        .padding(start = 12.dp)
++                        .size(16.dp),
++                )
++            }
++            Box(modifier = Modifier.weight(1f)) {
++                BasicTextField(
++                    value = fieldValue,
++                    onValueChange = { newValue ->
++                        fieldValue = newValue
++                        onTextChange(newValue.text)
++                    },
++                    modifier = Modifier
++                        .fillMaxWidth()
++                        .padding(start = 14.dp, end = 4.dp)
++                        .onFocusChanged { state ->
++                            // Chrome-style: focusing the bar selects the
++                            // full text (was urlInput.selectAll() in the
++                            // XML version's focus-change listener).
++                            if (state.isFocused) {
++                                fieldValue = fieldValue.copy(
++                                    selection = TextRange(0, fieldValue.text.length)
++                                )
++                            }
++                            onFocusChange(state.isFocused)
++                        },
++                    singleLine = true,
++                    textStyle = MaterialTheme.typography.bodyMedium.copy(
++                        color = MaterialTheme.colorScheme.onSurface,
++                        fontSize = 14.sp,
++                    ),
++                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
++                    keyboardOptions = KeyboardOptions(
++                        keyboardType = KeyboardType.Uri,
++                        imeAction = ImeAction.Go,
++                    ),
++                    keyboardActions = KeyboardActions(onGo = { onGo() }),
++                    decorationBox = { innerTextField ->
++                        if (fieldValue.text.isEmpty()) {
++                            Text(
++                                text = stringResource(R.string.hint_url),
++                                color = MaterialTheme.colorScheme.onSurfaceVariant,
++                                style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
++                                maxLines = 1,
++                                overflow = TextOverflow.Ellipsis,
++                            )
++                        }
++                        innerTextField()
++                    },
++                )
++            }
++            if (bookmarkVisible) {
++                IconButton(
++                    onClick = onBookmarkTap,
++                    modifier = Modifier
++                        .padding(end = 2.dp)
++                        .size(36.dp),
++                ) {
++                    Icon(
++                        painter = painterResource(
++                            if (bookmarkFilled) R.drawable.ic_star_filled else R.drawable.ic_star_outline
++                        ),
++                        contentDescription = stringResource(R.string.action_add_shortcut),
++                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
++                        modifier = Modifier.size(20.dp),
++                    )
++                }
++            }
++        }
++    }
++}
++
++@Composable
++private fun ToolbarIconButton(
++    iconRes: Int,
++    contentDescription: String?,
++    onClick: () -> Unit,
++    modifier: Modifier = Modifier,
++) {
++    IconButton(onClick = onClick, modifier = modifier.size(40.dp)) {
++        Icon(
++            painter = painterResource(iconRes),
++            contentDescription = contentDescription,
++            tint = MaterialTheme.colorScheme.onSurfaceVariant,
++            modifier = Modifier.size(22.dp),
++        )
++    }
++}
++
++/** Replicates bg_tabs_counter.xml (transparent fill, 1.6dp
++ *  colorOnSurfaceVariant stroke, 6dp corner radius) around the live tab
++ *  count, inside a 40dp tap target matching every other toolbar button. */
++@Composable
++private fun TabsButton(count: Int, contentDescription: String, onClick: () -> Unit) {
++    IconButton(
++        onClick = onClick,
++        modifier = Modifier
++            .size(40.dp)
++            .semantics { this.contentDescription = contentDescription },
++    ) {
++        Box(
++            modifier = Modifier
++                .size(22.dp)
++                .border(
++                    width = 1.6.dp,
++                    color = MaterialTheme.colorScheme.onSurfaceVariant,
++                    shape = RoundedCornerShape(6.dp),
++                ),
++            contentAlignment = Alignment.Center,
++        ) {
++            Text(
++                text = count.toString(),
++                color = MaterialTheme.colorScheme.onSurfaceVariant,
++                fontSize = 12.sp,
++                fontWeight = FontWeight.Bold,
++            )
++        }
++    }
++}
+diff --git a/app/src/main/java/com/invictus/xmd/ui/MainActivity.kt b/app/src/main/java/com/invictus/xmd/ui/MainActivity.kt
+index e6db349..8d2c632 100644
+--- a/app/src/main/java/com/invictus/xmd/ui/MainActivity.kt
++++ b/app/src/main/java/com/invictus/xmd/ui/MainActivity.kt
+@@ -1413,10 +1413,13 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
+ 
+     // ── BrowserFragment.Callbacks ───────────────────────────────────────────
+ 
+-    // Chrome-style overflow: a PopupMenu anchored directly under the 3-dot
+-    // button (right-aligned via Gravity.END) instead of a centered
+-    // AlertDialog, so it drops down from the icon the way Chrome's overflow
+-    // menu does rather than looking like a generic popup.
++    // Chrome-style overflow: a PopupMenu right-aligned (Gravity.END) under
++    // [anchor] instead of a centered AlertDialog, so it drops down near the
++    // 3-dot icon the way Chrome's overflow menu does rather than looking
++    // like a generic popup. Phase E moved the 3-dot button itself into
++    // Compose (BrowserToolbarRow), so [anchor] is now the whole toolbar row's
++    // ComposeView rather than the button alone -- Gravity.END still lands the
++    // menu at the row's right edge, right where the button sits.
+     override fun openBrowserMenu(anchor: android.view.View) {
+         val browserFragment = supportFragmentManager.findFragmentByTag(TAG_BROWSER) as? BrowserFragment
+         val popup = androidx.appcompat.widget.PopupMenu(this, anchor, android.view.Gravity.END)
+diff --git a/app/src/main/res/drawable/bg_tabs_counter.xml b/app/src/main/res/drawable/bg_tabs_counter.xml
+deleted file mode 100644
+index 7f5e797..0000000
+--- a/app/src/main/res/drawable/bg_tabs_counter.xml
++++ /dev/null
+@@ -1,9 +0,0 @@
+-<?xml version="1.0" encoding="utf-8"?>
+-<shape xmlns:android="http://schemas.android.com/apk/res/android"
+-    android:shape="rectangle">
+-    <solid android:color="@android:color/transparent" />
+-    <stroke
+-        android:width="1.6dp"
+-        android:color="?attr/colorOnSurfaceVariant" />
+-    <corners android:radius="6dp" />
+-</shape>
+diff --git a/app/src/main/res/layout/fragment_browser.xml b/app/src/main/res/layout/fragment_browser.xml
+index b03eff4..2c0e723 100644
+--- a/app/src/main/res/layout/fragment_browser.xml
++++ b/app/src/main/res/layout/fragment_browser.xml
+@@ -14,179 +14,20 @@
+              back/forward buttons; just new-tab, the search field, reload,
+              tabs, and overflow. Floats slightly off the edges with its own
+              rounded surface + elevation (rather than a flat bar flush with
+-             the screen edges) for the Expressive "floating toolbar" look. -->
+-        <!-- Wraps just the address bar card so the progress line below can
+-             overlay its bottom edge (layout_gravity="bottom") rather than
+-             sitting in a separate row with a gap underneath it. -->
+-        <FrameLayout
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content">
+-
+-        <com.google.android.material.card.MaterialCardView
++             the screen edges) for the Expressive "floating toolbar" look.
++
++             Phase E: this whole row (home/address-pill/new-tab/tabs/
++             overflow buttons, plus the progress line overlapping the
++             card's bottom edge) is now a single ComposeView hosting
++             BrowserToolbarRow (see BrowserToolbar.kt), replacing what was
++             a MaterialCardView + nested LinearLayout/EditText/ImageButtons
++             plus a separate LinearProgressIndicator sibling. Same wrap_content
++             height, same position as the first child of this vertical
++             LinearLayout, so the WebView content area below is unaffected. -->
++        <androidx.compose.ui.platform.ComposeView
++            android:id="@+id/browserToolbar"
+             android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:layout_margin="8dp"
+-            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
+-            app:shapeAppearance="@style/ShapeAppearance.Xmd.Large"
+-            app:cardElevation="3dp"
+-            app:strokeWidth="0dp">
+-
+-        <LinearLayout
+-            android:layout_width="match_parent"
+-            android:layout_height="wrap_content"
+-            android:orientation="horizontal"
+-            android:gravity="center_vertical"
+-            android:paddingStart="6dp"
+-            android:paddingEnd="6dp"
+-            android:paddingVertical="8dp">
+-
+-            <ImageButton
+-                android:id="@+id/homeButton"
+-                android:layout_width="40dp"
+-                android:layout_height="40dp"
+-                android:background="?attr/selectableItemBackgroundBorderless"
+-                android:padding="9dp"
+-                android:src="@drawable/ic_home"
+-                android:tint="?attr/colorOnSurfaceVariant"
+-                android:contentDescription="@string/action_home" />
+-
+-            <com.google.android.material.card.MaterialCardView
+-                android:layout_width="0dp"
+-                android:layout_height="wrap_content"
+-                android:layout_weight="1"
+-                android:layout_marginStart="6dp"
+-                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
+-                app:shapeAppearance="@style/ShapeAppearance.Xmd.Full"
+-                app:cardElevation="0dp"
+-                app:strokeWidth="0dp">
+-
+-                <LinearLayout
+-                    android:layout_width="match_parent"
+-                    android:layout_height="40dp"
+-                    android:orientation="horizontal"
+-                    android:gravity="center_vertical">
+-
+-                    <!-- Security indicator: swaps between locked/unlocked padlock
+-                         based on the current page's scheme; hidden on the speed
+-                         dial where there's no page to describe. -->
+-                    <ImageView
+-                        android:id="@+id/siteSecurityIcon"
+-                        android:layout_width="16dp"
+-                        android:layout_height="16dp"
+-                        android:layout_marginStart="12dp"
+-                        android:src="@drawable/ic_lock"
+-                        android:tint="?attr/colorOnSurfaceVariant"
+-                        android:visibility="gone"
+-                        android:contentDescription="@null" />
+-
+-                    <EditText
+-                        android:id="@+id/urlInput"
+-                        android:layout_width="0dp"
+-                        android:layout_height="40dp"
+-                        android:layout_weight="1"
+-                        android:background="@null"
+-                        android:paddingStart="14dp"
+-                        android:paddingEnd="4dp"
+-                        android:hint="@string/hint_url"
+-                        android:textColorHint="?attr/colorOnSurfaceVariant"
+-                        android:textColor="?attr/colorOnSurface"
+-                        android:textSize="14sp"
+-                        android:singleLine="true"
+-                        android:ellipsize="end"
+-                        android:imeOptions="actionGo"
+-                        android:inputType="textUri"
+-                        android:selectAllOnFocus="true" />
+-
+-                    <!-- Bookmark-this-page toggle: outline when the loaded page
+-                         isn't saved as a shortcut, filled once it is. Hidden on
+-                         the speed dial (no page to bookmark yet). -->
+-                    <ImageButton
+-                        android:id="@+id/bookmarkStarButton"
+-                        android:layout_width="36dp"
+-                        android:layout_height="36dp"
+-                        android:layout_marginEnd="2dp"
+-                        android:background="?attr/selectableItemBackgroundBorderless"
+-                        android:padding="8dp"
+-                        android:src="@drawable/ic_star_outline"
+-                        android:tint="?attr/colorOnSurfaceVariant"
+-                        android:visibility="gone"
+-                        android:contentDescription="@string/action_add_shortcut" />
+-                </LinearLayout>
+-            </com.google.android.material.card.MaterialCardView>
+-
+-            <!-- New tab: was the reload button's spot. Manual reload now
+-                 lives as pull-to-refresh (see webViewSwipeRefresh below) and
+-                 a "Refresh" item in the overflow menu, Chrome-gesture-style
+-                 instead of a dedicated button. -->
+-            <ImageButton
+-                android:id="@+id/newTabButton"
+-                android:layout_width="40dp"
+-                android:layout_height="40dp"
+-                android:layout_marginStart="2dp"
+-                android:background="?attr/selectableItemBackgroundBorderless"
+-                android:src="@drawable/ic_add"
+-                android:tint="?attr/colorOnSurfaceVariant"
+-                android:contentDescription="@string/action_new_tab" />
+-
+-            <FrameLayout
+-                android:id="@+id/tabsButton"
+-                android:layout_width="40dp"
+-                android:layout_height="40dp"
+-                android:background="?attr/selectableItemBackgroundBorderless"
+-                android:contentDescription="@string/action_tabs">
+-
+-                <View
+-                    android:layout_width="22dp"
+-                    android:layout_height="22dp"
+-                    android:layout_gravity="center"
+-                    android:background="@drawable/bg_tabs_counter" />
+-
+-                <TextView
+-                    android:id="@+id/tabsCount"
+-                    android:layout_width="wrap_content"
+-                    android:layout_height="wrap_content"
+-                    android:layout_gravity="center"
+-                    android:text="1"
+-                    android:textColor="?attr/colorOnSurfaceVariant"
+-                    android:textSize="12sp"
+-                    android:textStyle="bold" />
+-            </FrameLayout>
+-
+-            <ImageButton
+-                android:id="@+id/overflowButton"
+-                android:layout_width="40dp"
+-                android:layout_height="40dp"
+-                android:background="?attr/selectableItemBackgroundBorderless"
+-                android:src="@drawable/ic_more_vert"
+-                android:tint="?attr/colorOnSurfaceVariant"
+-                android:contentDescription="@string/action_more" />
+-        </LinearLayout>
+-        </com.google.android.material.card.MaterialCardView>
+-
+-            <!-- Chrome-style thin progress line, sitting right on the
+-                 address bar card's own bottom edge (same 8dp margins as the
+-                 card so it spans the same width). Track is transparent so
+-                 only the moving indicator line shows on top of the card's
+-                 surface; hide() fades it out instantly once loading ends. -->
+-            <com.google.android.material.progressindicator.LinearProgressIndicator
+-                android:id="@+id/pageProgress"
+-                android:layout_width="match_parent"
+-                android:layout_height="wrap_content"
+-                android:layout_gravity="bottom"
+-                android:layout_marginStart="8dp"
+-                android:layout_marginEnd="8dp"
+-                android:layout_marginBottom="8dp"
+-                android:elevation="4dp"
+-                android:translationZ="4dp"
+-                app:trackThickness="3dp"
+-                app:trackCornerRadius="2dp"
+-                app:trackColor="@android:color/transparent"
+-                app:indicatorColor="?attr/colorPrimary"
+-                app:showDelay="0"
+-                app:hideAnimationBehavior="outward"
+-                app:showAnimationBehavior="inward"
+-                android:visibility="gone" />
+-        </FrameLayout>
++            android:layout_height="wrap_content" />
+ 
+         <!-- Content area: WebView underneath, speed-dial shown on top for new tab -->
+         <FrameLayout
+-- 
+2.43.0
+

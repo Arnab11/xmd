@@ -14,179 +14,20 @@
              back/forward buttons; just new-tab, the search field, reload,
              tabs, and overflow. Floats slightly off the edges with its own
              rounded surface + elevation (rather than a flat bar flush with
-             the screen edges) for the Expressive "floating toolbar" look. -->
-        <!-- Wraps just the address bar card so the progress line below can
-             overlay its bottom edge (layout_gravity="bottom") rather than
-             sitting in a separate row with a gap underneath it. -->
-        <FrameLayout
+             the screen edges) for the Expressive "floating toolbar" look.
+
+             Phase E: this whole row (home/address-pill/new-tab/tabs/
+             overflow buttons, plus the progress line overlapping the
+             card's bottom edge) is now a single ComposeView hosting
+             BrowserToolbarRow (see BrowserToolbar.kt), replacing what was
+             a MaterialCardView + nested LinearLayout/EditText/ImageButtons
+             plus a separate LinearProgressIndicator sibling. Same wrap_content
+             height, same position as the first child of this vertical
+             LinearLayout, so the WebView content area below is unaffected. -->
+        <androidx.compose.ui.platform.ComposeView
+            android:id="@+id/browserToolbar"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content">
-
-        <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_margin="8dp"
-            app:cardBackgroundColor="?attr/colorSurfaceContainerLow"
-            app:shapeAppearance="@style/ShapeAppearance.Xmd.Large"
-            app:cardElevation="3dp"
-            app:strokeWidth="0dp">
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center_vertical"
-            android:paddingStart="6dp"
-            android:paddingEnd="6dp"
-            android:paddingVertical="8dp">
-
-            <ImageButton
-                android:id="@+id/homeButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:padding="9dp"
-                android:src="@drawable/ic_home"
-                android:tint="?attr/colorOnSurfaceVariant"
-                android:contentDescription="@string/action_home" />
-
-            <com.google.android.material.card.MaterialCardView
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:layout_marginStart="6dp"
-                app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                app:shapeAppearance="@style/ShapeAppearance.Xmd.Full"
-                app:cardElevation="0dp"
-                app:strokeWidth="0dp">
-
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="40dp"
-                    android:orientation="horizontal"
-                    android:gravity="center_vertical">
-
-                    <!-- Security indicator: swaps between locked/unlocked padlock
-                         based on the current page's scheme; hidden on the speed
-                         dial where there's no page to describe. -->
-                    <ImageView
-                        android:id="@+id/siteSecurityIcon"
-                        android:layout_width="16dp"
-                        android:layout_height="16dp"
-                        android:layout_marginStart="12dp"
-                        android:src="@drawable/ic_lock"
-                        android:tint="?attr/colorOnSurfaceVariant"
-                        android:visibility="gone"
-                        android:contentDescription="@null" />
-
-                    <EditText
-                        android:id="@+id/urlInput"
-                        android:layout_width="0dp"
-                        android:layout_height="40dp"
-                        android:layout_weight="1"
-                        android:background="@null"
-                        android:paddingStart="14dp"
-                        android:paddingEnd="4dp"
-                        android:hint="@string/hint_url"
-                        android:textColorHint="?attr/colorOnSurfaceVariant"
-                        android:textColor="?attr/colorOnSurface"
-                        android:textSize="14sp"
-                        android:singleLine="true"
-                        android:ellipsize="end"
-                        android:imeOptions="actionGo"
-                        android:inputType="textUri"
-                        android:selectAllOnFocus="true" />
-
-                    <!-- Bookmark-this-page toggle: outline when the loaded page
-                         isn't saved as a shortcut, filled once it is. Hidden on
-                         the speed dial (no page to bookmark yet). -->
-                    <ImageButton
-                        android:id="@+id/bookmarkStarButton"
-                        android:layout_width="36dp"
-                        android:layout_height="36dp"
-                        android:layout_marginEnd="2dp"
-                        android:background="?attr/selectableItemBackgroundBorderless"
-                        android:padding="8dp"
-                        android:src="@drawable/ic_star_outline"
-                        android:tint="?attr/colorOnSurfaceVariant"
-                        android:visibility="gone"
-                        android:contentDescription="@string/action_add_shortcut" />
-                </LinearLayout>
-            </com.google.android.material.card.MaterialCardView>
-
-            <!-- New tab: was the reload button's spot. Manual reload now
-                 lives as pull-to-refresh (see webViewSwipeRefresh below) and
-                 a "Refresh" item in the overflow menu, Chrome-gesture-style
-                 instead of a dedicated button. -->
-            <ImageButton
-                android:id="@+id/newTabButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:layout_marginStart="2dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_add"
-                android:tint="?attr/colorOnSurfaceVariant"
-                android:contentDescription="@string/action_new_tab" />
-
-            <FrameLayout
-                android:id="@+id/tabsButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:contentDescription="@string/action_tabs">
-
-                <View
-                    android:layout_width="22dp"
-                    android:layout_height="22dp"
-                    android:layout_gravity="center"
-                    android:background="@drawable/bg_tabs_counter" />
-
-                <TextView
-                    android:id="@+id/tabsCount"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_gravity="center"
-                    android:text="1"
-                    android:textColor="?attr/colorOnSurfaceVariant"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
-            </FrameLayout>
-
-            <ImageButton
-                android:id="@+id/overflowButton"
-                android:layout_width="40dp"
-                android:layout_height="40dp"
-                android:background="?attr/selectableItemBackgroundBorderless"
-                android:src="@drawable/ic_more_vert"
-                android:tint="?attr/colorOnSurfaceVariant"
-                android:contentDescription="@string/action_more" />
-        </LinearLayout>
-        </com.google.android.material.card.MaterialCardView>
-
-            <!-- Chrome-style thin progress line, sitting right on the
-                 address bar card's own bottom edge (same 8dp margins as the
-                 card so it spans the same width). Track is transparent so
-                 only the moving indicator line shows on top of the card's
-                 surface; hide() fades it out instantly once loading ends. -->
-            <com.google.android.material.progressindicator.LinearProgressIndicator
-                android:id="@+id/pageProgress"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_gravity="bottom"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="8dp"
-                android:layout_marginBottom="8dp"
-                android:elevation="4dp"
-                android:translationZ="4dp"
-                app:trackThickness="3dp"
-                app:trackCornerRadius="2dp"
-                app:trackColor="@android:color/transparent"
-                app:indicatorColor="?attr/colorPrimary"
-                app:showDelay="0"
-                app:hideAnimationBehavior="outward"
-                app:showAnimationBehavior="inward"
-                android:visibility="gone" />
-        </FrameLayout>
+            android:layout_height="wrap_content" />
 
         <!-- Content area: WebView underneath, speed-dial shown on top for new tab -->
         <FrameLayout
