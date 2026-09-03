@@ -511,16 +511,31 @@ private fun AppearanceRoute() {
 
 @Composable
 private fun ConnectionsRoute() {
-    val context = LocalContext.current
+    var connections by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.connectionsPerDownload())
+    }
+    var speedLimitKBps by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.speedLimitKBps())
+    }
+    var maxConcurrent by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.maxConcurrentDownloads())
+    }
+
     SettingsConnectionsScreen(
-        initialConnections = com.invictus.xmd.core.Settings.connectionsPerDownload(),
-        initialSpeedLimitKBps = com.invictus.xmd.core.Settings.speedLimitKBps(),
-        initialMaxConcurrent = com.invictus.xmd.core.Settings.maxConcurrentDownloads(),
-        onSave = { connections, speedLimitKBps, maxConcurrent ->
-            com.invictus.xmd.core.Settings.setConnectionsPerDownload(connections)
-            com.invictus.xmd.core.Settings.setSpeedLimitKBps(speedLimitKBps)
-            com.invictus.xmd.core.Settings.setMaxConcurrentDownloads(maxConcurrent)
-            Toast.makeText(context, R.string.settings_saved, Toast.LENGTH_SHORT).show()
+        connections = connections,
+        speedLimitKBps = speedLimitKBps,
+        maxConcurrent = maxConcurrent,
+        onConnectionsChanged = { value ->
+            connections = value
+            com.invictus.xmd.core.Settings.setConnectionsPerDownload(value)
+        },
+        onSpeedLimitChanged = { value ->
+            speedLimitKBps = value
+            com.invictus.xmd.core.Settings.setSpeedLimitKBps(value)
+        },
+        onMaxConcurrentChanged = { value ->
+            maxConcurrent = value
+            com.invictus.xmd.core.Settings.setMaxConcurrentDownloads(value)
         },
     )
 }
