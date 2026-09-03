@@ -36,17 +36,19 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.invictus.xmd.ui.icons.AppIcon
 import com.invictus.xmd.ui.icons.Icon
 import com.invictus.xmd.ui.icons.Icons
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -134,6 +136,17 @@ fun DownloadsScreen(
     var optionsTarget by remember { mutableStateOf<QueueItem?>(null) }
     var renameTarget by remember { mutableStateOf<QueueItem?>(null) }
     var deleteTarget by remember { mutableStateOf<QueueItem?>(null) }
+    var overflowMenuExpanded by remember { mutableStateOf(false) }
+
+    // Used by both the top-bar overflow menu (Cancel/Retry All + Clear) and
+    // to decide whether that menu button shows at all.
+    val hasActive = list.any {
+        it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
+            it.status == ItemStatus.RETRYING
+    }
+    val hasFailed = list.any { it.status == ItemStatus.FAILED }
+    val hasClearable = list.any { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
+    val showCancelOrRetry = hasActive || hasFailed
 
     Column(
         modifier = Modifier
@@ -144,39 +157,97 @@ fun DownloadsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                DownloadFilter.entries.forEach { filter ->
-                    val count = queryMatches.count(filter::matches)
-                    FilterChip(
-                        selected = selectedFilter == filter,
-                        onClick = { selectedFilterName = filter.name },
-                        label = {
-                            Text(
-                                text = "${stringResource(filter.labelRes)} $count",
-                                fontSize = 12.sp,
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    DownloadFilter.entries.forEach { filter ->
+                        val count = queryMatches.count(filter::matches)
+                        FilterChip(
+                            selected = selectedFilter == filter,
+                            onClick = { selectedFilterName = filter.name },
+                            label = {
+                                Text(
+                                    text = "${stringResource(filter.labelRes)} $count",
+                                    fontSize = 12.sp,
+                                )
+                            },
+                            leadingIcon = if (selectedFilter == filter) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ),
+                        )
+                    }
+                }
+
+                // Cancel All / Retry All + Clear, folded into a compact
+                // overflow menu instead of a separate full-width bar at the
+                // bottom of the screen (was visually disconnected from
+                // everything else and left a lot of dead space below a
+                // short list).
+                if (list.isNotEmpty() && (showCancelOrRetry || hasClearable)) {
+                    Box {
+                        IconButton(onClick = { overflowMenuExpanded = true }) {
+                            Icon(
+                                imageVector = Icons.More,
+                                contentDescription = stringResource(R.string.action_more),
                             )
-                        },
-                        leadingIcon = if (selectedFilter == filter) {
-                            {
-                                Icon(
-                                    imageVector = Icons.Check,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                        }
+                        DropdownMenu(
+                            expanded = overflowMenuExpanded,
+                            onDismissRequest = { overflowMenuExpanded = false },
+                        ) {
+                            if (hasActive) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.action_cancel_all),
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Cancel,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    onClick = { overflowMenuExpanded = false; onCancelAll() },
+                                )
+                            } else if (hasFailed) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_retry_all)) },
+                                    leadingIcon = { Icon(imageVector = Icons.Refresh, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onRetryAll() },
                                 )
                             }
-                        } else {
-                            null
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ),
-                    )
+                            if (hasClearable) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_clear)) },
+                                    leadingIcon = { Icon(imageVector = Icons.DeleteSweep, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onClearAllFinished() },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -202,44 +273,6 @@ fun DownloadsScreen(
                             onLongPress = { optionsTarget = it },
                         )
                     }
-                }
-            }
-        }
-
-        // ── Cancel All / Retry All + Clear All ──────────────────────────
-        val hasActive = list.any {
-            it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
-                it.status == ItemStatus.RETRYING
-        }
-        val hasFailed = list.any { it.status == ItemStatus.FAILED }
-        val hasClearable = list.any { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
-
-        val showCancelOrRetry = hasActive || hasFailed
-        if (list.isNotEmpty() && (showCancelOrRetry || hasClearable)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                if (showCancelOrRetry) {
-                    if (hasActive) {
-                        OutlinedButton(
-                            onClick = onCancelAll,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error,
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                        ) { Text(stringResource(R.string.action_cancel_all)) }
-                    } else {
-                        OutlinedButton(
-                            onClick = onRetryAll,
-                            modifier = Modifier.weight(1f),
-                        ) { Text(stringResource(R.string.action_retry_all)) }
-                    }
-                    if (hasClearable) Box(modifier = Modifier.width(8.dp))
-                }
-                if (hasClearable) {
-                    OutlinedButton(
-                        onClick = onClearAllFinished,
-                        modifier = Modifier.weight(1f),
-                    ) { Text(stringResource(R.string.action_clear)) }
                 }
             }
         }
