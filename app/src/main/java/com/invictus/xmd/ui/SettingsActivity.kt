@@ -775,9 +775,9 @@ private fun YoutubeRoute() {
 private fun AboutRoute() {
     val context = LocalContext.current
     val developers = listOf(
-        "Utsav Rajput" to "Developer",
-        "Arnab Sadhukhan" to "Developer",
-        "Ritesh Pandit" to "Developer",
+        AboutDeveloper("Utsav Rajput", "Utsavrajputt"),
+        AboutDeveloper("Arnab Sadhukhan", "Arnab11"),
+        AboutDeveloper("Ritesh Pandit", "Riteshp2001"),
     )
     val credits = buildList {
         add("libtorrent4j" to stringResource(R.string.about_credit_libtorrent_desc))
@@ -798,5 +798,9 @@ private fun AboutRoute() {
         },
         developers = developers,
         credits = credits,
+        onDeveloperClick = { developer ->
+            val url = "https://github.com/${developer.githubId}"
+            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+        },
     )
 }

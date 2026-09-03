@@ -63,6 +63,7 @@ class DownloadService : LifecycleService() {
         private const val BETWEEN_CLAIM_DELAY_MS = 500L
         private const val MAX_AUTO_RETRIES = 3
         private const val NOTIFY_THROTTLE_MS = 500L
+        private const val ETA_HOLD_MS = 1_000L
 
         fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java).setAction(ACTION_START)
@@ -775,6 +776,26 @@ class DownloadService : LifecycleService() {
     private val lastThrottledNotifyMs = java.util.concurrent.atomic.AtomicLong(0L)
 
     /**
+     * Holds each notification detail line's ETA steady for ~1s at a time,
+     * the same cadence [rememberThrottledSpeedEtaText] uses on the
+     * DownloadsScreen row (see DownloadsScreen.kt). Without this, ETA here
+     * would recompute from instantaneous speedBps on every throttled
+     * notification rebuild (every [NOTIFY_THROTTLE_MS] = 500ms), making the
+     * number flicker twice as fast as the in-app UI for the same download.
+     * Keyed by item id, or "__aggregate__" for the multi-item summary line.
+     */
+    private val etaHoldCache = ConcurrentHashMap<String, Pair<Long, Long>>() // key -> (heldAtMs, etaSec)
+
+    /** Returns [etaSec] unless a value for [key] was cached within the last second, in which case that stale value is returned instead. */
+    private fun holdSteadyEtaSec(key: String, etaSec: Long): Long {
+        val now = System.currentTimeMillis()
+        val cached = etaHoldCache[key]
+        if (cached != null && now - cached.first < ETA_HOLD_MS) return cached.second
+        etaHoldCache[key] = now to etaSec
+        return etaSec
+    }
+
+    /**
      * Same as [updateNotification] but rate-limited to at most once every
      * [NOTIFY_THROTTLE_MS]. The three per-download progress callbacks
      * (downloadOne/downloadYoutube/downloadTorrentOne) fire up to ~5x/sec
@@ -804,6 +825,13 @@ class DownloadService : LifecycleService() {
                 it.status == ItemStatus.RETRYING
         }
         val resolving = queue.any { it.status == ItemStatus.RESOLVING }
+
+        // Drop held ETA entries for items no longer in-flight so the cache
+        // doesn't grow unboundedly across a long-lived service instance.
+        if (etaHoldCache.isNotEmpty()) {
+            val liveIds = active.mapTo(mutableSetOf("__aggregate__")) { it.id }
+            etaHoldCache.keys.retainAll(liveIds)
+        }
 
         // yt-dlp reports a plain 0-100% instead of bytes -- excluded from the
         // byte-based sums below (mixing the two would produce meaningless
@@ -840,7 +868,7 @@ class DownloadService : LifecycleService() {
                     item.platform == MediaPlatform.YOUTUBE ->
                         (if (item.progressPercent >= 0) "${item.progressPercent}%" else "Resolving…") +
                             "  •  " + (item.mediaStatusText ?: item.mediaFormatLabel ?: "YouTube")
-                    else -> buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps)
+                    else -> buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps, etaHoldKey = item.id)
                 }
                 barPercent = when {
                     item.platform == MediaPlatform.YOUTUBE -> item.progressPercent.coerceAtLeast(0)
@@ -854,7 +882,7 @@ class DownloadService : LifecycleService() {
                 title = "${relevant.size} files" +
                     if (active.isNotEmpty()) " downloading" else " in queue"
                 text = buildString {
-                    append(buildDetailLine(totalDone, totalSize, totalSpeed))
+                    append(buildDetailLine(totalDone, totalSize, totalSpeed, etaHoldKey = "__aggregate__"))
                     if (pausedCount > 0) append("  •  $pausedCount paused")
                     if (ytCount > 0) append("  •  $ytCount YouTube")
                 }
@@ -923,8 +951,16 @@ class DownloadService : LifecycleService() {
         return builder.build()
     }
 
-    /** "12.4 MB / 45.0 MB  •  1.2 MB/s  •  ETA 0:32" */
-    private fun buildDetailLine(done: Long, total: Long, speedBps: Double): String {
+    /**
+     * "12.4 MB / 45.0 MB  •  1.2 MB/s  •  5 mins left"
+     *
+     * [etaHoldKey] identifies which row this line belongs to (an item id, or
+     * "__aggregate__" for the multi-item summary) so its ETA can be held
+     * steady via [holdSteadyEtaSec] instead of recomputing from instantaneous
+     * speed on every throttled notification rebuild -- pass null to skip
+     * holding (e.g. a paused item, whose speed/ETA aren't live anyway).
+     */
+    private fun buildDetailLine(done: Long, total: Long, speedBps: Double, etaHoldKey: String? = null): String {
         val sizePart = if (total > 0) "${formatBytes(done)} / ${formatBytes(total)}" else formatBytes(done)
         if (speedBps <= 0.0) return sizePart
 
@@ -935,8 +971,9 @@ class DownloadService : LifecycleService() {
         }
 
         val remaining = (total - done).coerceAtLeast(0)
-        val etaSec = if (total > 0) (remaining / speedBps).toLong() else -1L
-        val etaPart = if (etaSec >= 0) "  •  ETA ${formatDuration(etaSec)}" else ""
+        var etaSec = if (total > 0) (remaining / speedBps).toLong() else -1L
+        if (etaSec >= 0 && etaHoldKey != null) etaSec = holdSteadyEtaSec(etaHoldKey, etaSec)
+        val etaPart = if (etaSec >= 0) "  •  " + com.invictus.xmd.core.formatRemainingTimeChrome(etaSec) else ""
 
         return "$sizePart  •  $speedPart$etaPart"
     }
@@ -949,10 +986,4 @@ class DownloadService : LifecycleService() {
         else -> "$bytes B"
     }
 
-    private fun formatDuration(totalSeconds: Long): String {
-        val h = totalSeconds / 3600
-        val m = (totalSeconds % 3600) / 60
-        val s = totalSeconds % 60
-        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
-    }
 }
