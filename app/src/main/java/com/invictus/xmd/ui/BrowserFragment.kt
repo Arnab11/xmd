@@ -2,8 +2,6 @@ package com.invictus.xmd.ui
 
 import android.annotation.SuppressLint
 import android.os.Bundle
-import android.text.Editable
-import android.text.TextWatcher
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -13,7 +11,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
 import android.widget.FrameLayout
-import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.Toast
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
@@ -26,8 +23,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
-import com.google.android.material.card.MaterialCardView
-import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.invictus.xmd.R
 import com.invictus.xmd.core.BookmarkRepository
 import com.invictus.xmd.core.ShortcutRepository
@@ -143,7 +138,11 @@ class BrowserFragment : Fragment() {
     private lateinit var browserToolbar: androidx.compose.ui.platform.ComposeView
     private lateinit var webViewSwipeRefresh: SwipeRefreshLayout
     private lateinit var webViewContainer: FrameLayout
-    private lateinit var navLoadingVeil: View
+    // Phase F: was a plain View (FrameLayout + ProgressBar); now a
+    // ComposeView hosting NavLoadingVeil (see BrowserOverlays.kt) --
+    // showNavLoadingVeil()/hideNavLoadingVeil() now flip navLoadingVeilVisible
+    // instead of View.VISIBLE/GONE.
+    private lateinit var navLoadingVeil: androidx.compose.ui.platform.ComposeView
     // Now a ComposeView hosting ShortcutsScreen (was a LinearLayout wrapping
     // a RecyclerView + ShortcutAdapter) -- showSpeedDial()/showWebView()
     // still just flip its visibility, everything else moved to
@@ -153,8 +152,12 @@ class BrowserFragment : Fragment() {
     // see browserDialogHost's setContent in onViewCreated and
     // sniffedSheetStreams below for the first thing it hosts.
     private lateinit var browserDialogHost: androidx.compose.ui.platform.ComposeView
-    private lateinit var addLinkFab: FloatingActionButton
-    private lateinit var sniffedMediaFab: com.google.android.material.floatingactionbutton.ExtendedFloatingActionButton
+    // Phase F: addLinkFab (FloatingActionButton) + sniffedMediaFab
+    // (ExtendedFloatingActionButton) were two separate Views; now one
+    // shared ComposeView hosting BrowserFabs (see BrowserFabs.kt) --
+    // checkPageForLinks()/clearDetectedLink()/updateSniffedMediaFab() now
+    // flip the mutableStateOf fields below instead of View.VISIBLE/GONE.
+    private lateinit var browserFabs: androidx.compose.ui.platform.ComposeView
     // Now a ComposeView hosting AddressBarSuggestions (was a MaterialCardView
     // wrapping a RecyclerView + SuggestionAdapter) -- same id, same
     // top+8dp-margin position in fragment_browser.xml. scheduleSuggest()/
@@ -166,12 +169,11 @@ class BrowserFragment : Fragment() {
     // Phase 5: tabs tray, hosting TabsListOverlay.kt -- see that file's doc
     // comment and tabsOverlayVisible/tabsOverlaySnapshot below.
     private lateinit var tabsListOverlay: androidx.compose.ui.platform.ComposeView
-    private lateinit var findInPageBar: MaterialCardView
-    private lateinit var findInPageInput: EditText
-    private lateinit var findInPageMatchCount: android.widget.TextView
-    private lateinit var findInPagePrev: ImageButton
-    private lateinit var findInPageNext: ImageButton
-    private lateinit var findInPageClose: ImageButton
+    // Phase F: was a MaterialCardView + EditText/TextView/3x ImageButton;
+    // now a ComposeView hosting FindInPageBar (see BrowserOverlays.kt) --
+    // showFindInPage()/hideFindInPage()/setupFindInPage() now drive the
+    // mutableStateOf fields below instead of touching Views directly.
+    private lateinit var findInPageOverlay: androidx.compose.ui.platform.ComposeView
 
     private val shortcutsViewModel: ShortcutsViewModel by viewModels()
 
@@ -215,6 +217,30 @@ class BrowserFragment : Fragment() {
     // star can flip filled/outline instantly without a DB round-trip on
     // every tab switch -- kept in sync by the observer in setupSpeedDial().
     private var bookmarkedUrls: Set<String> = emptySet()
+
+    // ── Phase F: findInPageOverlay / navLoadingVeil / browserFabs state ───
+    // Drives FindInPageBar's setContent lambda below -- see
+    // setupFindInPage()/showFindInPage()/hideFindInPage(). Mirrors what
+    // findInPageBar.visibility used to hold directly.
+    private var findInPageVisible: Boolean by mutableStateOf(false)
+    // Mirrors the old findInPageInput.text -- "field on the Fragment,
+    // composable renders it" pattern, same as addressBarText.
+    private var findInPageQuery: String by mutableStateOf("")
+    // Mirrors the old findInPageMatchCount.text ("$current/$numberOfMatches").
+    private var findInPageMatchText: String by mutableStateOf("0/0")
+    // Bumped (never read for its value) each time showFindInPage() opens
+    // the bar, so FindInPageBar's LaunchedEffect can request focus + show
+    // the IME -- same "signal bump" pattern addressBarClearFocusSignal uses.
+    private var findInPageFocusSignal: Int by mutableStateOf(0)
+    // Drives NavLoadingVeil's visibility -- see showNavLoadingVeil()/
+    // hideNavLoadingVeil(). Mirrors the old navLoadingVeil.visibility.
+    private var navLoadingVeilVisible: Boolean by mutableStateOf(false)
+    // Drives BrowserFabs' two FABs -- see checkPageForLinks()/
+    // clearDetectedLink()/updateSniffedMediaFab(). Mirror the old
+    // addLinkFab.visibility / sniffedMediaFab.visibility+text.
+    private var detectedLinkVisible: Boolean by mutableStateOf(false)
+    private var sniffedMediaFabVisible: Boolean by mutableStateOf(false)
+    private var sniffedMediaFabText: String by mutableStateOf("")
 
     // ── Phase E: browserToolbar's state ──────────────────────────────────
     // Drives BrowserToolbarRow's setContent lambda below -- same "field on
@@ -344,6 +370,14 @@ class BrowserFragment : Fragment() {
         webViewSwipeRefresh = view.findViewById(R.id.webViewSwipeRefresh)
         webViewContainer = view.findViewById(R.id.webViewContainer)
         navLoadingVeil = view.findViewById(R.id.navLoadingVeil)
+        navLoadingVeil.setViewCompositionStrategy(
+            androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
+        )
+        navLoadingVeil.setContent {
+            com.invictus.xmd.ui.theme.XmdTheme {
+                NavLoadingVeil(visible = navLoadingVeilVisible)
+            }
+        }
         speedDialContainer = view.findViewById(R.id.speedDialContainer)
         speedDialContainer.setViewCompositionStrategy(
             androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
@@ -389,8 +423,21 @@ class BrowserFragment : Fragment() {
                 }
             }
         }
-        addLinkFab = view.findViewById(R.id.addLinkFab)
-        sniffedMediaFab = view.findViewById(R.id.sniffedMediaFab)
+        browserFabs = view.findViewById(R.id.browserFabs)
+        browserFabs.setViewCompositionStrategy(
+            androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
+        )
+        browserFabs.setContent {
+            com.invictus.xmd.ui.theme.XmdTheme {
+                BrowserFabs(
+                    detectedLinkVisible = detectedLinkVisible,
+                    onDetectedLinkTap = { onAddLinkClicked() },
+                    sniffedMediaVisible = sniffedMediaFabVisible,
+                    sniffedMediaText = sniffedMediaFabText,
+                    onSniffedMediaTap = { showSniffedMediaSheet() },
+                )
+            }
+        }
         suggestionsCard = view.findViewById(R.id.suggestionsCard)
         suggestionsCard.setViewCompositionStrategy(
             androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
@@ -447,25 +494,36 @@ class BrowserFragment : Fragment() {
                 )
             }
         }
-        findInPageBar = view.findViewById(R.id.findInPageBar)
-        findInPageInput = view.findViewById(R.id.findInPageInput)
-        findInPageMatchCount = view.findViewById(R.id.findInPageMatchCount)
-        findInPagePrev = view.findViewById(R.id.findInPagePrev)
-        findInPageNext = view.findViewById(R.id.findInPageNext)
-        findInPageClose = view.findViewById(R.id.findInPageClose)
+        findInPageOverlay = view.findViewById(R.id.findInPageOverlay)
+        findInPageOverlay.setViewCompositionStrategy(
+            androidx.compose.ui.platform.ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed
+        )
+        findInPageOverlay.setContent {
+            com.invictus.xmd.ui.theme.XmdTheme {
+                FindInPageBar(
+                    visible = findInPageVisible,
+                    query = findInPageQuery,
+                    onQueryChange = { query -> onFindInPageQueryChange(query) },
+                    matchText = findInPageMatchText,
+                    onPrev = { webViewFor(tabs.getOrNull(currentTabIndex))?.findNext(false) },
+                    onNext = { webViewFor(tabs.getOrNull(currentTabIndex))?.findNext(true) },
+                    onClose = { hideFindInPage() },
+                    requestFocus = findInPageFocusSignal,
+                )
+            }
+        }
 
         setupSpeedDial()
         setupPullToRefresh()
-        setupFindInPage()
 
         // newTabButton/homeButton/tabsButton/overflowButton/
         // bookmarkStarButton click wiring, and urlInput's editor-action/
         // text-watcher/focus-change listeners (the old setupAddressBar()),
         // all moved into BrowserToolbarRow's onClick/onGo/onAddressTextChange/
         // onAddressFocusChange lambdas above -- same destination functions,
-        // just no longer separate View listeners.
-        addLinkFab.setOnClickListener { onAddLinkClicked() }
-        sniffedMediaFab.setOnClickListener { showSniffedMediaSheet() }
+        // just no longer separate View listeners. addLinkFab/sniffedMediaFab's
+        // click listeners moved the same way, into browserFabs.setContent's
+        // onDetectedLinkTap/onSniffedMediaTap lambdas above.
 
         // Start on the speed-dial ("new tab") page.
         showSpeedDial()
@@ -1065,29 +1123,25 @@ class BrowserFragment : Fragment() {
     }
 
     // ── Find in page ──────────────────────────────────────────────────────
+    // Phase F: was setupFindInPage() wiring a TextWatcher + 3 click
+    // listeners onto real Views; FindInPageBar's setContent lambda
+    // (onViewCreated) now wires the same callbacks directly, so there's no
+    // separate setup function left to call -- onFindInPageQueryChange below
+    // is the TextWatcher's afterTextChanged logic, unchanged.
 
-    private fun setupFindInPage() {
-        findInPageInput.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                val webView = webViewFor(tabs.getOrNull(currentTabIndex)) ?: return
-                val query = s?.toString().orEmpty()
-                if (query.isEmpty()) {
-                    webView.clearMatches()
-                    findInPageMatchCount.text = "0/0"
-                } else {
-                    webView.findAllAsync(query)
-                }
-            }
-        })
-        findInPagePrev.setOnClickListener {
-            webViewFor(tabs.getOrNull(currentTabIndex))?.findNext(false)
+    /** Same logic the old TextWatcher's afterTextChanged had -- updates
+     *  findInPageQuery (so FindInPageBar's TextField reflects the edit)
+     *  and re-runs the WebView's find-in-page search, or clears matches on
+     *  an empty query. */
+    private fun onFindInPageQueryChange(query: String) {
+        findInPageQuery = query
+        val webView = webViewFor(tabs.getOrNull(currentTabIndex)) ?: return
+        if (query.isEmpty()) {
+            webView.clearMatches()
+            findInPageMatchText = "0/0"
+        } else {
+            webView.findAllAsync(query)
         }
-        findInPageNext.setOnClickListener {
-            webViewFor(tabs.getOrNull(currentTabIndex))?.findNext(true)
-        }
-        findInPageClose.setOnClickListener { hideFindInPage() }
     }
 
     /** Opened from the overflow menu's "Find in page" item. Wires the
@@ -1099,12 +1153,15 @@ class BrowserFragment : Fragment() {
         webView.setFindListener { activeMatchOrdinal, numberOfMatches, isDoneCounting ->
             if (!isDoneCounting) return@setFindListener
             val current = if (numberOfMatches == 0) 0 else activeMatchOrdinal + 1
-            findInPageMatchCount.text = "$current/$numberOfMatches"
+            findInPageMatchText = "$current/$numberOfMatches"
         }
-        findInPageBar.visibility = View.VISIBLE
-        findInPageInput.requestFocus()
-        val imm = requireContext().getSystemService(android.view.inputmethod.InputMethodManager::class.java)
-        imm?.showSoftInput(findInPageInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+        findInPageVisible = true
+        // FindInPageBar's LaunchedEffect(requestFocus) does the actual
+        // focus-request + IME-show, same as the old requestFocus() +
+        // showSoftInput(SHOW_IMPLICIT) pair -- see that composable's doc
+        // comment in BrowserOverlays.kt for why this can't be an
+        // imperative call from here anymore.
+        findInPageFocusSignal++
     }
 
     private fun hideFindInPage() {
@@ -1112,10 +1169,11 @@ class BrowserFragment : Fragment() {
             it.clearMatches()
             it.setFindListener(null)
         }
-        findInPageInput.setText("")
-        findInPageBar.visibility = View.GONE
+        findInPageQuery = ""
+        findInPageMatchText = "0/0"
+        findInPageVisible = false
         val imm = requireContext().getSystemService(android.view.inputmethod.InputMethodManager::class.java)
-        imm?.hideSoftInputFromWindow(findInPageInput.windowToken, 0)
+        imm?.hideSoftInputFromWindow(view?.windowToken, 0)
     }
 
     private fun updateSecurityIcon(tab: BrowserTab) {
@@ -1251,7 +1309,7 @@ class BrowserFragment : Fragment() {
         webViewSwipeRefresh.isRefreshing = false
         hideSuggestions()
         clearDetectedLink()
-        sniffedMediaFab.visibility = View.GONE
+        sniffedMediaFabVisible = false
         hideNavLoadingVeil()
     }
 
@@ -1269,12 +1327,11 @@ class BrowserFragment : Fragment() {
      * actually finished (or failed) loading.
      */
     private fun showNavLoadingVeil() {
-        navLoadingVeil.visibility = View.VISIBLE
-        navLoadingVeil.bringToFront()
+        navLoadingVeilVisible = true
     }
 
     private fun hideNavLoadingVeil() {
-        navLoadingVeil.visibility = View.GONE
+        navLoadingVeilVisible = false
     }
 
     // Add/edit/options dialogs for shortcuts are now Compose (see
@@ -1521,7 +1578,7 @@ class BrowserFragment : Fragment() {
     private fun checkPageForLinks(url: String) {
         if (LinkParser.isShareLink(url) || LinkParser.isFitgirlPage(url)) {
             lastDetectedLink = url
-            addLinkFab.visibility = View.VISIBLE
+            detectedLinkVisible = true
         } else {
             clearDetectedLink()
         }
@@ -1529,7 +1586,7 @@ class BrowserFragment : Fragment() {
 
     private fun clearDetectedLink() {
         lastDetectedLink = null
-        addLinkFab.visibility = View.GONE
+        detectedLinkVisible = false
     }
 
     /** Reflects [tab]'s current sniffedMedia count onto the chip -- called
@@ -1540,15 +1597,15 @@ class BrowserFragment : Fragment() {
         if (!isCurrentTab(tab)) return
         val count = tab.sniffedMedia.size
         if (count == 0) {
-            sniffedMediaFab.visibility = View.GONE
+            sniffedMediaFabVisible = false
             return
         }
-        sniffedMediaFab.text = if (count == 1) {
+        sniffedMediaFabText = if (count == 1) {
             getString(R.string.sniffed_media_chip_one)
         } else {
             getString(R.string.sniffed_media_chip_many, count)
         }
-        sniffedMediaFab.visibility = View.VISIBLE
+        sniffedMediaFabVisible = true
     }
 
     /** Opens the Compose SniffedMediaSheet (see browserDialogHost's
