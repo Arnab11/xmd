@@ -12,11 +12,15 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.appcompat.widget.TooltipCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
 import com.google.android.material.button.MaterialButton
 import com.invictus.xmd.R
 import com.invictus.xmd.core.ItemStatus
 import com.invictus.xmd.core.LinkParser
 import com.invictus.xmd.core.QueueRepository
+import kotlinx.coroutines.launch
 
 class HomeFragment : Fragment() {
 
@@ -80,23 +84,27 @@ class HomeFragment : Fragment() {
         val statsView = view.findViewById<TextView>(R.id.quickStats)
         statsView.setOnClickListener { (activity as? Callbacks)?.openDownloadsTab() }
 
-        QueueRepository.items.observe(viewLifecycleOwner) { list ->
-            val downloading = list.count { it.status == ItemStatus.DOWNLOADING }
-            val paused = list.count { it.status == ItemStatus.PAUSED }
-            val done = list.count { it.status == ItemStatus.DONE }
-            val failed = list.count { it.status == ItemStatus.FAILED }
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                QueueRepository.items.collect { list ->
+                    val downloading = list.count { it.status == ItemStatus.DOWNLOADING }
+                    val paused = list.count { it.status == ItemStatus.PAUSED }
+                    val done = list.count { it.status == ItemStatus.DONE }
+                    val failed = list.count { it.status == ItemStatus.FAILED }
 
-            val parts = mutableListOf<String>()
-            if (downloading > 0) parts += "⬇ $downloading downloading"
-            if (paused > 0) parts += "⏸ $paused paused"
-            if (done > 0) parts += "✔ $done done"
-            if (failed > 0) parts += "✖ $failed failed"
+                    val parts = mutableListOf<String>()
+                    if (downloading > 0) parts += "⬇ $downloading downloading"
+                    if (paused > 0) parts += "⏸ $paused paused"
+                    if (done > 0) parts += "✔ $done done"
+                    if (failed > 0) parts += "✖ $failed failed"
 
-            if (parts.isEmpty()) {
-                statsView.visibility = View.GONE
-            } else {
-                statsView.text = parts.joinToString("  •  ")
-                statsView.visibility = View.VISIBLE
+                    if (parts.isEmpty()) {
+                        statsView.visibility = View.GONE
+                    } else {
+                        statsView.text = parts.joinToString("  •  ")
+                        statsView.visibility = View.VISIBLE
+                    }
+                }
             }
         }
     }
