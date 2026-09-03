@@ -9,7 +9,6 @@ import android.webkit.CookieManager
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
-import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.Toast
@@ -200,6 +199,11 @@ class BrowserFragment : Fragment() {
     // See showLinkContextMenu() for how the coordinates get translated from
     // webView-local to browserDialogHost-local before landing here.
     private var linkContextMenuState: LinkContextMenuState? by mutableStateOf(null)
+    // Drives browserDialogHost's AddBookmarkDialog branch -- non-null shows
+    // the dialog prefilled with whatever showAddBookmarkDialog() was called
+    // with (current tab's URL/title, or an explicit prefill).
+    private data class AddBookmarkDialogState(val prefillUrl: String?, val prefillTitle: String?)
+    private var addBookmarkDialogState: AddBookmarkDialogState? by mutableStateOf(null)
     // Drives suggestionsCard's Compose content -- see that field's comment.
     // Empty list == dropdown hidden, same meaning View.GONE used to carry.
     private var suggestionItems: List<Suggestion> by mutableStateOf(emptyList())
@@ -419,6 +423,27 @@ class BrowserFragment : Fragment() {
                         onDownloadImage = { url -> onWebViewDownloadRequested(url, null, "image/*") },
                         onCopyLinkAddress = { url -> copyLinkToClipboard(url) },
                         onShareLink = { url -> shareLink(url) },
+                    )
+                }
+                addBookmarkDialogState?.let { state ->
+                    AddBookmarkDialog(
+                        initialUrl = state.prefillUrl,
+                        initialTitle = state.prefillTitle,
+                        onDismiss = { addBookmarkDialogState = null },
+                        onConfirm = { url, title, alsoAddShortcut ->
+                            if (url.isBlank()) {
+                                Toast.makeText(requireContext(), R.string.bookmark_needs_url, Toast.LENGTH_SHORT).show()
+                                return@AddBookmarkDialog
+                            }
+                            val normalized = normalizeToUrl(url.trim())
+                            val trimmedTitle = title.trim()
+                            BookmarkRepository.add(trimmedTitle, normalized)
+                            if (alsoAddShortcut) {
+                                ShortcutRepository.add(trimmedTitle, normalized)
+                            }
+                            Toast.makeText(requireContext(), R.string.bookmark_added_toast, Toast.LENGTH_SHORT).show()
+                            addBookmarkDialogState = null
+                        },
                     )
                 }
             }
@@ -1342,34 +1367,20 @@ class BrowserFragment : Fragment() {
     /** Star-button flow: saves a real Bookmark for the current page. The
      *  checkbox additionally creates a matching speed-dial Shortcut in the
      *  same tap -- the two lists stay independent after that (removing the
-     *  bookmark later never removes the shortcut, and vice versa). */
+     *  bookmark later never removes the shortcut, and vice versa).
+     *
+     *  Post-migration-audit conversion: was a MaterialAlertDialogBuilder +
+     *  dialog_add_bookmark.xml inflate, now just sets Compose state read by
+     *  browserDialogHost's AddBookmarkDialog branch (see onViewCreated).
+     *  Validation/persist logic (empty-URL toast, normalizeToUrl,
+     *  BookmarkRepository/ShortcutRepository.add, success toast) moved into
+     *  that branch's onConfirm lambda -- this function now only computes
+     *  the prefill. */
     private fun showAddBookmarkDialog(prefillUrl: String?, prefillTitle: String? = null) {
-        val dialogView = layoutInflater.inflate(R.layout.dialog_add_bookmark, null)
-        val titleInput = dialogView.findViewById<EditText>(R.id.bookmarkTitleInput)
-        val urlField = dialogView.findViewById<EditText>(R.id.bookmarkUrlInput)
-        val alsoAddShortcutCheckbox = dialogView.findViewById<android.widget.CheckBox>(R.id.bookmarkAlsoAddShortcutCheckbox)
-        urlField.setText(prefillUrl ?: tabs.getOrNull(currentTabIndex)?.url)
-        titleInput.setText(prefillTitle)
-
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle(R.string.add_bookmark_dialog_title)
-            .setView(dialogView)
-            .setPositiveButton(R.string.action_add) { _, _ ->
-                val url = urlField.text?.toString()?.trim().orEmpty()
-                if (url.isEmpty()) {
-                    Toast.makeText(requireContext(), R.string.bookmark_needs_url, Toast.LENGTH_SHORT).show()
-                    return@setPositiveButton
-                }
-                val normalized = normalizeToUrl(url)
-                val title = titleInput.text?.toString()?.trim().orEmpty()
-                BookmarkRepository.add(title, normalized)
-                if (alsoAddShortcutCheckbox.isChecked) {
-                    ShortcutRepository.add(title, normalized)
-                }
-                Toast.makeText(requireContext(), R.string.bookmark_added_toast, Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton(android.R.string.cancel, null)
-            .show()
+        addBookmarkDialogState = AddBookmarkDialogState(
+            prefillUrl = prefillUrl ?: tabs.getOrNull(currentTabIndex)?.url,
+            prefillTitle = prefillTitle,
+        )
     }
 
     // ── Tabs ─────────────────────────────────────────────────────────────
