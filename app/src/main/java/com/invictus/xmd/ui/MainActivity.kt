@@ -13,8 +13,6 @@ import android.view.Menu
 import android.view.MenuItem
 import android.view.MotionEvent
 import android.widget.EditText
-import android.widget.RadioButton
-import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.addCallback
@@ -24,7 +22,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
-import androidx.appcompat.widget.AppCompatRadioButton
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -67,8 +64,6 @@ import android.text.Editable
 import android.widget.ImageView
 import androidx.activity.result.ActivityResultLauncher
 import androidx.core.widget.doAfterTextChanged
-import androidx.recyclerview.widget.LinearLayoutManager
-import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.color.MaterialColors
 import com.google.android.material.shape.MaterialShapeDrawable
@@ -81,7 +76,6 @@ import android.graphics.Typeface
 import androidx.core.view.isVisible
 import android.widget.ArrayAdapter
 import android.widget.AutoCompleteTextView
-import com.google.android.material.textfield.MaterialAutoCompleteTextView
 import com.google.android.material.textfield.TextInputLayout
 import okhttp3.Request
 import org.json.JSONObject
@@ -215,6 +209,32 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     // for sniffedSheetStreams/suggestionItems (see that file's comments for
     // the extension-function-import lesson this relies on).
     private var dnsSettingsDialogOpen: Boolean by mutableStateOf(false)
+
+    // Phase A: state for the 3 dialogs converted this phase, same
+    // `by mutableStateOf` + null-means-closed pattern as dnsSettingsDialogOpen.
+    private data class AddDownloadDialogState(val initialLink: String)
+
+    private data class AddTorrentDialogState(
+        val prefillLink: String?,
+        val prefillTorrentUri: Uri?,
+        val prefillDisplayName: String?,
+        val filesState: TorrentFilesUiState,
+    )
+
+    private data class QualityPickerState(
+        val titleText: String,
+        val standardOptions: List<YtDlpManager.QualityOption>,
+        val advancedFormats: List<YtDlpManager.ProbedFormat>,
+        val advancedLoading: Boolean,
+        val durationSeconds: Int?,
+        val onConfirm: (YtDlpManager.QualityOption?) -> Unit,
+        val onDismiss: () -> Unit,
+    )
+
+    private var addDownloadDialogState: AddDownloadDialogState? by mutableStateOf(null)
+    private var addTorrentDialogState: AddTorrentDialogState? by mutableStateOf(null)
+    private var qualityPickerState: QualityPickerState? by mutableStateOf(null)
+    private var torrentMetadataJob: Job? = null
 
     private fun openHeaderSearch() {
         headerNormalLayout.visibility = View.GONE
@@ -465,6 +485,132 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                         onInvalidCustomUrl = {
                             Toast.makeText(this, R.string.dns_custom_url_needed, Toast.LENGTH_SHORT).show()
                         },
+                    )
+                }
+
+                addDownloadDialogState?.let { state ->
+                    AddDownloadDialog(
+                        initialLink = state.initialLink,
+                        defaultSavePath = defaultSavePath(),
+                        magnetDisplayName = { magnetDisplayName(it) },
+                        extractYoutubeFallbackName = { extractYoutubeFallbackName(it) },
+                        probeYoutubeTitle = { link -> withContext(Dispatchers.IO) { probeYoutubeTitle(link) } },
+                        probeRealFilename = { link ->
+                            withContext(Dispatchers.IO) { DownloadEngine.probeRealFilename(filenameClient, link) }
+                        },
+                        onDetectedTorrentLink = { link ->
+                            addDownloadDialogState = null
+                            showAddTorrentDialog(prefillLink = link)
+                        },
+                        onPickTorrentFile = {
+                            addDownloadDialogState = null
+                            pickTorrentFileLauncher.launch(
+                                arrayOf("application/x-bittorrent", "application/octet-stream")
+                            )
+                        },
+                        onCopyLink = { text ->
+                            if (text.isNotBlank()) {
+                                clipboardManager.setPrimaryClip(ClipData.newPlainText("Download link", text))
+                                Toast.makeText(this, R.string.torrent_dialog_link_copied_toast, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onPasteRequest = {
+                            val clipText = clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
+                            if (clipText.isBlank()) {
+                                Toast.makeText(this, R.string.clipboard_empty_toast, Toast.LENGTH_SHORT).show()
+                                null
+                            } else {
+                                Toast.makeText(this, R.string.dialog_link_pasted_toast, Toast.LENGTH_SHORT).show()
+                                clipText
+                            }
+                        },
+                        onChangeSaveDir = { onPicked ->
+                            pendingSaveDirCallback = onPicked
+                            pickSaveDirLauncher.launch(null)
+                        },
+                        onDismiss = { addDownloadDialogState = null },
+                        onStart = { link, name, saveDir, quality, audioFormat ->
+                            addDownloadDialogState = null
+                            when {
+                                LinkParser.isTorrentLink(link) -> showAddTorrentDialog(prefillLink = link)
+                                LinkParser.isShareLink(link) || LinkParser.isFitgirlPage(link) ->
+                                    triggerPrepare(listOf(link))
+                                LinkParser.needsYtDlp(link) ->
+                                    triggerDownloadYoutubeCustom(link, name, saveDir, quality, audioFormat)
+                                else -> triggerDownloadDirectCustom(link, name, saveDir)
+                            }
+                        },
+                    )
+                }
+
+                addTorrentDialogState?.let { state ->
+                    AddTorrentDialog(
+                        prefillLink = state.prefillLink,
+                        prefillTorrentUri = state.prefillTorrentUri,
+                        prefillDisplayName = state.prefillDisplayName,
+                        defaultSavePath = defaultSavePath(),
+                        filesState = state.filesState,
+                        onLinkChanged = { newLink -> onAddTorrentLinkChanged(newLink) },
+                        onCopyLink = { text ->
+                            if (text.isNotBlank()) {
+                                clipboardManager.setPrimaryClip(ClipData.newPlainText("Magnet link", text))
+                                Toast.makeText(this, R.string.torrent_dialog_link_copied_toast, Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onPasteRequest = {
+                            val clipText = clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
+                            if (clipText.isBlank()) {
+                                Toast.makeText(this, R.string.clipboard_empty_toast, Toast.LENGTH_SHORT).show()
+                                null
+                            } else {
+                                Toast.makeText(this, R.string.dialog_link_pasted_toast, Toast.LENGTH_SHORT).show()
+                                clipText
+                            }
+                        },
+                        onPickTorrentFile = {
+                            addTorrentDialogState = null
+                            pickTorrentFileLauncher.launch(
+                                arrayOf("application/x-bittorrent", "application/octet-stream")
+                            )
+                        },
+                        onToggleFile = { index -> toggleTorrentFileSelection(index) },
+                        onToggleSelectAll = { toggleTorrentSelectAll() },
+                        onChangeSaveDir = { onPicked ->
+                            pendingSaveDirCallback = onPicked
+                            pickSaveDirLauncher.launch(null)
+                        },
+                        onDismiss = {
+                            torrentMetadataJob?.cancel()
+                            addTorrentDialogState = null
+                        },
+                        onStart = onStart@{ link, name, saveDir, totalFiles, selectedCount, selectedIndices ->
+                            if (totalFiles > 0 && selectedCount == 0) {
+                                Toast.makeText(this, R.string.torrent_dialog_no_files_selected, Toast.LENGTH_SHORT).show()
+                                return@onStart
+                            }
+                            val uri = state.prefillTorrentUri
+                            if (uri != null) {
+                                addTorrentDialogState = null
+                                triggerDownloadTorrentFile(uri, name, saveDir, selectedIndices)
+                            } else if (!LinkParser.isTorrentLink(link)) {
+                                Toast.makeText(this, R.string.torrent_dialog_invalid_link, Toast.LENGTH_SHORT).show()
+                            } else {
+                                addTorrentDialogState = null
+                                triggerDownloadTorrentMagnet(link, name, saveDir, selectedIndices)
+                            }
+                        },
+                    )
+                }
+
+                qualityPickerState?.let { state ->
+                    QualityPickerDialog(
+                        titleText = state.titleText,
+                        standardOptions = state.standardOptions,
+                        advancedFormats = state.advancedFormats,
+                        advancedLoading = state.advancedLoading,
+                        durationSeconds = state.durationSeconds,
+                        onDismiss = state.onDismiss,
+                        onConfirm = state.onConfirm,
                     )
                 }
             }
@@ -859,384 +1005,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             showAddTorrentDialog(prefillLink = trimmed)
             return
         }
-
-        val dialogView = LayoutInflater.from(this)
-            .inflate(R.layout.dialog_add_download, null)
-
-        val linkInput = dialogView.findViewById<EditText>(R.id.downloadLinkInput)
-        val copyLinkButton = dialogView.findViewById<MaterialButton>(R.id.downloadCopyLinkButton)
-        val pasteLinkButton = dialogView.findViewById<MaterialButton>(R.id.downloadPasteLinkButton)
-        val pickFileText = dialogView.findViewById<TextView>(R.id.downloadPickFileText)
-        val qualitySection = dialogView.findViewById<View>(R.id.downloadQualitySection)
-        val qualityDropdown = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.downloadQualityDropdown)
-        val audioFormatLayout = dialogView.findViewById<View>(R.id.downloadAudioFormatLayout)
-        val audioFormatDropdown = dialogView.findViewById<MaterialAutoCompleteTextView>(R.id.downloadAudioFormatDropdown)
-
-        val advancedStreamsSection = dialogView.findViewById<View>(R.id.downloadAdvancedStreamsSection)
-        val advancedStreamsLoading = dialogView.findViewById<View>(R.id.downloadAdvancedStreamsLoading)
-        val advancedStreamsEmpty = dialogView.findViewById<View>(R.id.downloadAdvancedStreamsEmpty)
-        val advancedStreamsCard = dialogView.findViewById<View>(R.id.downloadAdvancedStreamsCard)
-        val advancedStreamsScroll = dialogView.findViewById<androidx.core.widget.NestedScrollView>(R.id.downloadAdvancedStreamsScroll)
-        advancedStreamsScroll.isNestedScrollingEnabled = true
-        val advancedStreamsGroup = dialogView.findViewById<RadioGroup>(R.id.downloadAdvancedStreamsGroup)
-
-        advancedStreamsScroll.setOnTouchListener { v, event ->
-            when (event.actionMasked) {
-                android.view.MotionEvent.ACTION_DOWN -> v.parent.requestDisallowInterceptTouchEvent(true)
-                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> v.parent.requestDisallowInterceptTouchEvent(false)
-            }
-            false
-        }
-
-        val nameInput = dialogView.findViewById<EditText>(R.id.downloadNameInput)
-        val advancedHeader = dialogView.findViewById<View>(R.id.downloadAdvancedHeader)
-        val advancedChevron = dialogView.findViewById<ImageView>(R.id.downloadAdvancedChevron)
-        val advancedContent = dialogView.findViewById<View>(R.id.downloadAdvancedContent)
-        val saveToPathText = dialogView.findViewById<TextView>(R.id.downloadSaveToPathText)
-        val changePathButton = dialogView.findViewById<MaterialButton>(R.id.downloadChangePathButton)
-        val startButton = dialogView.findViewById<MaterialButton>(R.id.downloadStartButton)
-        val cancelButton = dialogView.findViewById<MaterialButton>(R.id.downloadCancelButton)
-
-        var customSaveDirPath: String? = null
-        var nameManuallyEdited = false
-        var isProgrammaticNameChange = false
-        var selectedQualityOption: YtDlpManager.QualityOption? = null
-        var selectedAudioFormatPreset: Settings.AudioFormatPreset = Settings.presetAudioFormat()
-
-        fun setNameText(text: String) {
-            isProgrammaticNameChange = true
-            nameInput.setText(text)
-            isProgrammaticNameChange = false
-        }
-
-        val initialLink = link?.trim().orEmpty()
-
-        if (initialLink.isNotEmpty()) {
-            linkInput.setText(initialLink)
-        }
-        saveToPathText.text = defaultSavePath()
-
-        val audioFormatList = listOf(
-            "MP3" to Settings.AudioFormatPreset.MP3,
-            "M4A" to Settings.AudioFormatPreset.M4A,
-            "Opus" to Settings.AudioFormatPreset.OPUS,
-            "Original" to Settings.AudioFormatPreset.ORIGINAL
-        )
-        audioFormatDropdown.setSimpleItems(audioFormatList.map { it.first }.toTypedArray())
-        val initialAudioLabel = audioFormatList.firstOrNull { it.second == selectedAudioFormatPreset }?.first ?: "MP3"
-        audioFormatDropdown.setText(initialAudioLabel, false)
-        audioFormatDropdown.setOnItemClickListener { _, _, position, _ ->
-            selectedAudioFormatPreset = audioFormatList[position].second
-        }
-
-        var formatProbeJob: Job? = null
-        fun probeAdvancedFormats(currentLink: String) {
-            formatProbeJob?.cancel()
-            advancedStreamsGroup.removeAllViews()
-            if (!LinkParser.needsYtDlp(currentLink)) {
-                advancedStreamsSection.visibility = View.GONE
-                advancedStreamsCard.visibility = View.GONE
-                return
-            }
-            advancedStreamsSection.visibility = View.VISIBLE
-            advancedStreamsLoading.visibility = View.VISIBLE
-            advancedStreamsEmpty.visibility = View.GONE
-            advancedStreamsCard.visibility = View.GONE
-
-            formatProbeJob = lifecycleScope.launch {
-                val probe = withContext(Dispatchers.IO) {
-                    YtDlpManager.probeFormats(currentLink, this@MainActivity)
-                }
-                if (!isActive) return@launch
-                advancedStreamsLoading.visibility = View.GONE
-                if (probe.formats.isEmpty()) {
-                    advancedStreamsEmpty.visibility = View.VISIBLE
-                    advancedStreamsCard.visibility = View.GONE
-                    return@launch
-                }
-                advancedStreamsEmpty.visibility = View.GONE
-
-                val density = resources.displayMetrics.density
-                val sorted = probe.formats.sortedWith(
-                    compareByDescending<YtDlpManager.ProbedFormat> { it.height ?: -1 }
-                        .thenByDescending { it.fps ?: -1 }
-                        .thenByDescending { it.tbr ?: -1.0 }
-                )
-
-                val maxHeightPx = (210 * density).toInt()
-                val approxHeightPx = (sorted.size * 42 * density).toInt() + (8 * density).toInt()
-                advancedStreamsCard.layoutParams.height = minOf(maxHeightPx, approxHeightPx)
-                advancedStreamsCard.visibility = View.VISIBLE
-
-                sorted.forEach { format ->
-                    val sizeText = YtDlpManager.formatSize(format, probe.durationSeconds)
-                    val label = buildString {
-                        if (format.height != null) append("${format.height}p") else append("Audio")
-                        if (format.fps != null && format.fps > 30) append(" ${format.fps}fps")
-                        append(" · ${format.ext.uppercase()}")
-                        if (format.vcodec != null) append(" · ${format.vcodec.substringBefore('.')}")
-                        if (format.acodec != null && format.isAudioOnly) append(" · ${format.acodec.substringBefore('.')}")
-                        if (sizeText != null) append(" · $sizeText")
-                    }
-
-                    val row = AppCompatRadioButton(this@MainActivity).apply {
-                        id = View.generateViewId()
-                        text = label
-                        buttonDrawable = null
-                        setBackgroundResource(R.drawable.bg_stream_row_selector)
-                        setTextColor(ContextCompat.getColorStateList(this@MainActivity, R.color.text_radio_row))
-                        textSize = 13f
-                        gravity = android.view.Gravity.CENTER_VERTICAL
-                        val padH = (12 * density).toInt()
-                        val padV = (10 * density).toInt()
-                        setPadding(padH, padV, padH, padV)
-                        val startIcon = if (format.isAudioOnly) R.drawable.ic_music_note else R.drawable.ic_video
-                        setCompoundDrawablesWithIntrinsicBounds(startIcon, 0, R.drawable.ic_check_selector, 0)
-                        compoundDrawablePadding = (12 * density).toInt()
-                        tag = format
-                        layoutParams = RadioGroup.LayoutParams(
-                            RadioGroup.LayoutParams.MATCH_PARENT,
-                            RadioGroup.LayoutParams.WRAP_CONTENT
-                        ).apply {
-                            bottomMargin = (2 * density).toInt()
-                        }
-                    }
-                    advancedStreamsGroup.addView(row)
-                }
-
-                advancedStreamsGroup.setOnCheckedChangeListener { group, checkedId ->
-                    val checkedView = group.findViewById<RadioButton>(checkedId)
-                    val format = checkedView?.tag as? YtDlpManager.ProbedFormat ?: return@setOnCheckedChangeListener
-                    selectedQualityOption = YtDlpManager.QualityOption(
-                        label = checkedView.text.toString(),
-                        formatSelector = YtDlpManager.advancedSelector(format),
-                        isAudioOnly = format.isAudioOnly
-                    )
-                    if (format.isAudioOnly) {
-                        audioFormatLayout.visibility = View.VISIBLE
-                    } else {
-                        audioFormatLayout.visibility = View.GONE
-                    }
-                }
-            }
-        }
-
-        var currentQualityLink: String? = null
-        fun updateQualitySection(currentLink: String) {
-            if (!LinkParser.needsYtDlp(currentLink)) {
-                qualitySection.visibility = View.GONE
-                advancedStreamsSection.visibility = View.GONE
-                advancedStreamsCard.visibility = View.GONE
-                pickFileText.visibility = View.VISIBLE
-                formatProbeJob?.cancel()
-                return
-            }
-
-            qualitySection.visibility = View.VISIBLE
-            pickFileText.visibility = View.GONE
-
-            if (currentQualityLink == currentLink) return
-            currentQualityLink = currentLink
-
-            val isGeneric = !LinkParser.isYoutubeLink(currentLink)
-            val rawOptions = YtDlpManager.standardQualityOptions(isGenericOrHls = isGeneric)
-
-            val videoOpts = rawOptions.filter { !it.isAudioOnly }
-            val audioOpt = rawOptions.firstOrNull { it.isAudioOnly }
-                ?: YtDlpManager.QualityOption("Audio only", YtDlpManager.AUDIO_ONLY_SELECTOR, isAudioOnly = true)
-
-            val qualityItems = videoOpts.map { it.label } + "Audio only"
-            qualityDropdown.setSimpleItems(qualityItems.toTypedArray())
-
-            // Pick up default from yt-dlp Settings
-            val savedQuality = Settings.ytDlpDefaultQualityLabel()
-            val initialSelectedLabel: String = when {
-                savedQuality.startsWith("Audio only", ignoreCase = true) -> "Audio only"
-                savedQuality.isNotBlank() && qualityItems.contains(savedQuality) -> savedQuality
-                qualityItems.contains("1080p") -> "1080p"
-                qualityItems.contains("720p") -> "720p"
-                else -> qualityItems.firstOrNull() ?: "1080p"
-            }
-
-            qualityDropdown.setText(initialSelectedLabel, false)
-
-            if (initialSelectedLabel == "Audio only") {
-                audioFormatLayout.visibility = View.VISIBLE
-                selectedQualityOption = audioOpt
-            } else {
-                audioFormatLayout.visibility = View.GONE
-                selectedQualityOption = videoOpts.firstOrNull { it.label == initialSelectedLabel }
-            }
-
-            qualityDropdown.setOnItemClickListener { _, _, position, _ ->
-                val chosen = qualityItems[position]
-                advancedStreamsGroup.clearCheck()
-                if (chosen == "Audio only") {
-                    audioFormatLayout.visibility = View.VISIBLE
-                    selectedQualityOption = audioOpt
-                } else {
-                    audioFormatLayout.visibility = View.GONE
-                    selectedQualityOption = videoOpts.firstOrNull { it.label == chosen }
-                }
-            }
-
-            probeAdvancedFormats(currentLink)
-        }
-
-        var probeJob: Job? = null
-        fun updateNameForLink(currentLink: String) {
-            probeJob?.cancel()
-            if (nameManuallyEdited) return
-            if (currentLink.isBlank()) {
-                setNameText("")
-                return
-            }
-            if (LinkParser.isMagnetLink(currentLink)) {
-                val detected = magnetDisplayName(currentLink)
-                if (!detected.isNullOrBlank()) setNameText(detected)
-            } else if (LinkParser.isYoutubeLink(currentLink)) {
-                val fallback = extractYoutubeFallbackName(currentLink)
-                setNameText(fallback)
-                probeJob = lifecycleScope.launch {
-                    val probed = withContext(Dispatchers.IO) {
-                        probeYoutubeTitle(currentLink)
-                    }
-                    if (!nameManuallyEdited && !probed.isNullOrBlank()) {
-                        setNameText(probed)
-                    }
-                }
-            } else {
-                val guessed = DownloadEngine.filenameFromLink(currentLink).ifBlank { DownloadEngine.filenameFromUrl(currentLink) }
-                if (guessed.isNotBlank()) setNameText(guessed)
-                probeJob = lifecycleScope.launch {
-                    val probed = withContext(Dispatchers.IO) {
-                        DownloadEngine.probeRealFilename(filenameClient, currentLink)
-                    }
-                    if (!nameManuallyEdited && !probed.isNullOrBlank()) {
-                        setNameText(probed)
-                    }
-                }
-            }
-        }
-
-        if (initialLink.isNotEmpty()) {
-            updateNameForLink(initialLink)
-            updateQualitySection(initialLink)
-        }
-
-        var dialog: androidx.appcompat.app.AlertDialog? = null
-
-        linkInput.doAfterTextChanged {
-            val text = it?.toString()?.trim().orEmpty()
-            if (LinkParser.isTorrentLink(text) && text.contains("xt=", ignoreCase = true)) {
-                dialog?.dismiss()
-                showAddTorrentDialog(prefillLink = text)
-                return@doAfterTextChanged
-            }
-            updateNameForLink(text)
-            updateQualitySection(text)
-        }
-
-        nameInput.doAfterTextChanged {
-            if (!isProgrammaticNameChange && nameInput.hasFocus()) {
-                nameManuallyEdited = true
-            }
-        }
-
-        val alertDialog = MaterialAlertDialogBuilder(this)
-            .setView(dialogView)
-            .setCancelable(true)
-            .create()
-        dialog = alertDialog
-
-        dialog.setOnDismissListener {
-            probeJob?.cancel()
-            formatProbeJob?.cancel()
-        }
-
-        pickFileText.setOnClickListener {
-            dialog.dismiss()
-            pickTorrentFileLauncher.launch(
-                arrayOf("application/x-bittorrent", "application/octet-stream")
-            )
-        }
-
-        copyLinkButton.setOnClickListener {
-            val text = linkInput.text?.toString()?.trim().orEmpty()
-            if (text.isNotEmpty()) {
-                clipboardManager.setPrimaryClip(ClipData.newPlainText("Download link", text))
-                Toast.makeText(this, R.string.torrent_dialog_link_copied_toast, Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        pasteLinkButton.setOnClickListener {
-            val clipText = clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
-            if (clipText.isNotEmpty()) {
-                if (LinkParser.isTorrentLink(clipText) && clipText.contains("xt=", ignoreCase = true)) {
-                    dialog?.dismiss()
-                    showAddTorrentDialog(prefillLink = clipText)
-                    return@setOnClickListener
-                }
-                nameManuallyEdited = false
-                linkInput.setText(clipText)
-                linkInput.setSelection(clipText.length)
-                Toast.makeText(this, R.string.dialog_link_pasted_toast, Toast.LENGTH_SHORT).show()
-            } else {
-                Toast.makeText(this, R.string.clipboard_empty_toast, Toast.LENGTH_SHORT).show()
-            }
-        }
-
-        advancedHeader.setOnClickListener {
-            val expanding = advancedContent.visibility != View.VISIBLE
-            advancedContent.visibility = if (expanding) View.VISIBLE else View.GONE
-            advancedChevron.animate().rotation(if (expanding) 270f else 90f).setDuration(150).start()
-        }
-
-        changePathButton.setOnClickListener {
-            pendingSaveDirCallback = { path ->
-                customSaveDirPath = path
-                saveToPathText.text = path
-            }
-            pickSaveDirLauncher.launch(null)
-        }
-
-        cancelButton.setOnClickListener { dialog.dismiss() }
-
-        startButton.setOnClickListener {
-            val finalLink = linkInput.text?.toString()?.trim().orEmpty()
-            if (finalLink.isEmpty()) {
-                Toast.makeText(this, "Enter a valid link", Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val finalName = nameInput.text?.toString()?.trim().takeUnless { it.isNullOrBlank() }
-            probeJob?.cancel()
-            formatProbeJob?.cancel()
-            dialog.dismiss()
-
-            if (LinkParser.isTorrentLink(finalLink)) {
-                showAddTorrentDialog(prefillLink = finalLink)
-            } else if (LinkParser.isShareLink(finalLink) || LinkParser.isFitgirlPage(finalLink)) {
-                triggerPrepare(listOf(finalLink))
-            } else if (LinkParser.needsYtDlp(finalLink)) {
-                triggerDownloadYoutubeCustom(
-                    finalLink,
-                    finalName,
-                    customSaveDirPath,
-                    selectedQualityOption,
-                    selectedAudioFormatPreset
-                )
-            } else {
-                triggerDownloadDirectCustom(finalLink, finalName, customSaveDirPath)
-            }
-        }
-
-        dialog.setOnShowListener { applyResponsiveDialogWidth(dialog) }
-        dialogView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            applyResponsiveDialogWidth(dialog)
-        }
-
-        dialog.show()
-        applyResponsiveDialogWidth(dialog)
+        addDownloadDialogState = AddDownloadDialogState(initialLink = trimmed)
     }
 
     fun showAddTorrentDialog(
@@ -1244,238 +1013,90 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         prefillTorrentUri: Uri? = null,
         prefillDisplayName: String? = null
     ) {
-        val dialogView = LayoutInflater.from(this)
-            .inflate(R.layout.dialog_add_torrent, null)
-
-        val linkInput = dialogView.findViewById<EditText>(R.id.torrentLinkInput)
-        val copyLinkButton = dialogView.findViewById<MaterialButton>(R.id.torrentCopyLinkButton)
-        val pasteLinkButton = dialogView.findViewById<MaterialButton>(R.id.torrentPasteLinkButton)
-        val nameInput = dialogView.findViewById<EditText>(R.id.torrentNameInput)
-        val pickFileText = dialogView.findViewById<TextView>(R.id.torrentPickFileText)
-        val advancedHeader = dialogView.findViewById<View>(R.id.torrentAdvancedHeader)
-        val advancedChevron = dialogView.findViewById<ImageView>(R.id.torrentAdvancedChevron)
-        val advancedContent = dialogView.findViewById<View>(R.id.torrentAdvancedContent)
-        val saveToPathText = dialogView.findViewById<TextView>(R.id.torrentSaveToPathText)
-        val changePathButton = dialogView.findViewById<MaterialButton>(R.id.torrentChangePathButton)
-        val startButton = dialogView.findViewById<MaterialButton>(R.id.torrentStartButton)
-        val cancelButton = dialogView.findViewById<MaterialButton>(R.id.torrentCancelButton)
-
-        val filesCountText = dialogView.findViewById<TextView>(R.id.torrentFilesCountText)
-        val selectAllButton = dialogView.findViewById<MaterialButton>(R.id.torrentSelectAllButton)
-        val filesLoadingContainer = dialogView.findViewById<View>(R.id.torrentFilesLoadingContainer)
-        val filesErrorContainer = dialogView.findViewById<View>(R.id.torrentFilesErrorContainer)
-        val filesListCard = dialogView.findViewById<View>(R.id.torrentFilesListCard)
-        val filesRecyclerView = dialogView.findViewById<RecyclerView>(R.id.torrentFilesRecyclerView)
-
-        var customSaveDirPath: String? = null
-        var nameManuallyEdited = false
-        var fetchJob: Job? = null
-
-        saveToPathText.text = defaultSavePath()
-
-        val adapter = TorrentFileAdapter { count, bytes ->
-            val total = if (filesRecyclerView.adapter is TorrentFileAdapter) {
-                (filesRecyclerView.adapter as TorrentFileAdapter).getTotalCount()
-            } else count
-            filesCountText.text = "• $count of $total (${TorrentFileAdapter.formatBytes(bytes)})"
-            if (filesRecyclerView.adapter is TorrentFileAdapter) {
-                val allSelected = (filesRecyclerView.adapter as TorrentFileAdapter).areAllSelected()
-                selectAllButton.text = getString(
-                    if (allSelected) R.string.torrent_dialog_deselect_all else R.string.torrent_dialog_select_all
-                )
-            }
-            startButton.isEnabled = count > 0
-        }
-        filesRecyclerView.layoutManager = LinearLayoutManager(this)
-        filesRecyclerView.adapter = adapter
-
-        selectAllButton.setOnClickListener {
-            val select = !adapter.areAllSelected()
-            adapter.selectAll(select)
-        }
-
-        fun populateTorrentFiles(ti: TorrentInfo) {
-            val count = ti.numFiles()
-            val entries = (0 until count).map { idx ->
-                TorrentFileEntry(
-                    index = idx,
-                    path = runCatching { ti.files().filePath(idx) }.getOrNull() ?: "File ${idx + 1}",
-                    sizeBytes = runCatching { ti.files().fileSize(idx) }.getOrNull() ?: 0L,
-                    isSelected = true
-                )
-            }
-            adapter.setFiles(entries)
-            filesLoadingContainer.visibility = View.GONE
-            filesErrorContainer.visibility = View.GONE
-            filesListCard.visibility = View.VISIBLE
-            selectAllButton.visibility = View.VISIBLE
-        }
-
-        fun loadMetadataForMagnet(link: String) {
-            fetchJob?.cancel()
-            if (!LinkParser.isMagnetLink(link)) {
-                filesLoadingContainer.visibility = View.GONE
-                filesErrorContainer.visibility = View.GONE
-                filesListCard.visibility = View.GONE
-                selectAllButton.visibility = View.GONE
-                filesCountText.text = ""
-                return
-            }
-
-            filesLoadingContainer.visibility = View.VISIBLE
-            filesErrorContainer.visibility = View.GONE
-            filesListCard.visibility = View.GONE
-            selectAllButton.visibility = View.GONE
-            filesCountText.text = ""
-
-            fetchJob = lifecycleScope.launch {
-                val tempDir = File(cacheDir, "torrent_meta")
-                val bytes = withContext(Dispatchers.IO) {
-                    TorrentSession.fetchMetadata(link, timeoutSeconds = 25, tempDir)
-                }
-                if (bytes != null) {
-                    val ti = runCatching { TorrentInfo.bdecode(bytes) }.getOrNull()
-                    if (ti != null) {
-                        if (!nameManuallyEdited && ti.name().isNotBlank()) {
-                            nameInput.setText(ti.name())
-                        }
-                        populateTorrentFiles(ti)
-                        return@launch
-                    }
-                }
-                filesLoadingContainer.visibility = View.GONE
-                filesErrorContainer.visibility = View.VISIBLE
-                filesListCard.visibility = View.GONE
-                selectAllButton.visibility = View.GONE
-            }
-        }
-
-        fun updateNamePreview() {
-            if (nameManuallyEdited) return
-            val link = linkInput.text?.toString()?.trim().orEmpty()
-            val detected = magnetDisplayName(link)
-            if (!detected.isNullOrBlank()) {
-                nameInput.setText(detected)
-            }
-        }
-
-        linkInput.doAfterTextChanged {
-            val link = linkInput.text?.toString()?.trim().orEmpty()
-            updateNamePreview()
-            if (prefillTorrentUri == null && LinkParser.isMagnetLink(link)) {
-                loadMetadataForMagnet(link)
-            }
-        }
-        nameInput.doAfterTextChanged { nameManuallyEdited = true }
-
-        val dialog = MaterialAlertDialogBuilder(this)
-            .setView(dialogView)
-            .setCancelable(true)
-            .create()
-
-        dialog.setOnDismissListener { fetchJob?.cancel() }
-
-        if (prefillTorrentUri != null) {
-            linkInput.setText(prefillTorrentUri.toString())
-            linkInput.isEnabled = false
-            pickFileText.visibility = View.GONE
-            copyLinkButton.visibility = View.GONE
-            pasteLinkButton.visibility = View.GONE
-            if (!prefillDisplayName.isNullOrBlank()) {
-                nameInput.setText(prefillDisplayName)
-            }
-            runCatching {
-                val bytes = contentResolver.openInputStream(prefillTorrentUri)?.use { it.readBytes() }
-                if (bytes != null) {
-                    val ti = TorrentInfo.bdecode(bytes)
-                    if (!nameManuallyEdited && ti.name().isNotBlank()) {
-                        nameInput.setText(ti.name())
-                    }
-                    populateTorrentFiles(ti)
+        torrentMetadataJob?.cancel()
+        addTorrentDialogState = AddTorrentDialogState(
+            prefillLink = prefillLink,
+            prefillTorrentUri = prefillTorrentUri,
+            prefillDisplayName = prefillDisplayName,
+            filesState = TorrentFilesUiState(),
+        )
+        when {
+            prefillTorrentUri != null -> {
+                lifecycleScope.launch {
+                    val ti = runCatching {
+                        contentResolver.openInputStream(prefillTorrentUri)?.use { it.readBytes() }
+                            ?.let { TorrentInfo.bdecode(it) }
+                    }.getOrNull()
+                    if (ti != null) applyTorrentInfoToDialog(ti)
                 }
             }
-        } else if (!prefillLink.isNullOrBlank()) {
-            linkInput.setText(prefillLink)
-            nameManuallyEdited = false
-            updateNamePreview()
-            if (LinkParser.isMagnetLink(prefillLink)) {
-                loadMetadataForMagnet(prefillLink)
+            !prefillLink.isNullOrBlank() && LinkParser.isMagnetLink(prefillLink) -> {
+                loadTorrentMetadataForMagnet(prefillLink)
             }
         }
+    }
 
-        copyLinkButton.setOnClickListener {
-            val link = linkInput.text?.toString()?.trim().orEmpty()
-            if (link.isEmpty()) return@setOnClickListener
-            clipboardManager.setPrimaryClip(ClipData.newPlainText("Magnet link", link))
-            Toast.makeText(this, R.string.torrent_dialog_link_copied_toast, Toast.LENGTH_SHORT).show()
+    /**
+     * Called on every AddTorrentDialog link-field edit (mirrors the old
+     * linkInput.doAfterTextChanged). Re-fetches metadata for a newly-typed
+     * magnet link, or clears any stale file list once the field no longer
+     * holds one -- matches loadMetadataForMagnet()'s own early-return branch.
+     */
+    private fun onAddTorrentLinkChanged(link: String) {
+        val state = addTorrentDialogState ?: return
+        addTorrentDialogState = state.copy(prefillLink = link)
+        if (state.prefillTorrentUri == null && LinkParser.isMagnetLink(link)) {
+            loadTorrentMetadataForMagnet(link)
+        } else if (!LinkParser.isMagnetLink(link)) {
+            torrentMetadataJob?.cancel()
+            addTorrentDialogState = addTorrentDialogState?.copy(filesState = TorrentFilesUiState())
         }
+    }
 
-        pasteLinkButton.setOnClickListener {
-            val clipText = clipboardManager.primaryClip?.getItemAt(0)?.text?.toString()?.trim().orEmpty()
-            if (clipText.isNotEmpty()) {
-                linkInput.setText(clipText)
-                linkInput.setSelection(clipText.length)
-                Toast.makeText(this, R.string.dialog_link_pasted_toast, Toast.LENGTH_SHORT).show()
+    private fun loadTorrentMetadataForMagnet(link: String) {
+        torrentMetadataJob?.cancel()
+        addTorrentDialogState = addTorrentDialogState?.copy(filesState = TorrentFilesUiState(loading = true))
+        torrentMetadataJob = lifecycleScope.launch {
+            val tempDir = File(cacheDir, "torrent_meta")
+            val bytes = withContext(Dispatchers.IO) {
+                TorrentSession.fetchMetadata(link, timeoutSeconds = 25, tempDir)
+            }
+            val ti = bytes?.let { runCatching { TorrentInfo.bdecode(it) }.getOrNull() }
+            if (ti != null) {
+                applyTorrentInfoToDialog(ti)
             } else {
-                Toast.makeText(this, R.string.clipboard_empty_toast, Toast.LENGTH_SHORT).show()
+                addTorrentDialogState = addTorrentDialogState?.copy(filesState = TorrentFilesUiState(error = true))
             }
         }
+    }
 
-        advancedHeader.setOnClickListener {
-            val expanding = advancedContent.visibility != View.VISIBLE
-            advancedContent.visibility = if (expanding) View.VISIBLE else View.GONE
-            advancedChevron.animate().rotation(if (expanding) 270f else 90f).setDuration(150).start()
-        }
-
-        changePathButton.setOnClickListener {
-            pendingSaveDirCallback = { path ->
-                customSaveDirPath = path
-                saveToPathText.text = path
-            }
-            pickSaveDirLauncher.launch(null)
-        }
-
-        pickFileText.setOnClickListener {
-            dialog.dismiss()
-            pickTorrentFileLauncher.launch(
-                arrayOf("application/x-bittorrent", "application/octet-stream")
+    private fun applyTorrentInfoToDialog(ti: TorrentInfo) {
+        val count = ti.numFiles()
+        val entries = (0 until count).map { idx ->
+            TorrentFileRow(
+                index = idx,
+                path = runCatching { ti.files().filePath(idx) }.getOrNull() ?: "File ${idx + 1}",
+                sizeBytes = runCatching { ti.files().fileSize(idx) }.getOrNull() ?: 0L,
+                isSelected = true,
             )
         }
+        val detectedName = ti.name().takeIf { it.isNotBlank() }
+        addTorrentDialogState = addTorrentDialogState?.copy(
+            filesState = TorrentFilesUiState(files = entries, magnetDetectedName = detectedName)
+        )
+    }
 
-        cancelButton.setOnClickListener { dialog.dismiss() }
+    private fun toggleTorrentFileSelection(index: Int) {
+        val state = addTorrentDialogState ?: return
+        val updated = state.filesState.files.map { if (it.index == index) it.copy(isSelected = !it.isSelected) else it }
+        addTorrentDialogState = state.copy(filesState = state.filesState.copy(files = updated))
+    }
 
-        startButton.setOnClickListener {
-            if (adapter.itemCount > 0 && adapter.getSelectedCount() == 0) {
-                Toast.makeText(this, R.string.torrent_dialog_no_files_selected, Toast.LENGTH_SHORT).show()
-                return@setOnClickListener
-            }
-            val selectedIndices = if (adapter.itemCount > 0) {
-                if (adapter.areAllSelected()) null else adapter.getSelectedIndices().joinToString(",")
-            } else null
-
-            val name = nameInput.text?.toString()?.trim().takeUnless { it.isNullOrBlank() }
-
-            if (prefillTorrentUri != null) {
-                dialog.dismiss()
-                triggerDownloadTorrentFile(prefillTorrentUri, name, customSaveDirPath, selectedIndices)
-            } else {
-                val link = linkInput.text?.toString()?.trim().orEmpty()
-                if (!LinkParser.isTorrentLink(link)) {
-                    Toast.makeText(this, R.string.torrent_dialog_invalid_link, Toast.LENGTH_SHORT).show()
-                    return@setOnClickListener
-                }
-                dialog.dismiss()
-                triggerDownloadTorrentMagnet(link, name, customSaveDirPath, selectedIndices)
-            }
-        }
-
-        dialog.setOnShowListener { applyResponsiveDialogWidth(dialog) }
-        dialogView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            applyResponsiveDialogWidth(dialog)
-        }
-
-        dialog.show()
-        applyResponsiveDialogWidth(dialog)
+    private fun toggleTorrentSelectAll() {
+        val state = addTorrentDialogState ?: return
+        val allSelected = state.filesState.files.isNotEmpty() && state.filesState.files.all { it.isSelected }
+        val updated = state.filesState.files.map { it.copy(isSelected = !allSelected) }
+        addTorrentDialogState = state.copy(filesState = state.filesState.copy(files = updated))
     }
 
     // ── Download Triggers ──────────────────────────────────────────────────
@@ -2078,143 +1699,43 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                 ?: options.firstOrNull { it.isAudioOnly && savedLabel.startsWith("Audio only") }
         } else {
             suspendCancellableCoroutine<YtDlpManager.QualityOption?> { cont ->
-            val dialogView = layoutInflater.inflate(R.layout.dialog_quality_picker, null)
-            val group = dialogView.findViewById<RadioGroup>(R.id.qualityGroup)
-            val density = resources.displayMetrics.density
-
-            // Shared row builder -- used for both the standard ladder above
-            // and the advanced (real-probe) list below, so the two always
-            // look identical. tag carries whichever value the positive
-            // button should resolve for that row (a fixed QualityOption
-            // for the standard ladder, or a ProbedFormat for advanced --
-            // resolved into a QualityOption at OK-click time).
-            fun buildRow(label: String, isAudioOnly: Boolean, tag: Any): AppCompatRadioButton {
-                // AppCompatRadioButton, not the platform RadioButton -- it
-                // handles its own compound-button tinting internally, so it
-                // can be constructed programmatically like this safely. A
-                // plain platform RadioButton() built with an AppCompat-
-                // lineage style (Widget.Xmd.RadioRow extends
-                // Widget.AppCompat.CompoundButton.RadioButton) as its
-                // defStyleRes bypasses AppCompatViewInflater entirely
-                // (that only runs for XML-inflated views) and crashes with
-                // "requires Theme.AppCompat" the moment it's measured/drawn.
-                // Styling that Widget.Xmd.RadioRow would have applied via
-                // XML is replicated by hand below instead.
-                val row = AppCompatRadioButton(this)
-                row.id = android.view.View.generateViewId()
-                row.text = label
-                row.isClickable = true
-                row.buttonDrawable = null
-                row.setBackgroundResource(R.drawable.bg_radio_row_selector)
-                row.setTextColor(ContextCompat.getColorStateList(this, R.color.text_radio_row))
-                row.textSize = 14f
-                row.gravity = android.view.Gravity.CENTER_VERTICAL
-                row.setPadding((16 * density).toInt(), (14 * density).toInt(), (16 * density).toInt(), (14 * density).toInt())
-                val startIcon = if (isAudioOnly) R.drawable.ic_music_note else R.drawable.ic_video
-                row.setCompoundDrawablesWithIntrinsicBounds(startIcon, 0, R.drawable.ic_check_selector, 0)
-                row.compoundDrawablePadding = (12 * density).toInt()
-                row.tag = tag
-                row.layoutParams = RadioGroup.LayoutParams(
-                    RadioGroup.LayoutParams.MATCH_PARENT,
-                    RadioGroup.LayoutParams.WRAP_CONTENT
+                qualityPickerState = QualityPickerState(
+                    titleText = item.fileName ?: "Choose quality",
+                    standardOptions = options,
+                    advancedFormats = emptyList(),
+                    advancedLoading = true,
+                    durationSeconds = null,
+                    onConfirm = { resolved ->
+                        qualityPickerState = null
+                        cont.resume(resolved)
+                    },
+                    onDismiss = {
+                        qualityPickerState = null
+                        cont.resume(null)
+                    },
                 )
-                return row
-            }
-
-            options.forEach { option -> group.addView(buildRow(option.label, option.isAudioOnly, option)) }
-            // Default selection: the option one below the top of the ladder
-            // (1440p) reads as a sane, non-extreme default rather than
-            // pre-selecting either end of the quality range.
-            (group.getChildAt(1) as? RadioButton)?.isChecked = true
-
-            // ── Advanced settings: real probed formats (FPS/codec/exact size) ──
-            val advancedHeader  = dialogView.findViewById<android.view.View>(R.id.advancedHeader)
-            val advancedChevron = dialogView.findViewById<android.widget.ImageView>(R.id.advancedChevron)
-            val advancedContent = dialogView.findViewById<android.view.View>(R.id.advancedContent)
-            val advancedProgress = dialogView.findViewById<android.view.View>(R.id.advancedProgress)
-            val advancedEmptyText = dialogView.findViewById<TextView>(R.id.advancedEmptyText)
-            val advancedGroup = dialogView.findViewById<RadioGroup>(R.id.advancedGroup)
-
-            // Cleared once the picker dialog resolves (OK/Cancel/dismiss) so
-            // a slow probe landing after the user already answered doesn't
-            // touch dead dialog views.
-            var probeCallbackAlive = true
-
-            // Kicked off immediately (not lazily on expand) so the result is
-            // typically ready the moment the user taps "Advanced" -- this is
-            // a real yt-dlp --dump-json network round-trip, so it runs on
-            // Dispatchers.IO in the background while the standard ladder
-            // above is already interactive.
-            lifecycleScope.launch {
-                val probe = withContext(Dispatchers.IO) {
-                    YtDlpManager.probeFormats(item.sourceUrl, this@MainActivity)
-                }
-                if (!probeCallbackAlive) return@launch
-
-                advancedProgress.visibility = android.view.View.GONE
-                if (probe.formats.isEmpty()) {
-                    advancedEmptyText.visibility = android.view.View.VISIBLE
-                    return@launch
-                }
-
-                // Highest quality first -- video streams (by height, then
-                // fps) ahead of audio-only, matching the standard ladder's
-                // high-to-low ordering above.
-                val sorted = probe.formats.sortedWith(
-                    compareByDescending<YtDlpManager.ProbedFormat> { it.height ?: -1 }
-                        .thenByDescending { it.fps ?: -1 }
-                )
-                sorted.forEach { format ->
-                    val sizeText = YtDlpManager.formatSize(format, probe.durationSeconds)
-                    val label = buildString {
-                        if (format.height != null) append("${format.height}p") else append("Audio")
-                        if (format.fps != null) append(" ${format.fps}fps")
-                        append(" · ${format.ext.uppercase()}")
-                        if (format.vcodec != null) append(" · ${format.vcodec.substringBefore('.')}")
-                        if (sizeText != null) append(" · $sizeText")
+                val probeJob = lifecycleScope.launch {
+                    val probe = withContext(Dispatchers.IO) {
+                        YtDlpManager.probeFormats(item.sourceUrl, this@MainActivity)
                     }
-                    advancedGroup.addView(buildRow(label, format.isAudioOnly, format))
+                    // Highest quality first -- video streams (by height, then
+                    // fps, then bitrate) ahead of audio-only, matching the
+                    // standard ladder's high-to-low ordering above.
+                    val sorted = probe.formats.sortedWith(
+                        compareByDescending<YtDlpManager.ProbedFormat> { it.height ?: -1 }
+                            .thenByDescending { it.fps ?: -1 }
+                            .thenByDescending { it.tbr ?: -1.0 }
+                    )
+                    qualityPickerState = qualityPickerState?.copy(
+                        advancedLoading = false,
+                        advancedFormats = sorted,
+                        durationSeconds = probe.durationSeconds,
+                    )
                 }
-            }
-
-            advancedHeader.setOnClickListener {
-                val expanding = advancedContent.visibility != android.view.View.VISIBLE
-                advancedContent.visibility = if (expanding) android.view.View.VISIBLE else android.view.View.GONE
-                advancedChevron.animate().rotation(if (expanding) 180f else 0f).setDuration(150).start()
-            }
-
-            val dialog = MaterialAlertDialogBuilder(this)
-                .setTitle(item.fileName ?: "Choose quality")
-                .setView(dialogView)
-                .setPositiveButton(android.R.string.ok) { _, _ ->
-                    // Advanced list wins if the user picked a row there --
-                    // its RadioGroup and the standard qualityGroup are
-                    // separate groups (independent selection state), so
-                    // whichever one actually has a checked row is the
-                    // user's real choice; advanced is checked first since
-                    // picking there is the more deliberate, overriding action.
-                    val advancedChecked = advancedGroup.findViewById<RadioButton>(advancedGroup.checkedRadioButtonId)
-                    val checkedTag = advancedChecked?.tag
-                        ?: group.findViewById<RadioButton>(group.checkedRadioButtonId)?.tag
-                    val resolved = when (checkedTag) {
-                        is YtDlpManager.QualityOption -> checkedTag
-                        is YtDlpManager.ProbedFormat -> YtDlpManager.QualityOption(
-                            label = checkedTag.formatId,
-                            formatSelector = YtDlpManager.advancedSelector(checkedTag),
-                            isAudioOnly = checkedTag.isAudioOnly
-                        )
-                        else -> null
-                    }
-                    cont.resume(resolved)
+                cont.invokeOnCancellation {
+                    probeJob.cancel()
+                    qualityPickerState = null
                 }
-                .setOnCancelListener { cont.resume(null) }
-                .setNegativeButton(R.string.action_cancel) { d, _ -> d.cancel() }
-                .create()
-            cont.invokeOnCancellation {
-                probeCallbackAlive = false
-                dialog.dismiss()
-            }
-            dialog.show()
             }
         }
 
