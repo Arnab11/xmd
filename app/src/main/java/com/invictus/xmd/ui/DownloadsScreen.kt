@@ -56,11 +56,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -130,6 +133,17 @@ fun DownloadsScreen(
     val selectedFilter = DownloadFilter.valueOf(selectedFilterName)
     val list = remember(queryMatches, selectedFilter) {
         queryMatches.filter(selectedFilter::matches)
+    }
+
+    // If the currently selected chip (e.g. "Active") loses its last item to
+    // a cancel/delete, its count drops to 0 and the chip itself disappears
+    // (see the `count == 0 -> return@forEach` skip below) -- leaving the
+    // user stranded on a filter with no chip and an empty list. Snap back
+    // to "All" whenever that happens.
+    LaunchedEffect(selectedFilter, list.isEmpty()) {
+        if (selectedFilter != DownloadFilter.All && list.isEmpty()) {
+            selectedFilterName = DownloadFilter.All.name
+        }
     }
 
     // Long-press options menu / rename / delete-confirm dialog state --
@@ -491,8 +505,13 @@ fun QueueItemRow(
                         )
                         Spacer(Modifier.width(4.dp))
                     }
+                    val throttledSpeedEta = if (item.status == ItemStatus.DOWNLOADING) {
+                        rememberThrottledSpeedEtaText(item)
+                    } else {
+                        null
+                    }
                     Text(
-                        text = statusText(item),
+                        text = statusText(item, throttledSpeedEta),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Medium,
@@ -851,7 +870,7 @@ private fun progressFor(item: QueueItem): Pair<Float, Boolean> = when (item.stat
     else -> 0f to true
 }
 
-private fun statusText(item: QueueItem): String = when (item.status) {
+private fun statusText(item: QueueItem, speedEta: String?): String = when (item.status) {
     ItemStatus.PENDING -> "Queued"
     ItemStatus.RESOLVING -> "Resolving…"
     ItemStatus.NEEDS_CHALLENGE -> "Verifying — complete check in browser"
@@ -862,7 +881,6 @@ private fun statusText(item: QueueItem): String = when (item.status) {
             item.bytesTotal > 0 -> "${(item.bytesDone * 100 / item.bytesTotal)}%"
             else -> "Downloading…"
         }
-        val speedEta = if (item.speedBps > 0) buildSpeedEtaText(item) else null
         val label = if (item.platform == MediaPlatform.YOUTUBE) item.mediaFormatLabel?.let { " • $it" } else null
         buildString {
             append(pct)
@@ -913,6 +931,12 @@ private fun formatElapsedDuration(durationMs: Long): String {
     }
 }
 
+/**
+ * Speed + time-left text, recomputed from whatever `item` snapshot is
+ * passed in. Callers that want the Chrome-style once-a-second cadence
+ * should go through [rememberThrottledSpeedEtaText] instead of calling
+ * this directly on every recomposition.
+ */
 private fun buildSpeedEtaText(item: QueueItem): String {
     val bps = item.speedBps
     val speedStr = when {
@@ -922,7 +946,72 @@ private fun buildSpeedEtaText(item: QueueItem): String {
     }
     val remaining = (item.bytesTotal - item.bytesDone).coerceAtLeast(0)
     val etaSec = if (bps > 1.0 && item.bytesTotal > 0) (remaining / bps).toLong() else -1L
-    return if (etaSec >= 0) "$speedStr  •  ETA ${formatDuration(etaSec)}" else speedStr
+    return if (etaSec >= 0) "$speedStr  •  ${formatRemainingTimeChrome(etaSec)}" else speedStr
+}
+
+/**
+ * Holds a download row's speed/ETA text steady for up to a second at a
+ * time, then refreshes it from the latest [item] -- the same cadence
+ * Chrome's own download UI updates its remaining-time estimate at.
+ * Progress ticks arrive from the engine up to ~5x/sec (see
+ * QueueRepository), which would otherwise make the ETA number flicker.
+ *
+ * The displayed value still reflects the most recent data at each tick;
+ * only the *update frequency* is throttled, not the data itself.
+ */
+@Composable
+private fun rememberThrottledSpeedEtaText(item: QueueItem): String? {
+    val latestItem = rememberUpdatedState(item)
+    var text by remember(item.id) {
+        mutableStateOf(if (item.speedBps > 0) buildSpeedEtaText(item) else null)
+    }
+    LaunchedEffect(item.id) {
+        while (true) {
+            delay(1_000L)
+            val current = latestItem.value
+            text = if (current.speedBps > 0) buildSpeedEtaText(current) else null
+        }
+    }
+    return text
+}
+
+/**
+ * Formats remaining time the way Chrome's own Android download UI does
+ * (chrome/android/.../download/DownloadUtils#formatRemainingTime): a
+ * single rounded unit -- seconds, minutes, hours, or days -- so the
+ * label never shows something like "1:03:59" and instead reads "1 hour
+ * left", rounding the shown unit using the leftover fraction of the next
+ * smaller one (e.g. 92 minutes -> "2 hours left", not "1 hour left").
+ */
+private fun formatRemainingTimeChrome(totalSeconds: Long): String {
+    var remaining = totalSeconds.coerceAtLeast(0)
+    var days = 0L
+    var hours = 0L
+    var minutes = 0L
+    if (remaining >= 86_400L) {
+        days = remaining / 86_400L
+        remaining -= days * 86_400L
+    }
+    if (remaining >= 3_600L) {
+        hours = remaining / 3_600L
+        remaining -= hours * 3_600L
+    }
+    if (remaining >= 60L) {
+        minutes = remaining / 60L
+        remaining -= minutes * 60L
+    }
+    val seconds = remaining
+
+    return when {
+        days >= 2 -> "${days + (hours + 12) / 24} days left"
+        days > 0 -> "1 day left"
+        hours >= 2 -> "${hours + (minutes + 30) / 60} hours left"
+        hours > 0 -> "1 hour left"
+        minutes >= 2 -> "${minutes + (seconds + 30) / 60} mins left"
+        minutes > 0 -> "1 min left"
+        seconds == 1L -> "1 sec left"
+        else -> "$seconds secs left"
+    }
 }
 
 private fun formatBytes(bytes: Long): String = when {
@@ -930,13 +1019,6 @@ private fun formatBytes(bytes: Long): String = when {
     bytes >= 1_048_576L -> "%.1f MB".format(bytes / 1_048_576.0)
     bytes >= 1_024L -> "%.0f KB".format(bytes / 1_024.0)
     else -> "$bytes B"
-}
-
-private fun formatDuration(totalSeconds: Long): String {
-    val h = totalSeconds / 3600
-    val m = (totalSeconds % 3600) / 60
-    val s = totalSeconds % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 // ── Dialogs & Sheets ───────────────────────────────────────────────────────
