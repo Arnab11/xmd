@@ -16,7 +16,7 @@ import com.invictus.xmd.R
  * immediately via its own [onXChanged] callback (no Save button), matching
  * the original fragment's behavior including the wifi-only-just-enabled
  * pause-in-flight-downloads side effect (handled in
- * [SettingsDownloadsFragment], not here -- this composable is presentation
+ * SettingsActivity's DownloadsRoute, not here -- this composable is presentation
  * only).
  */
 @Composable

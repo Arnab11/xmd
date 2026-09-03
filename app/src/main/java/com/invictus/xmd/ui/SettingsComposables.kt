@@ -156,7 +156,8 @@ fun CategoryRow(
  * Single swatch in the horizontally-scrolling theme picker -- ring (selection
  * border), rounded box (theme background), 3 dots (primary/secondary/tertiary),
  * checkmark when selected, name below. Colors are computed exactly like the
- * old [SettingsAppearanceFragment.setupThemePicker] did: SYSTEM resolves its
+ * old SettingsAppearanceFragment's setupThemePicker (now SettingsActivity's
+ * AppearanceRoute) did: SYSTEM resolves its
  * dots against the dynamic-color-wrapped context (Material You), every other
  * theme uses its own fixed swatch* hex strings from [AppTheme].
  */

@@ -51,9 +51,8 @@ sealed class YtDlpOpState {
 /**
  * Default download quality, video preset ladder (container/fps/codec),
  * audio format, and the yt-dlp engine install/update/nightly-channel
- * controls. Mirrors fragment_settings_youtube.xml 1:1 -- this Fragment
- * ([SettingsYoutubeFragment]) now hosts a ComposeView instead of inflating
- * that layout.
+ * controls. Rendered directly by SettingsActivity's YoutubeRoute (NavHost
+ * route body) -- no Fragment host.
  *
  * All preset dropdowns persist immediately on selection via their own
  * `onXChanged` callback (same as Downloads/Browser), matching the original

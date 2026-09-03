@@ -1851,8 +1851,8 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     /**
      * Flips dark/light mode for whichever color theme is currently active --
      * triggered by tapping the toolbar title. Same pattern as the
-     * duplicate in SettingsAppearanceFragment.toggleDarkMode() (used there
-     * for the Dark Mode switch in Settings > Appearance): save the pick,
+     * duplicate in SettingsActivity's AppearanceRoute onDarkModeChanged
+     * (used there for the Dark Mode switch in Settings > Appearance): save the pick,
      * toast the new mode, then recreate() since a theme is only read in
      * onCreate(), before super.onCreate(). Two copies exist because each
      * needs to recreate() its *own* Activity instance.

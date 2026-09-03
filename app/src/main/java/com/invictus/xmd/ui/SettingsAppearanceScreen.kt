@@ -19,10 +19,10 @@ import com.invictus.xmd.ui.theme.AppTheme
 /**
  * Theme color + dark mode / AMOLED switches. [onThemeSelected]/
  * [onDarkModeChanged]/[onAmoledModeChanged] each persist to [Settings] and
- * trigger `requireActivity().recreate()` on the Fragment side (see
- * [SettingsAppearanceFragment]) exactly like the old dialog/Fragment did --
- * recreate() repaints the whole Activity with the new XML theme applied, so
- * this composable doesn't need to hold reactive color-scheme state itself.
+ * trigger `activity.recreate()` on the caller side (see SettingsActivity's
+ * AppearanceRoute) exactly like the old dialog/Fragment did -- recreate()
+ * repaints the whole Activity with the new XML theme applied, so this
+ * composable doesn't need to hold reactive color-scheme state itself.
  */
 @Composable
 fun SettingsAppearanceScreen(

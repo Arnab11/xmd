@@ -29,9 +29,8 @@ import com.invictus.xmd.R
 
 /**
  * App identity, version, GitHub link, license notice, developer credits,
- * and the open-source libraries Xmd is built on. Mirrors fragment_about.xml
- * 1:1 -- this Fragment ([AboutFragment]) now hosts a ComposeView instead of
- * inflating that layout.
+ * and the open-source libraries Xmd is built on. Rendered directly by
+ * SettingsActivity's AboutRoute (NavHost route body) -- no Fragment host.
  */
 @Composable
 fun AboutScreen(

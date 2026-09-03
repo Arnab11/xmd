@@ -32,7 +32,7 @@ import java.io.File
  * [ComposeView] instead of inflating fragment_downloads.xml + QueueAdapter.
  * Business logic that needs a real Context/Intent (opening files, sharing,
  * clipboard, renaming on disk) stays here and is wired into DownloadsScreen
- * via lambdas, same pattern AboutFragment/AboutScreen uses.
+ * via lambdas, same pattern SettingsActivity's AboutRoute/AboutScreen uses.
  */
 class DownloadsFragment : Fragment() {
 
