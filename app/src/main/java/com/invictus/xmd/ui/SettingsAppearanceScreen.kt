@@ -25,6 +25,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -350,7 +351,13 @@ private fun TabsSection(
     // approach as ReorderableShortcutGrid's pointerInputDragReorder.
     val itemBounds = remember { mutableStateMapOf<Int, Rect>() }
 
-    tabOrder.forEachIndexed { index, tabId ->
+    // Only page tabs can be reordered (Home, Downloads, Browser).
+    // The "+ Add" button is a fixed action button and cannot be rearranged.
+    val pageTabs = remember(tabOrder) {
+        tabOrder.filter { it != Settings.TabId.ADD }
+    }
+
+    pageTabs.forEachIndexed { index, tabId ->
         val meta = TAB_META[tabId] ?: return@forEachIndexed
         val isDragging = index == draggingIndex
         // Keyed on the stable tabId (not the position-derived index) so a
@@ -366,6 +373,7 @@ private fun TabsSection(
                 visible = tabId !in hiddenTabs,
                 isDragging = isDragging,
                 dragOffsetY = if (isDragging) dragOffset.y else 0f,
+                canReorder = true,
                 modifier = Modifier.onGloballyPositioned { coords -> itemBounds[index] = coords.boundsInParent() },
                 dragHandleModifier = Modifier.pointerInputTabDragReorder(
                     tabId = tabId,
@@ -385,7 +393,8 @@ private fun TabsSection(
                     onDragEnd = { draggingIndex = -1; dragOffset = Offset.Zero },
                 ),
                 onVisibleChange = { visible ->
-                    if (!visible && (tabOrder.size - hiddenTabs.size) <= 1) {
+                    val visiblePageCount = pageTabs.count { it !in hiddenTabs }
+                    if (!visible && visiblePageCount <= 1) {
                         Toast.makeText(
                             context,
                             R.string.settings_tabs_last_visible_toast,
@@ -399,7 +408,29 @@ private fun TabsSection(
         }
     }
 
-    SettingsDivider()
+    // Pinned "+ Add" tab row -- cannot be rearranged, so no drag handle or reorder gestures
+    val addMeta = TAB_META[Settings.TabId.ADD]
+    if (addMeta != null) {
+        key(Settings.TabId.ADD) {
+            TabConfigRow(
+                icon = addMeta.icon,
+                label = stringResource(addMeta.labelRes),
+                visible = Settings.TabId.ADD !in hiddenTabs,
+                isDragging = false,
+                dragOffsetY = 0f,
+                canReorder = false,
+                dragHandleModifier = Modifier,
+                onVisibleChange = { visible ->
+                    onToggleTabVisible(Settings.TabId.ADD, visible)
+                },
+            )
+        }
+    }
+
+    HorizontalDivider(
+        modifier = Modifier.padding(top = 10.dp, bottom = 16.dp),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
+    )
 
     Text(
         text = stringResource(R.string.settings_default_tab_title),
@@ -409,10 +440,8 @@ private fun TabsSection(
         modifier = Modifier.padding(bottom = 8.dp),
     )
 
-    tabOrder.forEach { tabId ->
-        // The center FAB ("add") is an action, not a navigable page, so it
-        // can never be the default tab -- see Settings.TabId's comment.
-        if (tabId in hiddenTabs || tabId == Settings.TabId.ADD) return@forEach
+    pageTabs.forEach { tabId ->
+        if (tabId in hiddenTabs) return@forEach
         val meta = TAB_META[tabId] ?: return@forEach
         DefaultTabRadioRow(
             icon = meta.icon,
@@ -487,6 +516,7 @@ private fun TabConfigRow(
     dragHandleModifier: Modifier,
     onVisibleChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
+    canReorder: Boolean = true,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -507,12 +537,16 @@ private fun TabConfigRow(
             )
             .padding(vertical = 6.dp, horizontal = 4.dp),
     ) {
-        Icon(
-            imageVector = Icons.DragHandle,
-            contentDescription = stringResource(R.string.action_reorder),
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-            modifier = Modifier.size(22.dp).then(dragHandleModifier),
-        )
+        if (canReorder) {
+            Icon(
+                imageVector = Icons.DragHandle,
+                contentDescription = stringResource(R.string.action_reorder),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier.size(22.dp).then(dragHandleModifier),
+            )
+        } else {
+            Spacer(modifier = Modifier.size(22.dp))
+        }
         Icon(
             imageVector = icon,
             contentDescription = null,

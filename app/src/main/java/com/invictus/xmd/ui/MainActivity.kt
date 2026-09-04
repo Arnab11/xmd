@@ -169,16 +169,30 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
 
     private var mainViewPager: ViewPager2? = null
     private var pagerPosition by mutableFloatStateOf(0f)
+    private var downloadsSelectionState: DownloadsSelectionUiState? by mutableStateOf(null)
+    private var isBrowserWebpageOpen: Boolean = false
 
-    private fun selectMainDestination(destination: MainDestination, smoothScroll: Boolean = true) {
+    private fun updateViewPagerUserInputEnabled() {
+        val webpageOpen = browserFragment()?.isWebpageOpen() ?: isBrowserWebpageOpen
+        val disabled = (downloadsSelectionState != null) ||
+            (mainDestination == MainDestination.Browser && webpageOpen)
+        mainViewPager?.isUserInputEnabled = !disabled
+    }
+
+    private fun selectMainDestination(destination: MainDestination, smoothScroll: Boolean = false) {
+        if (destination != MainDestination.Downloads) {
+            downloadsSelectionState?.onClose?.invoke()
+        }
         savedPagesDestination = null
         closeHeaderSearch()
         mainDestination = destination
         currentTabTag = tagFor(destination)
         val index = bottomNavSwipeOrder.indexOf(destination)
         if (index >= 0 && mainViewPager?.currentItem != index) {
+            pagerPosition = index.toFloat()
             mainViewPager?.setCurrentItem(index, smoothScroll)
         }
+        updateViewPagerUserInputEnabled()
     }
 
     private fun homeFragment(): HomeFragment? =
@@ -220,8 +234,10 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                     currentTabTag = tagFor(dest)
                     closeHeaderSearch()
                 }
+                updateViewPagerUserInputEnabled()
             }
         })
+        updateViewPagerUserInputEnabled()
     }
 
     private val clipboardManager by lazy { getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager }
@@ -401,6 +417,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                     searchQuery = headerSearchQuery,
                     snackbarHostState = snackbarHostState,
                     pagerPosition = pagerPosition,
+                    downloadsSelectionState = downloadsSelectionState,
                     onSearchActiveChange = { active ->
                         if (active) openHeaderSearch() else closeHeaderSearch()
                     },
@@ -1191,7 +1208,37 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         savedPagesDestination = SavedPagesDestination.Bookmarks
     }
 
+    override fun onBrowserWebpageStateChanged(isWebpageOpen: Boolean) {
+        this.isBrowserWebpageOpen = isWebpageOpen
+        updateViewPagerUserInputEnabled()
+    }
+
+    override fun onBrowserHeaderDragStart() {
+        if (mainViewPager?.isFakeDragging == false) {
+            mainViewPager?.beginFakeDrag()
+        }
+    }
+
+    override fun onBrowserHeaderDrag(dragAmount: Float) {
+        if (mainViewPager?.isFakeDragging == true) {
+            mainViewPager?.fakeDragBy(-dragAmount)
+        }
+    }
+
+    override fun onBrowserHeaderDragEnd() {
+        if (mainViewPager?.isFakeDragging == true) {
+            try {
+                mainViewPager?.endFakeDrag()
+            } catch (_: Throwable) {}
+        }
+    }
+
     // ── DownloadsFragment.Callbacks ─────────────────────────────────────────
+
+    override fun onDownloadsSelectionChanged(selectionState: DownloadsSelectionUiState?) {
+        downloadsSelectionState = selectionState
+        updateViewPagerUserInputEnabled()
+    }
 
     override fun retryItem(itemId: String) {
         val item = QueueRepository.current().firstOrNull { it.id == itemId } ?: return

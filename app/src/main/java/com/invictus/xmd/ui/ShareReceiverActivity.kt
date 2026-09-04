@@ -96,38 +96,37 @@ class ShareReceiverActivity : AppCompatActivity() {
             return
         }
 
-        QueueRepository.setLinks(listOf(url))
-        val item = QueueRepository.current().firstOrNull { it.sourceUrl == url } ?: run {
-            finish()
-            return
-        }
-
         when {
-            LinkParser.needsYtDlp(url) -> showYtDlpQualitySheet(item)
+            LinkParser.needsYtDlp(url) || LinkParser.isShareLink(url) || LinkParser.isFitgirlPage(url) -> {
+                startActivity(
+                    Intent(this, MainActivity::class.java)
+                        .setAction(Intent.ACTION_SEND)
+                        .putExtra(Intent.EXTRA_TEXT, url)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                )
+                finish()
+            }
             LinkParser.isGenericDownloadUrl(url) -> {
+                QueueRepository.setLinks(listOf(url))
+                val item = QueueRepository.current().firstOrNull { it.sourceUrl == url } ?: run {
+                    finish()
+                    return
+                }
                 QueueRepository.update(item.id) { it.copy(directUrl = url, status = ItemStatus.READY) }
                 DownloadService.start(this)
                 Toast.makeText(this, R.string.download_started_confirmation, Toast.LENGTH_SHORT).show()
                 finish()
             }
-            LinkParser.isShareLink(url) || LinkParser.isFitgirlPage(url) -> {
-                // Needs the Cloudflare-challenge WebView -- no way to do
-                // that invisibly, so this one case does still hand off to
-                // the full app.
-                startActivity(
-                    Intent(this, MainActivity::class.java)
-                        .setAction(Intent.ACTION_SEND)
-                        .putExtra(Intent.EXTRA_TEXT, url)
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
-                )
-                finish()
-            }
             else -> {
-                QueueRepository.update(item.id) {
-                    it.copy(
-                        status = ItemStatus.FAILED,
-                        error = getString(R.string.download_invalid_url_error, url),
-                    )
+                QueueRepository.setLinks(listOf(url))
+                val item = QueueRepository.current().firstOrNull { it.sourceUrl == url }
+                if (item != null) {
+                    QueueRepository.update(item.id) {
+                        it.copy(
+                            status = ItemStatus.FAILED,
+                            error = getString(R.string.download_invalid_url_error, url),
+                        )
+                    }
                 }
                 Toast.makeText(this, R.string.share_unsupported_link, Toast.LENGTH_SHORT).show()
                 finish()
@@ -146,6 +145,7 @@ class ShareReceiverActivity : AppCompatActivity() {
 
     // ── yt-dlp quality bottom sheet (YouTube, or a direct HLS/DASH link) ───
 
+    @Suppress("unused")
     private fun showYtDlpQualitySheet(item: QueueItem) {
         if (!BuildConfig.HAS_YOUTUBE_SUPPORT) {
             Toast.makeText(this, R.string.share_full_build_required, Toast.LENGTH_LONG).show()

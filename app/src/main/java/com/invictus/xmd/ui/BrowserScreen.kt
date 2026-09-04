@@ -296,7 +296,7 @@ internal fun BrowserDownloadConfirmationDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.fillMaxWidth(fraction = 0.82f),
+        modifier = Modifier.wideDialogWidth(),
         properties = WideDialogProperties,
         title = { Text(stringResource(R.string.download_confirm_title)) },
         text = {

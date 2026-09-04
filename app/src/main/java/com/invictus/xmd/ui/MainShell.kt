@@ -1,8 +1,14 @@
 package com.invictus.xmd.ui
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -31,6 +37,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,11 +67,13 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -107,6 +117,7 @@ internal fun MainShell(
     searchQuery: String,
     snackbarHostState: SnackbarHostState,
     pagerPosition: Float,
+    downloadsSelectionState: DownloadsSelectionUiState? = null,
     onSearchActiveChange: (Boolean) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onDestinationSelected: (MainDestination) -> Unit,
@@ -142,6 +153,7 @@ internal fun MainShell(
                     destination = destination,
                     searchActive = searchActive,
                     searchQuery = searchQuery,
+                    downloadsSelectionState = if (destination == MainDestination.Downloads) downloadsSelectionState else null,
                     onSearchActiveChange = onSearchActiveChange,
                     onSearchQueryChange = onSearchQueryChange,
                     onOpenSettings = onOpenSettings,
@@ -151,15 +163,32 @@ internal fun MainShell(
         },
         bottomBar = {
             if (!imeVisible) {
-                MainNavigationBar(
-                    destination = destination,
-                    navigationItems = navigationItems,
-                    position = pagerPosition,
-                    activeDownloadCount = activeDownloadCount,
-                    swipeModifier = bottomBarSwipeModifier,
-                    onDestinationSelected = onDestinationSelected,
-                    onAddDownload = onAddDownload,
-                )
+                val showSelectionPill = destination == MainDestination.Downloads && downloadsSelectionState != null
+                AnimatedContent(
+                    targetState = showSelectionPill,
+                    transitionSpec = {
+                        (slideInVertically { height -> height } + fadeIn())
+                            .togetherWith(slideOutVertically { height -> height } + fadeOut())
+                    },
+                    label = "BottomBarSelectionTransition",
+                ) { isSelecting ->
+                    val selection = downloadsSelectionState
+                    if (isSelecting && selection != null) {
+                        DownloadsSelectionPill(
+                            selection = selection,
+                        )
+                    } else {
+                        MainNavigationBar(
+                            destination = destination,
+                            navigationItems = navigationItems,
+                            position = pagerPosition,
+                            activeDownloadCount = activeDownloadCount,
+                            swipeModifier = bottomBarSwipeModifier,
+                            onDestinationSelected = onDestinationSelected,
+                            onAddDownload = onAddDownload,
+                        )
+                    }
+                }
             }
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -193,11 +222,102 @@ private fun DownloadsTopBar(
     destination: MainDestination,
     searchActive: Boolean,
     searchQuery: String,
+    downloadsSelectionState: DownloadsSelectionUiState? = null,
     onSearchActiveChange: (Boolean) -> Unit,
     onSearchQueryChange: (String) -> Unit,
     onOpenSettings: () -> Unit,
     onToggleTheme: () -> Unit,
 ) {
+    if (downloadsSelectionState != null) {
+        var showDropdown by remember { mutableStateOf(false) }
+
+        TopAppBar(
+            navigationIcon = {
+                IconButton(onClick = downloadsSelectionState.onClose) {
+                    Icon(
+                        imageVector = Icons.Close,
+                        contentDescription = stringResource(R.string.action_cancel),
+                        modifier = Modifier.size(24.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            },
+            title = {
+                Box {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { showDropdown = true }
+                            .padding(horizontal = 6.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            text = "${downloadsSelectionState.selectedCount}/${downloadsSelectionState.totalCount} Selected",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Icon(
+                            imageVector = Icons.ArrowDown,
+                            contentDescription = stringResource(R.string.selection_options),
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+
+                    DropdownMenu(
+                        expanded = showDropdown,
+                        onDismissRequest = { showDropdown = false },
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.select_all)) },
+                            leadingIcon = { Icon(Icons.Check, contentDescription = null) },
+                            onClick = {
+                                downloadsSelectionState.onSelectAll()
+                                showDropdown = false
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.invert_selection)) },
+                            leadingIcon = { Icon(Icons.Sync, contentDescription = null) },
+                            onClick = {
+                                downloadsSelectionState.onInvertSelection()
+                                showDropdown = false
+                            },
+                        )
+                    }
+                }
+            },
+            actions = {
+                if (downloadsSelectionState.canPause) {
+                    IconButton(onClick = downloadsSelectionState.onPause) {
+                        Icon(
+                            imageVector = Icons.Pause,
+                            contentDescription = stringResource(R.string.action_pause),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+                if (downloadsSelectionState.canStart) {
+                    IconButton(onClick = downloadsSelectionState.onStart) {
+                        Icon(
+                            imageVector = Icons.Play,
+                            contentDescription = stringResource(R.string.action_resume),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            ),
+        )
+        return
+    }
+
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     LaunchedEffect(searchActive) {
@@ -304,6 +424,164 @@ private fun DownloadsTopBar(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         ),
     )
+}
+
+@Composable
+private fun DownloadsSelectionPill(
+    selection: DownloadsSelectionUiState,
+    modifier: Modifier = Modifier,
+) {
+    val configuration = LocalConfiguration.current
+    val screenWidthDp = configuration.screenWidthDp
+    val isLargeScreen = screenWidthDp >= 600
+    val isExtraLargeScreen = screenWidthDp >= 840
+
+    val buttonSize = when {
+        isExtraLargeScreen -> 52.dp
+        isLargeScreen -> 46.dp
+        else -> 38.dp
+    }
+    val iconSize = when {
+        isExtraLargeScreen -> 28.dp
+        isLargeScreen -> 24.dp
+        else -> 20.dp
+    }
+    val pillHorizontalPadding = when {
+        isExtraLargeScreen -> 20.dp
+        isLargeScreen -> 16.dp
+        else -> 10.dp
+    }
+    val pillVerticalPadding = when {
+        isLargeScreen -> 8.dp
+        else -> 4.dp
+    }
+    val actionSpacing = when {
+        isExtraLargeScreen -> 12.dp
+        isLargeScreen -> 8.dp
+        else -> 4.dp
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .navigationBarsPadding(),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            modifier = modifier.padding(horizontal = 12.dp, vertical = 12.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+            shadowElevation = 8.dp,
+            border = BorderStroke(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+            ),
+        ) {
+            Row(
+                modifier = Modifier
+                    .wrapContentWidth()
+                    .padding(horizontal = pillHorizontalPadding, vertical = pillVerticalPadding),
+                horizontalArrangement = Arrangement.spacedBy(actionSpacing, Alignment.CenterHorizontally),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // Action: Pause
+                if (selection.canPause) {
+                    PillActionButton(
+                        icon = Icons.Pause,
+                        contentDescription = stringResource(R.string.action_pause),
+                        tint = MaterialTheme.colorScheme.primary,
+                        size = buttonSize,
+                        iconSize = iconSize,
+                        onClick = selection.onPause,
+                    )
+                }
+
+                // Action: Start / Resume
+                if (selection.canStart) {
+                    PillActionButton(
+                        icon = Icons.Play,
+                        contentDescription = stringResource(R.string.action_resume),
+                        tint = MaterialTheme.colorScheme.primary,
+                        size = buttonSize,
+                        iconSize = iconSize,
+                        onClick = selection.onStart,
+                    )
+                }
+
+                // Action: Retry / Re-download
+                if (selection.canRetry) {
+                    PillActionButton(
+                        icon = Icons.Refresh,
+                        contentDescription = stringResource(R.string.action_redownload),
+                        tint = MaterialTheme.colorScheme.primary,
+                        size = buttonSize,
+                        iconSize = iconSize,
+                        onClick = selection.onRetry,
+                    )
+                }
+
+                // Action: Copy link
+                if (selection.canCopyLink) {
+                    PillActionButton(
+                        icon = Icons.Copy,
+                        contentDescription = stringResource(R.string.action_copy_link),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        size = buttonSize,
+                        iconSize = iconSize,
+                        onClick = selection.onCopyLink,
+                    )
+                }
+
+                // Action: Share
+                if (selection.canShare) {
+                    PillActionButton(
+                        icon = Icons.Share,
+                        contentDescription = stringResource(R.string.action_share),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        size = buttonSize,
+                        iconSize = iconSize,
+                        onClick = selection.onShare,
+                    )
+                }
+
+                // Action: Delete
+                if (selection.canDelete) {
+                    PillActionButton(
+                        icon = Icons.Delete,
+                        contentDescription = stringResource(R.string.action_delete),
+                        tint = MaterialTheme.colorScheme.error,
+                        size = buttonSize,
+                        iconSize = iconSize,
+                        onClick = selection.onDelete,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PillActionButton(
+    icon: AppIcon,
+    contentDescription: String,
+    tint: Color,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: Dp = 38.dp,
+    iconSize: Dp = 20.dp,
+) {
+    IconButton(
+        onClick = onClick,
+        modifier = modifier.size(size),
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = tint,
+            modifier = Modifier.size(iconSize),
+        )
+    }
 }
 
 @Composable

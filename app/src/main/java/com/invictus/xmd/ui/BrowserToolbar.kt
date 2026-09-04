@@ -110,8 +110,9 @@ fun BrowserToolbarRow(
     overflowMenu: @Composable () -> Unit,
     progress: Int,
     progressVisible: Boolean,
+    modifier: Modifier = Modifier,
 ) {
-    Box(modifier = Modifier.fillMaxWidth()) {
+    Box(modifier = modifier.fillMaxWidth()) {
         Surface(
             modifier = Modifier
                 .fillMaxWidth()

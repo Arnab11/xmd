@@ -11,10 +11,15 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -78,6 +83,10 @@ class BrowserFragment : Fragment() {
          *  the same way); direct video/audio goes straight to READY like
          *  any other direct-download link. */
         fun triggerSniffedMedia(url: String, needsPicker: Boolean)
+        fun onBrowserWebpageStateChanged(isWebpageOpen: Boolean)
+        fun onBrowserHeaderDragStart()
+        fun onBrowserHeaderDrag(dragAmount: Float)
+        fun onBrowserHeaderDragEnd()
     }
 
     companion object {
@@ -286,6 +295,48 @@ class BrowserFragment : Fragment() {
         )
         setContent {
             com.invictus.xmd.ui.theme.XmdTheme {
+                val canSwipeHeader = !addressBarFocused && !tabsOverlayVisible
+                val headerSwipeModifier = Modifier.pointerInput(canSwipeHeader) {
+                    if (!canSwipeHeader) return@pointerInput
+                    awaitEachGesture {
+                        val down = awaitFirstDown(pass = PointerEventPass.Initial, requireUnconsumed = false)
+                        var dragStarted = false
+                        var totalDx = 0f
+                        val touchSlop = viewConfiguration.touchSlop
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent(pass = PointerEventPass.Initial)
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) {
+                                    break
+                                }
+                                val dx = change.position.x - change.previousPosition.x
+                                val dy = change.position.y - change.previousPosition.y
+                                if (!dragStarted) {
+                                    totalDx += dx
+                                    if (kotlin.math.abs(totalDx) > touchSlop) {
+                                        val totalDy = change.position.y - down.position.y
+                                        if (kotlin.math.abs(totalDx) > kotlin.math.abs(totalDy)) {
+                                            dragStarted = true
+                                            change.consume()
+                                            (activity as? Callbacks)?.onBrowserHeaderDragStart()
+                                            (activity as? Callbacks)?.onBrowserHeaderDrag(totalDx)
+                                        } else {
+                                            break
+                                        }
+                                    }
+                                } else {
+                                    change.consume()
+                                    (activity as? Callbacks)?.onBrowserHeaderDrag(dx)
+                                }
+                            }
+                        } finally {
+                            if (dragStarted) {
+                                (activity as? Callbacks)?.onBrowserHeaderDragEnd()
+                            }
+                        }
+                    }
+                }
                 BrowserScreen(
                     speedDialVisible = speedDialVisible,
                     toolbar = {
@@ -330,6 +381,7 @@ class BrowserFragment : Fragment() {
                             },
                             progress = toolbarProgress,
                             progressVisible = toolbarProgressVisible,
+                            modifier = headerSwipeModifier,
                         )
                     },
                     onWebViewHostReady = { swipeRefresh, containerView ->
@@ -1292,8 +1344,20 @@ class BrowserFragment : Fragment() {
         }
     }
 
+    fun isWebpageOpen(): Boolean = !speedDialVisible
+
+    private fun notifyWebpageState(isOpen: Boolean) {
+        (activity as? Callbacks)?.onBrowserWebpageStateChanged(isOpen)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        notifyWebpageState(!speedDialVisible)
+    }
+
     private fun showSpeedDial() {
         speedDialVisible = true
+        notifyWebpageState(false)
         addressBarText = ""
         securityIconVisible = false
         bookmarkStarVisible = false
@@ -1307,6 +1371,7 @@ class BrowserFragment : Fragment() {
 
     private fun showWebView() {
         speedDialVisible = false
+        notifyWebpageState(true)
     }
 
     /**

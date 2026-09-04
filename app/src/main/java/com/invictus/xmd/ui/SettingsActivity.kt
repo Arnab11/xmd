@@ -486,11 +486,14 @@ private fun AppearanceRoute() {
         hiddenTabs = hiddenTabs,
         defaultTab = defaultTab,
         onMoveTab = { fromIndex, toIndex ->
-            val updated = tabOrder.toMutableList()
-            val moved = updated.removeAt(fromIndex)
-            updated.add(toIndex, moved)
-            tabOrder = updated
-            com.invictus.xmd.core.Settings.setTabOrder(updated)
+            val pages = tabOrder.filter { it != com.invictus.xmd.core.Settings.TabId.ADD }.toMutableList()
+            if (fromIndex in pages.indices && toIndex in pages.indices) {
+                val moved = pages.removeAt(fromIndex)
+                pages.add(toIndex, moved)
+                val updated = pages + com.invictus.xmd.core.Settings.TabId.ADD
+                tabOrder = updated
+                com.invictus.xmd.core.Settings.setTabOrder(updated)
+            }
         },
         onToggleTabVisible = { tabId, visible ->
             val updated = hiddenTabs.toMutableSet()
