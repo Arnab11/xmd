@@ -11,18 +11,24 @@ import android.provider.Settings as AndroidSettings
 import android.view.GestureDetector
 import android.view.MotionEvent
 import android.widget.Toast
+import androidx.activity.SystemBarStyle
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
 import androidx.viewpager2.adapter.FragmentStateAdapter
@@ -59,7 +65,9 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.ui.graphics.toArgb
 import com.invictus.xmd.core.DownloadEngine
 import com.invictus.xmd.core.TorrentSession
+import com.invictus.xmd.ui.theme.rememberThemeTransitionState
 import com.invictus.xmd.ui.theme.resolveCurrentXmdColorScheme
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Job
 import org.libtorrent4j.TorrentInfo
 import okhttp3.Request
@@ -360,15 +368,23 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         }
     }
 
-    private fun applySystemBarColors() {
-        val isDark = Settings.isDarkMode()
-        val colorScheme = resolveCurrentXmdColorScheme(this)
-        window.statusBarColor = colorScheme.surfaceContainerLow.toArgb()
-        window.navigationBarColor = colorScheme.background.toArgb()
+    private var appliedEdgeToEdgeDarkMode: Boolean? = null
 
-        val insetsController = androidx.core.view.WindowCompat.getInsetsController(window, window.decorView)
-        insetsController.isAppearanceLightStatusBars = !isDark
-        insetsController.isAppearanceLightNavigationBars = !isDark
+    private fun applyEdgeToEdge(isDarkMode: Boolean) {
+        if (appliedEdgeToEdgeDarkMode == isDarkMode) return
+
+        val synchronizedBarStyle = SystemBarStyle.auto(
+            lightScrim = Color(0xFFF4F6F9).toArgb(),
+            darkScrim = Color(0xFF0E1521).toArgb(),
+        ) { isDarkMode }
+        enableEdgeToEdge(
+            statusBarStyle = synchronizedBarStyle,
+            navigationBarStyle = synchronizedBarStyle,
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        appliedEdgeToEdgeDarkMode = isDarkMode
     }
 
     // ── onCreate ──────────────────────────────────────────────────────────
@@ -381,6 +397,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         appliedIsAmoled = Settings.isAmoledMode()
         com.invictus.xmd.ui.theme.AppTheme.applyTo(this)
         super.onCreate(savedInstanceState)
+        applyEdgeToEdge(isDarkMode = Settings.isDarkMode())
         navigationItems = configuredNavigationItems()
         if (savedInstanceState == null) {
             mainDestination = configuredDefaultDestination()
@@ -393,9 +410,22 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                     destination.name == savedName
                 }
             }
-        applySystemBarColors()
         setContent {
-            com.invictus.xmd.ui.theme.XmdTheme {
+            val isDark by Settings.darkModeFlow.collectAsState()
+            val themeTransitionState = rememberThemeTransitionState()
+
+            LaunchedEffect(isDark) {
+                if (themeTransitionState.isAnimating) {
+                    snapshotFlow {
+                        themeTransitionState.animationProgress.value to themeTransitionState.isAnimating
+                    }.first { (progress, isAnimating) ->
+                        !isAnimating || progress >= SYSTEM_BAR_THEME_SWITCH_PROGRESS
+                    }
+                }
+                applyEdgeToEdge(isDark)
+            }
+
+            com.invictus.xmd.ui.theme.XmdTheme(transitionState = themeTransitionState) {
                 MainShell(
                     destination = mainDestination,
                     navigationItems = navigationItems,
@@ -1535,6 +1565,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     // ── Constants ─────────────────────────────────────────────────────────
 
     companion object {
+        private const val SYSTEM_BAR_THEME_SWITCH_PROGRESS = 0.55f
         private const val TAG_HOME      = "home"
         private const val TAG_BROWSER   = "browser"
         private const val TAG_DOWNLOADS = "downloads"

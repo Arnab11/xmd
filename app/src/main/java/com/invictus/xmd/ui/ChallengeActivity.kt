@@ -10,6 +10,7 @@ import android.webkit.WebView
 import androidx.activity.ComponentActivity
 import androidx.activity.addCallback
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -87,6 +88,7 @@ class ChallengeActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         com.invictus.xmd.ui.theme.AppTheme.applyTo(this)
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
 
         shareUrl = intent.getStringExtra(EXTRA_SHARE_URL) ?: run { finishWithError("Missing URL"); return }
         fileId = intent.getStringExtra(EXTRA_FILE_ID) ?: run { finishWithError("Missing file id"); return }
