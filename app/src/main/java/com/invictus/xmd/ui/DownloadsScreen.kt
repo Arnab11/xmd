@@ -109,6 +109,7 @@ fun DownloadsScreen(
     onRename: (QueueItem, String) -> Unit,
     onCopyLink: (QueueItem) -> Unit,
     onShare: (QueueItem) -> Unit,
+    onOpenFileLocation: (QueueItem) -> Unit,
     onDelete: (QueueItem) -> Unit,
     onCancelAll: () -> Unit,
     onRetryAll: () -> Unit,
@@ -334,6 +335,7 @@ fun DownloadsScreen(
             onRedownload = { onRetry(item); optionsTarget = null },
             onCopyLink = { onCopyLink(item); optionsTarget = null },
             onShare = { onShare(item); optionsTarget = null },
+            onOpenFileLocation = { onOpenFileLocation(item); optionsTarget = null },
             onDelete = { deleteTarget = item; optionsTarget = null },
             onDismiss = { optionsTarget = null },
         )
@@ -1004,6 +1006,7 @@ private fun DownloadOptionsSheet(
     onRedownload: () -> Unit,
     onCopyLink: () -> Unit,
     onShare: () -> Unit,
+    onOpenFileLocation: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -1089,6 +1092,13 @@ private fun DownloadOptionsSheet(
                 label = stringResource(R.string.action_share),
                 onClick = onShare,
             )
+            if (showOpenWithAndRename) {
+                SheetActionRow(
+                    icon = Icons.Folder,
+                    label = stringResource(R.string.action_open_file_location),
+                    onClick = onOpenFileLocation,
+                )
+            }
             SheetActionRow(
                 icon = Icons.Delete,
                 label = stringResource(R.string.action_delete),

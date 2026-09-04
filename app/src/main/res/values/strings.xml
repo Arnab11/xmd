@@ -47,6 +47,7 @@
     <string name="link_found_toast">Link found — tap to add to downloads</string>
     <string name="open_file_missing">File not found — it may have been moved or deleted.</string>
     <string name="open_file_no_app">No app found that can open this file.</string>
+    <string name="open_file_location_no_app">No file manager app found to open this location.</string>
     <string name="action_clear">Clear</string>
     <string name="action_retry_all">Retry All</string>
     <string name="action_clear_all">Clear All</string>
@@ -64,6 +65,7 @@
     <string name="action_open_with">Open with</string>
     <string name="action_rename">Rename</string>
     <string name="action_redownload">Re-download</string>
+    <string name="action_open_file_location">Open file location</string>
     <string name="action_share">Share</string>
     <string name="delete_download_title">Delete this download?</string>
     <string name="rename_conflict_toast">A file with that name already exists</string>
