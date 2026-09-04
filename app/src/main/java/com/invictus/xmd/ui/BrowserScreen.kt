@@ -3,6 +3,7 @@ package com.invictus.xmd.ui
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
@@ -10,6 +11,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.AlertDialog
@@ -294,24 +296,37 @@ internal fun BrowserDownloadConfirmationDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.wideDialogWidth(),
+        modifier = Modifier.fillMaxWidth(fraction = 0.82f),
         properties = WideDialogProperties,
         title = { Text(stringResource(R.string.download_confirm_title)) },
-        text = { Text(stringResource(R.string.download_confirm_message, prompt.fileName)) },
-        confirmButton = {
-            TextButton(onClick = { onAddToDownloads(prompt.url); onDismiss() }) {
-                Text(stringResource(R.string.action_add_to_downloads))
+        text = {
+            Column {
+                Text(stringResource(R.string.download_confirm_message, prompt.fileName))
+                Spacer(Modifier.height(20.dp))
+                // Custom action row instead of the default confirm/dismiss slots --
+                // those always pack together at the trailing edge, which is what
+                // pushed Copy link over next to Cancel/Download. SpaceBetween here
+                // pins Copy link to the leading edge, Cancel+Download to the trailing.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = { onCopyLink(prompt.url); onDismiss() }) {
+                        Text(stringResource(R.string.action_copy_link))
+                    }
+                    Row {
+                        TextButton(onClick = onDismiss) {
+                            Text(stringResource(android.R.string.cancel))
+                        }
+                        TextButton(onClick = { onAddToDownloads(prompt.url); onDismiss() }) {
+                            Text(stringResource(R.string.action_download_direct))
+                        }
+                    }
+                }
             }
         },
-        dismissButton = {
-            Row {
-                TextButton(onClick = { onCopyLink(prompt.url); onDismiss() }) {
-                    Text(stringResource(R.string.action_copy_link))
-                }
-                TextButton(onClick = onDismiss) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            }
-        },
+        confirmButton = {},
+        dismissButton = {},
     )
 }

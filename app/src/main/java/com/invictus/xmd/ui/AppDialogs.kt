@@ -28,7 +28,7 @@ import androidx.compose.ui.window.DialogProperties
  */
 internal val WideDialogProperties = DialogProperties(usePlatformDefaultWidth = false)
 
-internal fun Modifier.wideDialogWidth(): Modifier = this.fillMaxWidth(fraction = 0.92f)
+internal fun Modifier.wideDialogWidth(): Modifier = this.fillMaxWidth(fraction = 0.82f)
 
 /**
  * Filled pill-shaped confirm button -- used only for a dialog's primary
