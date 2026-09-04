@@ -93,20 +93,8 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         val filesState: TorrentFilesUiState,
     )
 
-    private data class QualityPickerState(
-        val titleText: String,
-        val standardOptions: List<YtDlpManager.QualityOption>,
-        val advancedFormats: List<YtDlpManager.ProbedFormat>,
-        val advancedLoading: Boolean,
-        val durationSeconds: Int?,
-        val onConfirm: (YtDlpManager.QualityOption?) -> Unit,
-        val onDismiss: () -> Unit,
-    )
-
     private var addDownloadDialogState: AddDownloadDialogState? by mutableStateOf(null)
     private var addTorrentDialogState: AddTorrentDialogState? by mutableStateOf(null)
-    private var qualityPickerState: QualityPickerState? by mutableStateOf(null)
-    private var qualityPickerRequestToken: Any? = null
     private var torrentMetadataJob: Job? = null
 
     private fun openHeaderSearch() {
@@ -519,7 +507,17 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                             pendingSaveDirCallback = onPicked
                             pickSaveDirLauncher.launch(null)
                         },
-                        onDismiss = { addDownloadDialogState = null },
+                        onDismiss = {
+                            addDownloadDialogState?.let { state ->
+                                val pending = QueueRepository.current().firstOrNull {
+                                    it.sourceUrl == state.initialLink && it.status == ItemStatus.RESOLVING
+                                }
+                                if (pending != null) {
+                                    QueueRepository.removeItem(pending.id)
+                                }
+                            }
+                            addDownloadDialogState = null
+                        },
                         onStart = { link, name, saveDir, quality, audioFormat ->
                             addDownloadDialogState = null
                             when {
@@ -595,18 +593,6 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                                 triggerDownloadTorrentMagnet(link, name, saveDir, selectedIndices)
                             }
                         },
-                    )
-                }
-
-                qualityPickerState?.let { state ->
-                    QualityPickerDialog(
-                        titleText = state.titleText,
-                        standardOptions = state.standardOptions,
-                        advancedFormats = state.advancedFormats,
-                        advancedLoading = state.advancedLoading,
-                        durationSeconds = state.durationSeconds,
-                        onDismiss = state.onDismiss,
-                        onConfirm = state.onConfirm,
                     )
                 }
 
@@ -967,18 +953,18 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             showDownloadStartedSnackbar()
         }
 
-        // YouTube/Instagram/HLS-DASH links skip directUrl/READY entirely --
-        // they need the quality-picker dialog first (see resolveYoutube),
-        // same as if they'd gone through resolveAll(). DownloadService.start()
-        // for these fires from inside resolveYoutube() itself, once a quality
-        // is actually picked, not here.
         if (ytDlpLines.isNotEmpty()) {
-            lifecycleScope.launch {
-                for (link in ytDlpLines) {
-                    val item = QueueRepository.current().firstOrNull { it.sourceUrl == link } ?: continue
-                    QueueRepository.update(item.id) { it.copy(status = ItemStatus.RESOLVING) }
-                    resolveOne(item)
+            val savedLabel = Settings.ytDlpDefaultQualityLabel()
+            if (savedLabel.isNotBlank()) {
+                lifecycleScope.launch {
+                    for (link in ytDlpLines) {
+                        val item = QueueRepository.current().firstOrNull { it.sourceUrl == link } ?: continue
+                        QueueRepository.update(item.id) { it.copy(status = ItemStatus.RESOLVING) }
+                        resolveOne(item)
+                    }
                 }
+            } else {
+                showAddDownloadDialog(ytDlpLines.first())
             }
         }
     }
@@ -1179,12 +1165,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     }
 
     override fun triggerSniffedMedia(url: String, needsPicker: Boolean) {
-        QueueRepository.setLinks(listOf(url))
-        val item = QueueRepository.current().firstOrNull { it.sourceUrl == url } ?: return
         if (needsPicker) {
-            QueueRepository.update(item.id) { it.copy(status = ItemStatus.RESOLVING) }
-            lifecycleScope.launch { resolveYoutube(item) }
+            showAddDownloadDialog(url)
         } else {
+            QueueRepository.setLinks(listOf(url))
+            val item = QueueRepository.current().firstOrNull { it.sourceUrl == url } ?: return
             QueueRepository.update(item.id) { it.copy(directUrl = url, status = ItemStatus.READY) }
             DownloadService.start(this)
             showDownloadStartedSnackbar()
@@ -1422,10 +1407,6 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             isGenericOrHls = !LinkParser.isYoutubeLink(item.sourceUrl)
         )
 
-        // A saved default (anything other than blank/"Ask always") skips
-        // the picker dialog entirely and downloads at that quality
-        // directly -- matched back to its QualityOption by label, same
-        // list the dialog itself is built from so the two never drift.
         val savedLabel = Settings.ytDlpDefaultQualityLabel()
         val chosen = if (savedLabel.isNotBlank()) {
             // Exact match first; the "Audio only (…)" entry's suffix now
@@ -1437,52 +1418,8 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             options.firstOrNull { it.label == savedLabel }
                 ?: options.firstOrNull { it.isAudioOnly && savedLabel.startsWith("Audio only") }
         } else {
-            suspendCancellableCoroutine<YtDlpManager.QualityOption?> { cont ->
-                val requestToken = Any()
-                qualityPickerRequestToken = requestToken
-                fun complete(result: YtDlpManager.QualityOption?) {
-                    if (qualityPickerRequestToken !== requestToken) return
-                    qualityPickerRequestToken = null
-                    qualityPickerState = null
-                    if (cont.isActive) cont.resume(result)
-                }
-                qualityPickerState = QualityPickerState(
-                    titleText = item.fileName ?: "Choose quality",
-                    standardOptions = options,
-                    advancedFormats = emptyList(),
-                    advancedLoading = true,
-                    durationSeconds = null,
-                    onConfirm = ::complete,
-                    onDismiss = { complete(null) },
-                )
-                val probeJob = lifecycleScope.launch {
-                    val probe = withContext(Dispatchers.IO) {
-                        YtDlpManager.probeFormats(item.sourceUrl, this@MainActivity)
-                    }
-                    // Highest quality first -- video streams (by height, then
-                    // fps, then bitrate) ahead of audio-only, matching the
-                    // standard ladder's high-to-low ordering above.
-                    val sorted = probe.formats.sortedWith(
-                        compareByDescending<YtDlpManager.ProbedFormat> { it.height ?: -1 }
-                            .thenByDescending { it.fps ?: -1 }
-                            .thenByDescending { it.tbr ?: -1.0 }
-                    )
-                    if (qualityPickerRequestToken === requestToken) {
-                        qualityPickerState = qualityPickerState?.copy(
-                            advancedLoading = false,
-                            advancedFormats = sorted,
-                            durationSeconds = probe.durationSeconds,
-                        )
-                    }
-                }
-                cont.invokeOnCancellation {
-                    probeJob.cancel()
-                    if (qualityPickerRequestToken === requestToken) {
-                        qualityPickerRequestToken = null
-                        qualityPickerState = null
-                    }
-                }
-            }
+            showAddDownloadDialog(item.sourceUrl)
+            return
         }
 
         if (chosen == null) {
