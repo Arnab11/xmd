@@ -31,6 +31,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
 import com.invictus.xmd.R
 
+/** A developer credit -- [name] shown as the row title, [githubId] shown as
+ * subtext and used to open `github.com/<githubId>` when the row is tapped. */
+data class AboutDeveloper(val name: String, val githubId: String)
+
 /**
  * App identity, version, GitHub link, license notice, developer credits,
  * and the open-source libraries Xmd is built on. Rendered directly by
@@ -40,8 +44,9 @@ import com.invictus.xmd.R
 fun AboutScreen(
     versionText: String,
     onGithubClick: () -> Unit,
-    developers: List<Pair<String, String>>,
+    developers: List<AboutDeveloper>,
     credits: List<Pair<String, String>>,
+    onDeveloperClick: (AboutDeveloper) -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -139,8 +144,12 @@ fun AboutScreen(
         SettingsSectionHeader(title = stringResource(R.string.about_developers_title))
 
         SettingsSectionCard {
-            developers.forEachIndexed { index, (name, role) ->
-                AboutCreditRow(name, role)
+            developers.forEachIndexed { index, developer ->
+                AboutCreditRow(
+                    name = developer.name,
+                    description = developer.githubId,
+                    onClick = { onDeveloperClick(developer) },
+                )
                 if (index != developers.lastIndex) SettingsDivider()
             }
         }
@@ -170,10 +179,11 @@ fun AboutScreen(
 }
 
 @Composable
-private fun AboutCreditRow(name: String, description: String) {
+private fun AboutCreditRow(name: String, description: String, onClick: (() -> Unit)? = null) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Text(

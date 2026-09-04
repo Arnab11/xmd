@@ -52,14 +52,18 @@ class DownloadService : LifecycleService() {
         const val ACTION_START = "com.invictus.xmd.action.START"
         const val ACTION_PAUSE_ITEM = "com.invictus.xmd.action.PAUSE_ITEM"
         const val ACTION_RESUME_ITEM = "com.invictus.xmd.action.RESUME_ITEM"
+        const val ACTION_PAUSE_ALL = "com.invictus.xmd.action.PAUSE_ALL"
+        const val ACTION_RESUME_ALL = "com.invictus.xmd.action.RESUME_ALL"
         const val ACTION_CANCEL_ITEM = "com.invictus.xmd.action.CANCEL_ITEM"
         const val ACTION_CANCEL_ALL = "com.invictus.xmd.action.CANCEL_ALL"
         const val ACTION_WIFI_ONLY_ENABLED = "com.invictus.xmd.action.WIFI_ONLY_ENABLED"
         const val EXTRA_ITEM_ID = "extra_item_id"
+        const val EXTRA_ITEM_IDS = "extra_item_ids"
         private const val NOTIFICATION_ID = 42
         private const val BETWEEN_CLAIM_DELAY_MS = 500L
         private const val MAX_AUTO_RETRIES = 3
         private const val NOTIFY_THROTTLE_MS = 500L
+        private const val ETA_HOLD_MS = 1_000L
 
         fun start(context: Context) {
             val intent = Intent(context, DownloadService::class.java).setAction(ACTION_START)
@@ -79,6 +83,28 @@ class DownloadService : LifecycleService() {
                 Intent(context, DownloadService::class.java)
                     .setAction(ACTION_RESUME_ITEM)
                     .putExtra(EXTRA_ITEM_ID, itemId)
+            )
+        }
+
+        /** Pauses every id in [itemIds] -- caller (DownloadsScreen's overflow
+         *  menu) decides the scope, e.g. only the items visible under the
+         *  currently selected filter tab + search query. */
+        fun pauseAll(context: Context, itemIds: List<String>) {
+            if (itemIds.isEmpty()) return
+            context.startService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_PAUSE_ALL)
+                    .putStringArrayListExtra(EXTRA_ITEM_IDS, ArrayList(itemIds))
+            )
+        }
+
+        /** Resumes every id in [itemIds] -- same scoping story as [pauseAll]. */
+        fun resumeAll(context: Context, itemIds: List<String>) {
+            if (itemIds.isEmpty()) return
+            context.startService(
+                Intent(context, DownloadService::class.java)
+                    .setAction(ACTION_RESUME_ALL)
+                    .putStringArrayListExtra(EXTRA_ITEM_IDS, ArrayList(itemIds))
             )
         }
 
@@ -152,6 +178,7 @@ class DownloadService : LifecycleService() {
     private val activeWorkers = java.util.concurrent.atomic.AtomicInteger(0)
 
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    private var internetCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -160,13 +187,72 @@ class DownloadService : LifecycleService() {
             onWifiAvailable = { onWifiRegained() },
             onWifiLost = { onWifiLost() }
         )
+        internetCallback = NetworkMonitor.registerInternet(
+            context = this,
+            onAvailable = { onInternetRegained() },
+            onLost = { onInternetLost() }
+        )
     }
 
     override fun onDestroy() {
         networkCallback?.let { NetworkMonitor.unregister(this, it) }
         networkCallback = null
+        internetCallback?.let { NetworkMonitor.unregister(this, it) }
+        internetCallback = null
         super.onDestroy()
     }
+
+    /** Total internet outage (airplane mode, no signal, router down --
+     *  regardless of the Wi-Fi-only setting, which only cares about Wi-Fi
+     *  specifically). Pause every live download in place as "Waiting for
+     *  network", the same shape as [onWifiLost] but for any transport. */
+    private fun onInternetLost() {
+        val live = QueueRepository.current()
+            .filter { it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING }
+        live.forEach { item ->
+            if (item.platform == MediaPlatform.YOUTUBE) {
+                networkWaitingYoutubeIds.add(item.id)
+                cancelledYoutubeIds.add(item.id)
+                YtDlpManager.cancel(item.id)
+            } else {
+                engines[item.id]?.pause()
+                torrentEngines[item.id]?.pause()
+                QueueRepository.update(item.id) {
+                    it.copy(status = ItemStatus.PAUSED, error = Settings.NETWORK_WAIT_MARKER)
+                }
+            }
+        }
+        if (live.isNotEmpty()) updateNotification()
+    }
+
+    /** Internet is back (any transport) -- resume anything auto-paused for
+     *  a total outage and top workers back up so anything still READY gets
+     *  picked up automatically, no manual Retry needed (mirrors Chrome). */
+    private fun onInternetRegained() {
+        val autoPaused = QueueRepository.current()
+            .filter { it.status == ItemStatus.PAUSED && it.error == Settings.NETWORK_WAIT_MARKER }
+        autoPaused.forEach { item ->
+            val liveEngine = engines[item.id] != null || torrentEngines[item.id] != null
+            if (liveEngine) {
+                engines[item.id]?.resume()
+                torrentEngines[item.id]?.resume()
+                QueueRepository.update(item.id) { it.copy(status = ItemStatus.DOWNLOADING, error = null) }
+            } else {
+                QueueRepository.update(item.id) { it.copy(status = ItemStatus.READY, error = null) }
+            }
+        }
+        val hadWaitingYoutube = networkWaitingYoutubeIds.isNotEmpty()
+        if (autoPaused.isNotEmpty() || hadWaitingYoutube) {
+            startForeground(NOTIFICATION_ID, buildNotification())
+            topUpWorkers()
+            updateNotification()
+        }
+    }
+
+    /** YouTube item ids cancelled by [onInternetLost] specifically -- same
+     *  idea as [wifiWaitingYoutubeIds] but for a total outage, so their
+     *  catch block in [downloadYoutube] knows to land on READY, not FAILED. */
+    private val networkWaitingYoutubeIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** Wi-Fi dropped (or vanished entirely) while Wi-Fi-only downloads is ON --
      *  pause every live download in place, marking each with [Settings.WIFI_WAIT_MARKER]
@@ -238,45 +324,28 @@ class DownloadService : LifecycleService() {
                 topUpWorkers()
             }
             ACTION_PAUSE_ITEM -> intent.getStringExtra(EXTRA_ITEM_ID)?.let { id ->
-                // yt-dlp has no native pause -- QueueItemRow (DownloadsScreen.kt) already hides the
-                // Pause button for YouTube items, this is just a defensive
-                // no-op in case this action fires for one some other way.
-                val current = QueueRepository.current().firstOrNull { it.id == id }
-                if (current?.platform != MediaPlatform.YOUTUBE) {
-                    engines[id]?.pause()
-                    torrentEngines[id]?.pause()
-                    QueueRepository.update(id) { it.copy(status = ItemStatus.PAUSED) }
-                }
+                pauseSingleItem(id)
                 updateNotification()
             }
             ACTION_RESUME_ITEM -> intent.getStringExtra(EXTRA_ITEM_ID)?.let { id ->
-                val liveEngine = engines[id] != null || torrentEngines[id] != null
-                if (liveEngine) {
-                    // Same app session, engine's coroutine is still alive and
-                    // just spinning in its pause-checkpoint loop -- flip the
-                    // flag and it picks the exact same connection back up.
-                    engines[id]?.resume()
-                    torrentEngines[id]?.resume()
-                    QueueRepository.update(id) { it.copy(status = ItemStatus.DOWNLOADING) }
-                } else {
-                    // No live engine -- the process was killed while this item
-                    // sat paused (very possible over "long hours": Doze,
-                    // battery optimization, user swipe-kill). There's no
-                    // coroutine left to un-pause. Route it back through READY
-                    // instead of marking DOWNLOADING with nothing behind it --
-                    // a fresh worker claims it and downloadAuto() picks the
-                    // temp file back up via Range: bytes=<existingSize>-, so
-                    // already-downloaded bytes aren't wasted.
-                    val current = QueueRepository.current().firstOrNull { it.id == id }
-                    if (current?.directUrl != null) {
-                        QueueRepository.update(id) { it.copy(status = ItemStatus.READY, error = null) }
-                        startForeground(NOTIFICATION_ID, buildNotification())
-                        topUpWorkers()
-                    } else {
-                        // No resolved direct link cached either -- needs a
-                        // full re-resolve, not just a restarted download.
-                        QueueRepository.update(id) { it.copy(status = ItemStatus.PENDING, error = null) }
-                    }
+                if (resumeSingleItem(id)) {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                    topUpWorkers()
+                }
+                updateNotification()
+            }
+            ACTION_PAUSE_ALL -> {
+                intent.getStringArrayListExtra(EXTRA_ITEM_IDS)?.forEach { id -> pauseSingleItem(id) }
+                updateNotification()
+            }
+            ACTION_RESUME_ALL -> {
+                val ids = intent.getStringArrayListExtra(EXTRA_ITEM_IDS).orEmpty()
+                // Only call startForeground/topUpWorkers once for the whole
+                // batch, not per id -- same effect, no redundant churn.
+                val needsTopUp = ids.fold(false) { acc, id -> resumeSingleItem(id) || acc }
+                if (needsTopUp) {
+                    startForeground(NOTIFICATION_ID, buildNotification())
+                    topUpWorkers()
                 }
                 updateNotification()
             }
@@ -323,6 +392,54 @@ class DownloadService : LifecycleService() {
         return START_NOT_STICKY
     }
 
+    /** Pauses one item by id -- shared by [ACTION_PAUSE_ITEM] and [ACTION_PAUSE_ALL].
+     *  yt-dlp has no native pause -- QueueItemRow (DownloadsScreen.kt) already hides the
+     *  Pause button for YouTube items, this is just a defensive no-op in case
+     *  this action fires for one some other way. */
+    private fun pauseSingleItem(id: String) {
+        val current = QueueRepository.current().firstOrNull { it.id == id }
+        if (current?.platform != MediaPlatform.YOUTUBE) {
+            engines[id]?.pause()
+            torrentEngines[id]?.pause()
+            QueueRepository.update(id) { it.copy(status = ItemStatus.PAUSED) }
+        }
+    }
+
+    /** Resumes one item by id -- shared by [ACTION_RESUME_ITEM] and [ACTION_RESUME_ALL].
+     *  Returns true if the caller needs to (re-)start the foreground
+     *  notification and top up workers, i.e. this item had no live engine
+     *  left and was routed back through READY/PENDING instead. */
+    private fun resumeSingleItem(id: String): Boolean {
+        val liveEngine = engines[id] != null || torrentEngines[id] != null
+        if (liveEngine) {
+            // Same app session, engine's coroutine is still alive and
+            // just spinning in its pause-checkpoint loop -- flip the
+            // flag and it picks the exact same connection back up.
+            engines[id]?.resume()
+            torrentEngines[id]?.resume()
+            QueueRepository.update(id) { it.copy(status = ItemStatus.DOWNLOADING) }
+            return false
+        }
+        // No live engine -- the process was killed while this item
+        // sat paused (very possible over "long hours": Doze,
+        // battery optimization, user swipe-kill). There's no
+        // coroutine left to un-pause. Route it back through READY
+        // instead of marking DOWNLOADING with nothing behind it --
+        // a fresh worker claims it and downloadAuto() picks the
+        // temp file back up via Range: bytes=<existingSize>-, so
+        // already-downloaded bytes aren't wasted.
+        val current = QueueRepository.current().firstOrNull { it.id == id }
+        return if (current?.directUrl != null) {
+            QueueRepository.update(id) { it.copy(status = ItemStatus.READY, error = null) }
+            true
+        } else {
+            // No resolved direct link cached either -- needs a
+            // full re-resolve, not just a restarted download.
+            QueueRepository.update(id) { it.copy(status = ItemStatus.PENDING, error = null) }
+            false
+        }
+    }
+
     /** Launches enough fresh worker loops to bring the live count up to the configured max. */
     private fun topUpWorkers() {
         val maxWorkers = Settings.maxConcurrentDownloads().coerceIn(1, 5)
@@ -348,6 +465,11 @@ class DownloadService : LifecycleService() {
     private suspend fun worker() {
         while (true) {
             if (Settings.wifiOnlyDownloads() && !NetworkMonitor.isOnWifi(this)) break
+            // No internet at all -- don't even attempt to start a fresh item
+            // just to have it immediately fail; leave it READY and let
+            // onInternetRegained()'s topUpWorkers() spin a worker back up
+            // the moment connectivity returns.
+            if (!NetworkMonitor.hasInternet(this)) break
             val item = QueueRepository.claimNextReady() ?: break
             when {
                 item.platform == MediaPlatform.YOUTUBE -> downloadYoutube(item)
@@ -434,14 +556,25 @@ class DownloadService : LifecycleService() {
             // binary invocation can surface as an Error subtype.
             val cancelled = cancelledYoutubeIds.remove(itemId)
             val wifiWait = wifiWaitingYoutubeIds.remove(itemId)
+            val networkWait = networkWaitingYoutubeIds.remove(itemId)
             QueueRepository.update(itemId) {
                 when {
-                    // Cancelled specifically for Wi-Fi wait -- land on READY
-                    // (not FAILED) so a fresh worker re-claims it once Wi-Fi
-                    // is back, mirroring the non-YouTube pause path.
-                    wifiWait -> it.copy(
+                    // Cancelled specifically for a Wi-Fi or total-outage wait --
+                    // land on READY (not FAILED) so a fresh worker re-claims it
+                    // once connectivity is back, mirroring the non-YouTube path.
+                    wifiWait || networkWait -> it.copy(
                         status = ItemStatus.READY,
                         error = null,
+                        progressPercent = -1,
+                        mediaStatusText = null
+                    )
+                    // Not an explicit cancel/wait, but there's genuinely no
+                    // internet right now -- pause as "Waiting for network"
+                    // instead of failing outright; onInternetRegained() will
+                    // put it back to READY once connectivity returns.
+                    !cancelled && !NetworkMonitor.hasInternet(this@DownloadService) -> it.copy(
+                        status = ItemStatus.PAUSED,
+                        error = Settings.NETWORK_WAIT_MARKER,
                         progressPercent = -1,
                         mediaStatusText = null
                     )
@@ -456,6 +589,7 @@ class DownloadService : LifecycleService() {
         } finally {
             cancelledYoutubeIds.remove(itemId)
             wifiWaitingYoutubeIds.remove(itemId)
+            networkWaitingYoutubeIds.remove(itemId)
             updateNotification()
         }
     }
@@ -653,6 +787,20 @@ class DownloadService : LifecycleService() {
                 // automatically would just burn battery/data for nothing; those need
                 // the user's manual Retry (which can re-resolve a fresh link).
                 val isNetworkError = e is IOException
+                if (isNetworkError && !NetworkMonitor.hasInternet(this)) {
+                    // Not a flaky link -- there's genuinely no internet at all
+                    // right now (Wi-Fi/data dropped, airplane mode, router
+                    // down...). Sit as "Waiting for network" like Chrome does
+                    // instead of burning retries or failing outright;
+                    // onInternetRegained() flips it back to READY/DOWNLOADING
+                    // the instant connectivity returns, no manual Retry needed.
+                    engines.remove(itemId)
+                    QueueRepository.update(itemId) {
+                        it.copy(status = ItemStatus.PAUSED, error = Settings.NETWORK_WAIT_MARKER)
+                    }
+                    updateNotification()
+                    return
+                }
                 if (isNetworkError && Settings.autoRetryEnabled() && attempt < MAX_AUTO_RETRIES) {
                     attempt++
                     engines.remove(itemId)
@@ -719,6 +867,26 @@ class DownloadService : LifecycleService() {
     private val lastThrottledNotifyMs = java.util.concurrent.atomic.AtomicLong(0L)
 
     /**
+     * Holds each notification detail line's ETA steady for ~1s at a time,
+     * the same cadence [rememberThrottledSpeedEtaText] uses on the
+     * DownloadsScreen row (see DownloadsScreen.kt). Without this, ETA here
+     * would recompute from instantaneous speedBps on every throttled
+     * notification rebuild (every [NOTIFY_THROTTLE_MS] = 500ms), making the
+     * number flicker twice as fast as the in-app UI for the same download.
+     * Keyed by item id, or "__aggregate__" for the multi-item summary line.
+     */
+    private val etaHoldCache = ConcurrentHashMap<String, Pair<Long, Long>>() // key -> (heldAtMs, etaSec)
+
+    /** Returns [etaSec] unless a value for [key] was cached within the last second, in which case that stale value is returned instead. */
+    private fun holdSteadyEtaSec(key: String, etaSec: Long): Long {
+        val now = System.currentTimeMillis()
+        val cached = etaHoldCache[key]
+        if (cached != null && now - cached.first < ETA_HOLD_MS) return cached.second
+        etaHoldCache[key] = now to etaSec
+        return etaSec
+    }
+
+    /**
      * Same as [updateNotification] but rate-limited to at most once every
      * [NOTIFY_THROTTLE_MS]. The three per-download progress callbacks
      * (downloadOne/downloadYoutube/downloadTorrentOne) fire up to ~5x/sec
@@ -748,6 +916,13 @@ class DownloadService : LifecycleService() {
                 it.status == ItemStatus.RETRYING
         }
         val resolving = queue.any { it.status == ItemStatus.RESOLVING }
+
+        // Drop held ETA entries for items no longer in-flight so the cache
+        // doesn't grow unboundedly across a long-lived service instance.
+        if (etaHoldCache.isNotEmpty()) {
+            val liveIds = active.mapTo(mutableSetOf("__aggregate__")) { it.id }
+            etaHoldCache.keys.retainAll(liveIds)
+        }
 
         // yt-dlp reports a plain 0-100% instead of bytes -- excluded from the
         // byte-based sums below (mixing the two would produce meaningless
@@ -784,7 +959,7 @@ class DownloadService : LifecycleService() {
                     item.platform == MediaPlatform.YOUTUBE ->
                         (if (item.progressPercent >= 0) "${item.progressPercent}%" else "Resolving…") +
                             "  •  " + (item.mediaStatusText ?: item.mediaFormatLabel ?: "YouTube")
-                    else -> buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps)
+                    else -> buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps, etaHoldKey = item.id)
                 }
                 barPercent = when {
                     item.platform == MediaPlatform.YOUTUBE -> item.progressPercent.coerceAtLeast(0)
@@ -798,7 +973,7 @@ class DownloadService : LifecycleService() {
                 title = "${relevant.size} files" +
                     if (active.isNotEmpty()) " downloading" else " in queue"
                 text = buildString {
-                    append(buildDetailLine(totalDone, totalSize, totalSpeed))
+                    append(buildDetailLine(totalDone, totalSize, totalSpeed, etaHoldKey = "__aggregate__"))
                     if (pausedCount > 0) append("  •  $pausedCount paused")
                     if (ytCount > 0) append("  •  $ytCount YouTube")
                 }
@@ -867,8 +1042,16 @@ class DownloadService : LifecycleService() {
         return builder.build()
     }
 
-    /** "12.4 MB / 45.0 MB  •  1.2 MB/s  •  ETA 0:32" */
-    private fun buildDetailLine(done: Long, total: Long, speedBps: Double): String {
+    /**
+     * "12.4 MB / 45.0 MB  •  1.2 MB/s  •  5 mins left"
+     *
+     * [etaHoldKey] identifies which row this line belongs to (an item id, or
+     * "__aggregate__" for the multi-item summary) so its ETA can be held
+     * steady via [holdSteadyEtaSec] instead of recomputing from instantaneous
+     * speed on every throttled notification rebuild -- pass null to skip
+     * holding (e.g. a paused item, whose speed/ETA aren't live anyway).
+     */
+    private fun buildDetailLine(done: Long, total: Long, speedBps: Double, etaHoldKey: String? = null): String {
         val sizePart = if (total > 0) "${formatBytes(done)} / ${formatBytes(total)}" else formatBytes(done)
         if (speedBps <= 0.0) return sizePart
 
@@ -879,8 +1062,9 @@ class DownloadService : LifecycleService() {
         }
 
         val remaining = (total - done).coerceAtLeast(0)
-        val etaSec = if (total > 0) (remaining / speedBps).toLong() else -1L
-        val etaPart = if (etaSec >= 0) "  •  ETA ${formatDuration(etaSec)}" else ""
+        var etaSec = if (total > 0) (remaining / speedBps).toLong() else -1L
+        if (etaSec >= 0 && etaHoldKey != null) etaSec = holdSteadyEtaSec(etaHoldKey, etaSec)
+        val etaPart = if (etaSec >= 0) "  •  " + com.invictus.xmd.core.formatRemainingTimeChrome(etaSec) else ""
 
         return "$sizePart  •  $speedPart$etaPart"
     }
@@ -893,10 +1077,4 @@ class DownloadService : LifecycleService() {
         else -> "$bytes B"
     }
 
-    private fun formatDuration(totalSeconds: Long): String {
-        val h = totalSeconds / 3600
-        val m = (totalSeconds % 3600) / 60
-        val s = totalSeconds % 60
-        return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
-    }
 }

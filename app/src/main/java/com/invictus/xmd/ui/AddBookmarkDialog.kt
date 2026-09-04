@@ -46,6 +46,8 @@ fun AddBookmarkDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = { Text(stringResource(R.string.add_bookmark_dialog_title)) },
         text = {
             Column {

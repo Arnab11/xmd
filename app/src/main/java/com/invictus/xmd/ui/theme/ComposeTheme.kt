@@ -80,11 +80,16 @@ fun XmdTheme(
     if (!view.isInEditMode) {
         androidx.compose.runtime.LaunchedEffect(isDark, isAmoled, colorScheme) {
             if (transitionState.isAnimating) {
+                // Wait for the circular reveal to fully cover the screen before
+                // flipping the bars -- the reveal is a circle expanding from the
+                // tap point, so it doesn't reach the screen edges (where the
+                // status/nav bars sit) until the animation is essentially done.
+                // Flipping earlier (e.g. at 55%) made the bars visibly change
+                // color before the reveal had drawn over them, so they'd pop to
+                // the new theme while the rest of the screen was still mid-wipe.
                 androidx.compose.runtime.snapshotFlow {
-                    transitionState.animationProgress.value to transitionState.isAnimating
-                }.first { (progress, isAnimating) ->
-                    !isAnimating || progress >= 0.55f
-                }
+                    transitionState.isAnimating
+                }.first { isAnimating -> !isAnimating }
             }
             val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
             window.statusBarColor = colorScheme.surfaceContainerLow.toArgb()

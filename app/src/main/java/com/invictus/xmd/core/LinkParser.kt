@@ -29,6 +29,13 @@ object LinkParser {
         "music.youtube.com", "youtu.be"
     )
 
+    // Instagram (reels/posts/stories) -- like YouTube, these need yt-dlp to
+    // actually resolve+download rather than a plain byte-for-byte fetch, so
+    // they get routed through the same quality-picker flow (see needsYtDlp).
+    // Full-build only, same as YouTube (see BuildConfig.HAS_YOUTUBE_SUPPORT
+    // checks at the resolveYoutube/triggerDownloadYoutubeCustom call sites).
+    private val INSTAGRAM_HOSTS = setOf("instagram.com", "www.instagram.com")
+
     private val FILE_ID_PATTERN = Pattern.compile("[A-Za-z0-9_-]+")
     private val SHARE_LINK_PATTERN = Pattern.compile(
         "https?://(?:www\\.)?fuckingfast\\.co/(?:f/)?[A-Za-z0-9_-]+[^\\s\"'<>]*",
@@ -79,6 +86,7 @@ object LinkParser {
         if (isShareLink(link)) return false
         if (uri.host in FITGIRL_HOSTS) return false
         if (uri.host in YOUTUBE_HOSTS) return false
+        if (uri.host in INSTAGRAM_HOSTS) return false
         // HLS (.m3u8) / DASH (.mpd) manifests aren't downloadable as-is --
         // the "file" at that URL is just a text playlist pointing at the
         // real media segments, so these need yt-dlp (needsYtDlp) instead of
@@ -103,6 +111,12 @@ object LinkParser {
         return uri.host in YOUTUBE_HOSTS
     }
 
+    /** True for an instagram.com link (reel/post/story) -- routed to the yt-dlp quality-picker flow instead of a normal resolve. */
+    fun isInstagramLink(link: String): Boolean {
+        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        return uri.host in INSTAGRAM_HOSTS
+    }
+
     /**
      * True for a direct HLS (.m3u8) or DASH (.mpd) manifest link -- these
      * are streams, not a single file, so (like YouTube) they need yt-dlp to
@@ -125,7 +139,19 @@ object LinkParser {
      * falls through to isGenericDownloadUrl and gets "downloaded" as the
      * raw manifest text instead of the actual video.
      */
-    fun needsYtDlp(link: String): Boolean = isYoutubeLink(link) || isHlsOrDashLink(link)
+    fun needsYtDlp(link: String): Boolean = isYoutubeLink(link) || isInstagramLink(link) || isHlsOrDashLink(link)
+
+    /**
+     * True for anything the "direct download" fast-path (HomeFragment's
+     * plain Download button, skipping Prepare) can actually act on --
+     * a generic downloadable URL/magnet/.torrent, or a link that needs
+     * yt-dlp. False for share/fitgirl links (those need Prepare first,
+     * handled separately) and for plain garbage text like "uu", which
+     * used to sail through untouched and get "downloaded" as a literal
+     * URL.
+     */
+    fun isSupportedDirectInput(link: String): Boolean =
+        isGenericDownloadUrl(link) || needsYtDlp(link)
 
     /** Extracts the file id from a fuckingfast.co share URL, e.g. fuckingfast.co/f/abc123 -> abc123 */
     fun fileId(link: String): String {

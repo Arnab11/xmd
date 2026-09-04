@@ -3,6 +3,7 @@ package com.invictus.xmd.ui
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +25,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Surface
@@ -33,16 +33,22 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -52,6 +58,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.invictus.xmd.R
 import com.invictus.xmd.core.Settings
 import com.invictus.xmd.ui.icons.AppIcon
@@ -336,28 +343,60 @@ private fun TabsSection(
         modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
     )
 
+    var draggingIndex by remember { mutableStateOf(-1) }
+    var dragOffset by remember { mutableStateOf(Offset.Zero) }
+    // Last-measured on-screen bounds of each row, keyed by index -- used to
+    // find which neighbor the dragged row's center has crossed. Same
+    // approach as ReorderableShortcutGrid's pointerInputDragReorder.
+    val itemBounds = remember { mutableStateMapOf<Int, Rect>() }
+
     tabOrder.forEachIndexed { index, tabId ->
         val meta = TAB_META[tabId] ?: return@forEachIndexed
-        TabConfigRow(
-            icon = meta.icon,
-            label = stringResource(meta.labelRes),
-            visible = tabId !in hiddenTabs,
-            canMoveUp = index > 0,
-            canMoveDown = index < tabOrder.lastIndex,
-            onMoveUp = { onMoveTab(index, index - 1) },
-            onMoveDown = { onMoveTab(index, index + 1) },
-            onVisibleChange = { visible ->
-                if (!visible && (tabOrder.size - hiddenTabs.size) <= 1) {
-                    Toast.makeText(
-                        context,
-                        R.string.settings_tabs_last_visible_toast,
-                        Toast.LENGTH_SHORT,
-                    ).show()
-                } else {
-                    onToggleTabVisible(tabId, visible)
-                }
-            },
-        )
+        val isDragging = index == draggingIndex
+        // Keyed on the stable tabId (not the position-derived index) so a
+        // mid-drag reorder doesn't reset this row's composition state --
+        // same reasoning as itemsIndexed's key param in ReorderableShortcutGrid.
+        key(tabId) {
+            // index shifts as siblings reorder mid-drag; the drag gesture
+            // reads the latest index through this instead of a stale capture.
+            val liveIndex by rememberUpdatedState(index)
+            TabConfigRow(
+                icon = meta.icon,
+                label = stringResource(meta.labelRes),
+                visible = tabId !in hiddenTabs,
+                isDragging = isDragging,
+                dragOffsetY = if (isDragging) dragOffset.y else 0f,
+                modifier = Modifier.onGloballyPositioned { coords -> itemBounds[index] = coords.boundsInParent() },
+                dragHandleModifier = Modifier.pointerInputTabDragReorder(
+                    tabId = tabId,
+                    indexProvider = { liveIndex },
+                    itemBounds = itemBounds,
+                    onDragStart = { draggingIndex = liveIndex; dragOffset = Offset.Zero },
+                    onDragBy = { dragOffset += it },
+                    onSwap = { from, to ->
+                        val oldBounds = itemBounds[from]
+                        val newBounds = itemBounds[to]
+                        if (oldBounds != null && newBounds != null) {
+                            dragOffset += Offset(0f, oldBounds.top - newBounds.top)
+                        }
+                        onMoveTab(from, to)
+                        draggingIndex = to
+                    },
+                    onDragEnd = { draggingIndex = -1; dragOffset = Offset.Zero },
+                ),
+                onVisibleChange = { visible ->
+                    if (!visible && (tabOrder.size - hiddenTabs.size) <= 1) {
+                        Toast.makeText(
+                            context,
+                            R.string.settings_tabs_last_visible_toast,
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    } else {
+                        onToggleTabVisible(tabId, visible)
+                    }
+                },
+            )
+        }
     }
 
     SettingsDivider()
@@ -371,7 +410,9 @@ private fun TabsSection(
     )
 
     tabOrder.forEach { tabId ->
-        if (tabId in hiddenTabs) return@forEach
+        // The center FAB ("add") is an action, not a navigable page, so it
+        // can never be the default tab -- see Settings.TabId's comment.
+        if (tabId in hiddenTabs || tabId == Settings.TabId.ADD) return@forEach
         val meta = TAB_META[tabId] ?: return@forEach
         DefaultTabRadioRow(
             icon = meta.icon,
@@ -382,44 +423,101 @@ private fun TabsSection(
     }
 }
 
+/**
+ * Hand-rolled drag-to-reorder for the (non-lazy) Bottom Tabs Column --
+ * mirrors ReorderableShortcutGrid's pointerInputDragReorder in
+ * ShortcutsScreen.kt (same swap-on-crossed-center approach), adapted to a
+ * single vertical axis and a dedicated drag handle instead of long-press
+ * anywhere on the row.
+ */
+private fun Modifier.pointerInputTabDragReorder(
+    tabId: String,
+    indexProvider: () -> Int,
+    itemBounds: Map<Int, Rect>,
+    onDragStart: () -> Unit,
+    onDragBy: (Offset) -> Unit,
+    onSwap: (from: Int, to: Int) -> Unit,
+    onDragEnd: () -> Unit,
+): Modifier = this.then(
+    // Keyed on the stable tabId so a mid-drag reorder doesn't cancel this
+    // pointerInput coroutine and drop the drag.
+    Modifier.pointerInput(tabId) {
+        var currentIndex = indexProvider()
+        var accumulatedOffset = Offset.Zero
+        detectDragGestures(
+            onDragStart = {
+                currentIndex = indexProvider()
+                accumulatedOffset = Offset.Zero
+                onDragStart()
+            },
+            onDrag = { change, dragAmount ->
+                change.consume()
+                accumulatedOffset += dragAmount
+                onDragBy(dragAmount)
+                val draggedCenter = (itemBounds[currentIndex]?.center ?: return@detectDragGestures) + accumulatedOffset
+                val target = itemBounds.entries
+                    .filter { it.key != currentIndex }
+                    .minByOrNull { (it.value.center - draggedCenter).getDistance() }
+                if (target != null && (target.value.center - draggedCenter).getDistance() < target.value.height / 2) {
+                    onSwap(currentIndex, target.key)
+                    currentIndex = target.key
+                }
+            },
+            onDragEnd = { onDragEnd() },
+            onDragCancel = { onDragEnd() },
+        )
+    }
+)
+
+/**
+ * A single reorderable row in the Bottom Tabs list. Dragging the handle on
+ * the left reorders the row; the switch on the right independently
+ * shows/hides the tab. [modifier] carries the row-level position tracking
+ * from TabsSection, while [dragHandleModifier] carries the
+ * pointerInputTabDragReorder wiring -- kept separate so only the handle
+ * itself starts a drag, leaving the switch and page scroll untouched.
+ */
 @Composable
 private fun TabConfigRow(
     icon: AppIcon,
     label: String,
     visible: Boolean,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
+    isDragging: Boolean,
+    dragOffsetY: Float,
+    dragHandleModifier: Modifier,
     onVisibleChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .zIndex(if (isDragging) 1f else 0f)
+            .graphicsLayer {
+                translationY = dragOffsetY
+                shadowElevation = if (isDragging) 4f else 0f
+            }
+            .background(
+                color = if (isDragging) {
+                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                } else {
+                    Color.Transparent
+                },
+                shape = RoundedCornerShape(8.dp),
+            )
+            .padding(vertical = 6.dp, horizontal = 4.dp),
     ) {
-        Column {
-            IconButton(onClick = onMoveUp, enabled = canMoveUp, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    imageVector = Icons.ArrowUp,
-                    contentDescription = stringResource(R.string.action_move_up),
-                    tint = if (canMoveUp) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-            IconButton(onClick = onMoveDown, enabled = canMoveDown, modifier = Modifier.size(28.dp)) {
-                Icon(
-                    imageVector = Icons.ArrowDown,
-                    contentDescription = stringResource(R.string.action_move_down),
-                    tint = if (canMoveDown) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                    modifier = Modifier.size(16.dp),
-                )
-            }
-        }
+        Icon(
+            imageVector = Icons.DragHandle,
+            contentDescription = stringResource(R.string.action_reorder),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            modifier = Modifier.size(22.dp).then(dragHandleModifier),
+        )
         Icon(
             imageVector = icon,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp, end = 12.dp).size(18.dp),
+            modifier = Modifier.padding(start = 10.dp, end = 12.dp).size(18.dp),
         )
         Text(
             text = label,

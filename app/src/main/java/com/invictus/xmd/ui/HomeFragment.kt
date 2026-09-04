@@ -65,6 +65,7 @@ class HomeFragment : Fragment() {
                 done = items.count { item -> item.status == ItemStatus.DONE },
                 failed = items.count { item -> item.status == ItemStatus.FAILED },
             )
+            val hasReadyItems = items.any { item -> item.status == ItemStatus.READY }
 
             XmdTheme {
                 HomeScreen(
@@ -72,9 +73,10 @@ class HomeFragment : Fragment() {
                     onLinksTextChange = { value -> linksText = value },
                     clipboardLink = pendingClipboardLink,
                     quickStats = quickStats,
-                    needsPrepare = requiresPrepare(currentInputLines()),
+                    needsPrepare = requiresPrepare(currentInputLines(), hasReadyItems),
                     onClipboardAdd = ::onClipboardAddClicked,
                     onClipboardDismiss = ::dismissClipboardBanner,
+                    onPasteClipboard = ::pasteClipboard,
                     onAddTorrent = { (activity as? MainActivity)?.showAddTorrentDialog() },
                     onPrepare = ::onPrepareClicked,
                     onDownload = ::onDownloadClicked,
@@ -105,8 +107,8 @@ class HomeFragment : Fragment() {
     /**
      * Clipboard reads only work while the app is in the foreground (Android 10+
      * privacy restriction). We show a banner so the user can tap to add the link
-     * rather than auto-adding it silently. YouTube links are deliberately
-     * excluded -- no clipboard prompt for those, add them manually instead.
+     * rather than auto-adding it silently. Generic: any share/fitgirl link, or
+     * a YouTube/Instagram link, triggers the banner.
      */
     private fun checkClipboard() {
         val clip = clipboardManager.primaryClip ?: return
@@ -114,7 +116,11 @@ class HomeFragment : Fragment() {
         val text = clip.getItemAt(0).coerceToText(requireContext())
             ?.toString()?.trim().orEmpty()
         if (text.isEmpty() || text == lastHandledClipboardText) return
-        if (!LinkParser.isShareLink(text) && !LinkParser.isFitgirlPage(text)) return
+        val isRecognized = LinkParser.isShareLink(text) ||
+            LinkParser.isFitgirlPage(text) ||
+            LinkParser.isYoutubeLink(text) ||
+            LinkParser.isInstagramLink(text)
+        if (!isRecognized) return
         if (linksText.contains(text)) return
         if (QueueRepository.current().any { it.sourceUrl == text }) return
 
@@ -133,14 +139,32 @@ class HomeFragment : Fragment() {
         pendingClipboardLink = null
     }
 
+    /**
+     * Manual paste -- always available in the textfield's trailing icon,
+     * independent of the auto-detect banner above. Pastes whatever's on the
+     * clipboard (any text, not just a recognized share/torrent link).
+     */
+    private fun pasteClipboard() {
+        val clip = clipboardManager.primaryClip ?: return
+        if (clip.itemCount == 0) return
+        val text = clip.getItemAt(0).coerceToText(requireContext())
+            ?.toString()?.trim().orEmpty()
+        if (text.isEmpty()) return
+        linksText = if (linksText.isBlank()) text else "$linksText\n$text"
+    }
+
     // ── Button state ──────────────────────────────────────────────────────
 
-    private fun requiresPrepare(lines: List<String>): Boolean {
-        // YouTube links deliberately excluded here: they don't need the
-        // FuckingFast/Fitgirl-style Prepare step (challenge/expand-sources) --
-        // the quality picker itself is their confirmation step, so they go
-        // through the Download button's direct-path below like a plain URL.
-        return lines.isEmpty() || lines.any {
+    private fun requiresPrepare(lines: List<String>, hasReadyItems: Boolean): Boolean {
+        // Only FuckingFast/Fitgirl-style share links need the Prepare step
+        // (challenge/expand-sources) -- normal/direct/YouTube links show
+        // just the plain Download button, no Prepare, no "Ready Files"
+        // wording. Empty input still counts as needing Prepare-mode *only*
+        // if there are already-prepared READY items waiting (so "Download
+        // Ready Files" stays reachable after Prepare clears the text field);
+        // otherwise empty input falls back to plain Download.
+        if (lines.isEmpty()) return hasReadyItems
+        return lines.any {
             LinkParser.isShareLink(it) || LinkParser.isFitgirlPage(it)
         }
     }
@@ -158,8 +182,9 @@ class HomeFragment : Fragment() {
 
     private fun onDownloadClicked() {
         val lines = currentInputLines()
+        val hasReadyItems = QueueRepository.current().any { it.status == ItemStatus.READY }
 
-        if (requiresPrepare(lines)) {
+        if (requiresPrepare(lines, hasReadyItems)) {
             val readyCount = QueueRepository.current()
                 .count { it.status == ItemStatus.READY }
             if (readyCount == 0) {
@@ -180,7 +205,23 @@ class HomeFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.home_links_required, Toast.LENGTH_SHORT).show()
             return
         }
-        (activity as? Callbacks)?.triggerDownloadDirect(lines)
+
+        // Drop anything that isn't a real link before handing off -- without
+        // this, plain garbage text (e.g. "uu") sailed through untouched and
+        // got "downloaded" as a literal URL.
+        val (valid, invalid) = lines.partition { LinkParser.isSupportedDirectInput(it) }
+        if (valid.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.home_no_valid_links, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (invalid.isNotEmpty()) {
+            Toast.makeText(
+                requireContext(),
+                getString(R.string.home_skipped_invalid_links, invalid.size),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        (activity as? Callbacks)?.triggerDownloadDirect(valid)
         linksText = ""
     }
 

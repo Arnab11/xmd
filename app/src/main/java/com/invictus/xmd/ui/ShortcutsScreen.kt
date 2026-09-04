@@ -426,6 +426,8 @@ private fun AddEditShortcutDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = { Text(stringResource(titleRes)) },
         text = {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -502,6 +504,8 @@ private fun ShortcutOptionsDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = { Text(shortcut.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         text = {
             Column {

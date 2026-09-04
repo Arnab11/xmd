@@ -36,17 +36,19 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import com.invictus.xmd.ui.icons.AppIcon
 import com.invictus.xmd.ui.icons.Icon
 import com.invictus.xmd.ui.icons.Icons
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
@@ -54,11 +56,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -104,10 +109,13 @@ fun DownloadsScreen(
     onRename: (QueueItem, String) -> Unit,
     onCopyLink: (QueueItem) -> Unit,
     onShare: (QueueItem) -> Unit,
+    onOpenFileLocation: (QueueItem) -> Unit,
     onDelete: (QueueItem) -> Unit,
     onCancelAll: () -> Unit,
     onRetryAll: () -> Unit,
     onClearAllFinished: () -> Unit,
+    onPauseAll: (List<QueueItem>) -> Unit,
+    onResumeAll: (List<QueueItem>) -> Unit,
 ) {
     // Same filter as DownloadsFragment.renderList: filename OR sourceUrl,
     // case-insensitive substring.
@@ -128,12 +136,42 @@ fun DownloadsScreen(
         queryMatches.filter(selectedFilter::matches)
     }
 
+    // If the currently selected chip (e.g. "Active") loses its last item to
+    // a cancel/delete, its count drops to 0 and the chip itself disappears
+    // (see the `count == 0 -> return@forEach` skip below) -- leaving the
+    // user stranded on a filter with no chip and an empty list. Snap back
+    // to "All" whenever that happens.
+    LaunchedEffect(selectedFilter, list.isEmpty()) {
+        if (selectedFilter != DownloadFilter.All && list.isEmpty()) {
+            selectedFilterName = DownloadFilter.All.name
+        }
+    }
+
     // Long-press options menu / rename / delete-confirm dialog state --
     // one shared slot since only one row's menu can be open at a time,
     // same as the old single MaterialAlertDialogBuilder instance.
     var optionsTarget by remember { mutableStateOf<QueueItem?>(null) }
     var renameTarget by remember { mutableStateOf<QueueItem?>(null) }
     var deleteTarget by remember { mutableStateOf<QueueItem?>(null) }
+    var overflowMenuExpanded by remember { mutableStateOf(false) }
+
+    // Used by both the top-bar overflow menu (Cancel/Retry All + Clear) and
+    // to decide whether that menu button shows at all.
+    val hasActive = list.any {
+        it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
+            it.status == ItemStatus.RETRYING
+    }
+    val hasFailed = list.any { it.status == ItemStatus.FAILED }
+    val hasClearable = list.any { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
+    val showCancelOrRetry = hasActive || hasFailed
+
+    // Pause All / Resume All operate on `list` too -- same "currently
+    // visible" scope as Cancel All/Retry All/Clear above, i.e. whatever the
+    // selected filter tab + search query narrow it down to.
+    val pausableItems = list.filter {
+        it.status == ItemStatus.DOWNLOADING && it.platform != MediaPlatform.YOUTUBE
+    }
+    val resumableItems = list.filter { it.status == ItemStatus.PAUSED }
 
     Column(
         modifier = Modifier
@@ -144,39 +182,118 @@ fun DownloadsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                DownloadFilter.entries.forEach { filter ->
-                    val count = queryMatches.count(filter::matches)
-                    FilterChip(
-                        selected = selectedFilter == filter,
-                        onClick = { selectedFilterName = filter.name },
-                        label = {
-                            Text(
-                                text = "${stringResource(filter.labelRes)} $count",
-                                fontSize = 12.sp,
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    DownloadFilter.entries.forEach { filter ->
+                        val count = queryMatches.count(filter::matches)
+                        // All always shows (it's the reset-to-everything
+                        // chip); the rest only show once they'd actually
+                        // have something in them, so a Waiting/Completed/
+                        // Failed chip stuck at 0 doesn't just sit there.
+                        if (filter != DownloadFilter.All && count == 0) return@forEach
+                        FilterChip(
+                            selected = selectedFilter == filter,
+                            onClick = { selectedFilterName = filter.name },
+                            label = {
+                                Text(
+                                    text = "${stringResource(filter.labelRes)} $count",
+                                    fontSize = 12.sp,
+                                )
+                            },
+                            leadingIcon = if (selectedFilter == filter) {
+                                {
+                                    Icon(
+                                        imageVector = Icons.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(FilterChipDefaults.IconSize),
+                                    )
+                                }
+                            } else {
+                                null
+                            },
+                            colors = FilterChipDefaults.filterChipColors(
+                                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                                selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                            ),
+                        )
+                    }
+                }
+
+                // Cancel All / Retry All + Clear, folded into a compact
+                // overflow menu instead of a separate full-width bar at the
+                // bottom of the screen (was visually disconnected from
+                // everything else and left a lot of dead space below a
+                // short list).
+                if (list.isNotEmpty() &&
+                    (showCancelOrRetry || hasClearable || pausableItems.isNotEmpty() || resumableItems.isNotEmpty())
+                ) {
+                    Box {
+                        IconButton(onClick = { overflowMenuExpanded = true }) {
+                            Icon(
+                                imageVector = Icons.More,
+                                contentDescription = stringResource(R.string.action_more),
                             )
-                        },
-                        leadingIcon = if (selectedFilter == filter) {
-                            {
-                                Icon(
-                                    imageVector = Icons.Check,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(FilterChipDefaults.IconSize),
+                        }
+                        DropdownMenu(
+                            expanded = overflowMenuExpanded,
+                            onDismissRequest = { overflowMenuExpanded = false },
+                        ) {
+                            if (pausableItems.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_pause_all)) },
+                                    leadingIcon = { Icon(imageVector = Icons.Pause, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onPauseAll(pausableItems) },
                                 )
                             }
-                        } else {
-                            null
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                            selectedLeadingIconColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ),
-                    )
+                            if (resumableItems.isNotEmpty()) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_resume_all)) },
+                                    leadingIcon = { Icon(imageVector = Icons.Play, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onResumeAll(resumableItems) },
+                                )
+                            }
+                            if (hasActive) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = stringResource(R.string.action_cancel_all),
+                                            color = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    leadingIcon = {
+                                        Icon(
+                                            imageVector = Icons.Cancel,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    },
+                                    onClick = { overflowMenuExpanded = false; onCancelAll() },
+                                )
+                            } else if (hasFailed) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_retry_all)) },
+                                    leadingIcon = { Icon(imageVector = Icons.Refresh, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onRetryAll() },
+                                )
+                            }
+                            if (hasClearable) {
+                                DropdownMenuItem(
+                                    text = { Text(stringResource(R.string.action_clear_all)) },
+                                    leadingIcon = { Icon(imageVector = Icons.DeleteSweep, contentDescription = null) },
+                                    onClick = { overflowMenuExpanded = false; onClearAllFinished() },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -205,44 +322,6 @@ fun DownloadsScreen(
                 }
             }
         }
-
-        // ── Cancel All / Retry All + Clear All ──────────────────────────
-        val hasActive = list.any {
-            it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
-                it.status == ItemStatus.RETRYING
-        }
-        val hasFailed = list.any { it.status == ItemStatus.FAILED }
-        val hasClearable = list.any { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
-
-        val showCancelOrRetry = hasActive || hasFailed
-        if (list.isNotEmpty() && (showCancelOrRetry || hasClearable)) {
-            Row(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
-                if (showCancelOrRetry) {
-                    if (hasActive) {
-                        OutlinedButton(
-                            onClick = onCancelAll,
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = MaterialTheme.colorScheme.error,
-                            ),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
-                        ) { Text(stringResource(R.string.action_cancel_all)) }
-                    } else {
-                        OutlinedButton(
-                            onClick = onRetryAll,
-                            modifier = Modifier.weight(1f),
-                        ) { Text(stringResource(R.string.action_retry_all)) }
-                    }
-                    if (hasClearable) Box(modifier = Modifier.width(8.dp))
-                }
-                if (hasClearable) {
-                    OutlinedButton(
-                        onClick = onClearAllFinished,
-                        modifier = Modifier.weight(1f),
-                    ) { Text(stringResource(R.string.action_clear)) }
-                }
-            }
-        }
     }
 
     // ── Long-press options menu ──────────────────────────────────────────
@@ -256,6 +335,7 @@ fun DownloadsScreen(
             onRedownload = { onRetry(item); optionsTarget = null },
             onCopyLink = { onCopyLink(item); optionsTarget = null },
             onShare = { onShare(item); optionsTarget = null },
+            onOpenFileLocation = { onOpenFileLocation(item); optionsTarget = null },
             onDelete = { deleteTarget = item; optionsTarget = null },
             onDismiss = { optionsTarget = null },
         )
@@ -275,6 +355,8 @@ fun DownloadsScreen(
     deleteTarget?.let { item ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
+            modifier = Modifier.wideDialogWidth(),
+            properties = WideDialogProperties,
             shape = RoundedCornerShape(20.dp),
             title = { Text(stringResource(R.string.delete_download_title)) },
             text = { Text(item.fileName ?: item.sourceUrl) },
@@ -427,8 +509,13 @@ fun QueueItemRow(
                         )
                         Spacer(Modifier.width(4.dp))
                     }
+                    val throttledSpeedEta = if (item.status == ItemStatus.DOWNLOADING) {
+                        rememberThrottledSpeedEtaText(item)
+                    } else {
+                        null
+                    }
                     Text(
-                        text = statusText(item),
+                        text = statusText(item, throttledSpeedEta),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.5.sp,
                         fontWeight = FontWeight.Medium,
@@ -787,7 +874,7 @@ private fun progressFor(item: QueueItem): Pair<Float, Boolean> = when (item.stat
     else -> 0f to true
 }
 
-private fun statusText(item: QueueItem): String = when (item.status) {
+private fun statusText(item: QueueItem, speedEta: String?): String = when (item.status) {
     ItemStatus.PENDING -> "Queued"
     ItemStatus.RESOLVING -> "Resolving…"
     ItemStatus.NEEDS_CHALLENGE -> "Verifying — complete check in browser"
@@ -798,7 +885,6 @@ private fun statusText(item: QueueItem): String = when (item.status) {
             item.bytesTotal > 0 -> "${(item.bytesDone * 100 / item.bytesTotal)}%"
             else -> "Downloading…"
         }
-        val speedEta = if (item.speedBps > 0) buildSpeedEtaText(item) else null
         val label = if (item.platform == MediaPlatform.YOUTUBE) item.mediaFormatLabel?.let { " • $it" } else null
         buildString {
             append(pct)
@@ -817,7 +903,11 @@ private fun statusText(item: QueueItem): String = when (item.status) {
             item.bytesTotal > 0 -> "${(item.bytesDone * 100 / item.bytesTotal)}%"
             else -> null
         }
-        val label = if (item.error == Settings.WIFI_WAIT_MARKER) "Waiting for Wi-Fi" else "Paused"
+        val label = when (item.error) {
+            Settings.WIFI_WAIT_MARKER -> "Waiting for Wi-Fi"
+            Settings.NETWORK_WAIT_MARKER -> "Waiting for network"
+            else -> "Paused"
+        }
         if (pct != null) "$pct • $label" else label
     }
     ItemStatus.RETRYING -> item.error ?: "Retrying…"
@@ -849,6 +939,12 @@ private fun formatElapsedDuration(durationMs: Long): String {
     }
 }
 
+/**
+ * Speed + time-left text, recomputed from whatever `item` snapshot is
+ * passed in. Callers that want the Chrome-style once-a-second cadence
+ * should go through [rememberThrottledSpeedEtaText] instead of calling
+ * this directly on every recomposition.
+ */
 private fun buildSpeedEtaText(item: QueueItem): String {
     val bps = item.speedBps
     val speedStr = when {
@@ -858,21 +954,47 @@ private fun buildSpeedEtaText(item: QueueItem): String {
     }
     val remaining = (item.bytesTotal - item.bytesDone).coerceAtLeast(0)
     val etaSec = if (bps > 1.0 && item.bytesTotal > 0) (remaining / bps).toLong() else -1L
-    return if (etaSec >= 0) "$speedStr  •  ETA ${formatDuration(etaSec)}" else speedStr
+    return if (etaSec >= 0) "$speedStr  •  ${formatRemainingTimeChrome(etaSec)}" else speedStr
 }
+
+/**
+ * Holds a download row's speed/ETA text steady for up to a second at a
+ * time, then refreshes it from the latest [item] -- the same cadence
+ * Chrome's own download UI updates its remaining-time estimate at.
+ * Progress ticks arrive from the engine up to ~5x/sec (see
+ * QueueRepository), which would otherwise make the ETA number flicker.
+ *
+ * The displayed value still reflects the most recent data at each tick;
+ * only the *update frequency* is throttled, not the data itself.
+ */
+@Composable
+private fun rememberThrottledSpeedEtaText(item: QueueItem): String? {
+    val latestItem = rememberUpdatedState(item)
+    var text by remember(item.id) {
+        mutableStateOf(if (item.speedBps > 0) buildSpeedEtaText(item) else null)
+    }
+    LaunchedEffect(item.id) {
+        while (true) {
+            delay(1_000L)
+            val current = latestItem.value
+            text = if (current.speedBps > 0) buildSpeedEtaText(current) else null
+        }
+    }
+    return text
+}
+
+/**
+ * Formats remaining time using [formatRemainingTimeChrome] -- see that
+ * function for details.
+ */
+private fun formatRemainingTimeChrome(totalSeconds: Long): String =
+    com.invictus.xmd.core.formatRemainingTimeChrome(totalSeconds)
 
 private fun formatBytes(bytes: Long): String = when {
     bytes >= 1_073_741_824L -> "%.2f GB".format(bytes / 1_073_741_824.0)
     bytes >= 1_048_576L -> "%.1f MB".format(bytes / 1_048_576.0)
     bytes >= 1_024L -> "%.0f KB".format(bytes / 1_024.0)
     else -> "$bytes B"
-}
-
-private fun formatDuration(totalSeconds: Long): String {
-    val h = totalSeconds / 3600
-    val m = (totalSeconds % 3600) / 60
-    val s = totalSeconds % 60
-    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%d:%02d".format(m, s)
 }
 
 // ── Dialogs & Sheets ───────────────────────────────────────────────────────
@@ -888,6 +1010,7 @@ private fun DownloadOptionsSheet(
     onRedownload: () -> Unit,
     onCopyLink: () -> Unit,
     onShare: () -> Unit,
+    onOpenFileLocation: () -> Unit,
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -973,6 +1096,13 @@ private fun DownloadOptionsSheet(
                 label = stringResource(R.string.action_share),
                 onClick = onShare,
             )
+            if (showOpenWithAndRename) {
+                SheetActionRow(
+                    icon = Icons.Folder,
+                    label = stringResource(R.string.action_open_file_location),
+                    onClick = onOpenFileLocation,
+                )
+            }
             SheetActionRow(
                 icon = Icons.Delete,
                 label = stringResource(R.string.action_delete),
@@ -1040,6 +1170,8 @@ private fun RenameDialog(currentName: String, onConfirm: (String) -> Unit, onDis
     var text by remember(currentName) { mutableStateOf(currentName) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         shape = RoundedCornerShape(20.dp),
         title = { Text(stringResource(R.string.action_rename)) },
         text = {

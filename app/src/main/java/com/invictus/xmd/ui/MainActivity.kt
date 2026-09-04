@@ -938,7 +938,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
 
     override fun triggerDownloadDirect(lines: List<String>) {
         QueueRepository.setLinks(lines)
-        val (youtubeLines, otherLines) = lines.partition { LinkParser.needsYtDlp(it) }
+        val (ytDlpLines, otherLines) = lines.partition { LinkParser.needsYtDlp(it) }
 
         otherLines.forEach { link ->
             val item = QueueRepository.current().firstOrNull { it.sourceUrl == link }
@@ -951,14 +951,14 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             showDownloadStartedSnackbar()
         }
 
-        // YouTube links skip directUrl/READY entirely -- they need the
-        // quality-picker dialog first (see resolveYoutube), same as if they'd
-        // gone through resolveAll(). DownloadService.start() for these fires
-        // from inside resolveYoutube() itself, once a quality is actually
-        // picked, not here.
-        if (youtubeLines.isNotEmpty()) {
+        // YouTube/Instagram/HLS-DASH links skip directUrl/READY entirely --
+        // they need the quality-picker dialog first (see resolveYoutube),
+        // same as if they'd gone through resolveAll(). DownloadService.start()
+        // for these fires from inside resolveYoutube() itself, once a quality
+        // is actually picked, not here.
+        if (ytDlpLines.isNotEmpty()) {
             lifecycleScope.launch {
-                for (link in youtubeLines) {
+                for (link in ytDlpLines) {
                     val item = QueueRepository.current().firstOrNull { it.sourceUrl == link } ?: continue
                     QueueRepository.update(item.id) { it.copy(status = ItemStatus.RESOLVING) }
                     resolveOne(item)

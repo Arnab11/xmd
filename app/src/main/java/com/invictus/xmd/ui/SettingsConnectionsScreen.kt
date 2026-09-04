@@ -4,11 +4,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -32,22 +30,25 @@ private val CONNECTION_OPTIONS = listOf(2, 4, 8, 16)
 
 /**
  * Parallel connections per download (segmented picker, replacing the old
- * RadioGroup), global speed limit, max concurrent downloads. Values are only
- * persisted when [onSave] fires (Save button), same as the original
- * dialog/fragment -- unlike Downloads/Browser/Appearance, this screen keeps
- * a Save button rather than persisting per-field.
+ * RadioGroup), global speed limit, max concurrent downloads. Each field now
+ * persists as soon as it changes, matching Downloads/Browser/Appearance --
+ * no more Save button.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsConnectionsScreen(
-    initialConnections: Int,
-    initialSpeedLimitKBps: Int,
-    initialMaxConcurrent: Int,
-    onSave: (connections: Int, speedLimitKBps: Int, maxConcurrent: Int) -> Unit,
+    connections: Int,
+    speedLimitKBps: Int,
+    maxConcurrent: Int,
+    onConnectionsChanged: (Int) -> Unit,
+    onSpeedLimitChanged: (Int) -> Unit,
+    onMaxConcurrentChanged: (Int) -> Unit,
 ) {
-    var connections by remember { mutableStateOf(initialConnections) }
-    var speedLimitText by remember { mutableStateOf(initialSpeedLimitKBps.toString()) }
-    var maxConcurrentText by remember { mutableStateOf(initialMaxConcurrent.toString()) }
+    // Keyed on the persisted value so an external change (e.g. re-opening
+    // this screen) refreshes the field, while an in-progress edit that
+    // hasn't parsed to a new int yet (empty, or mid-digit) isn't clobbered.
+    var speedLimitText by remember(speedLimitKBps) { mutableStateOf(speedLimitKBps.toString()) }
+    var maxConcurrentText by remember(maxConcurrent) { mutableStateOf(maxConcurrent.toString()) }
 
     Column(
         modifier = Modifier
@@ -71,7 +72,7 @@ fun SettingsConnectionsScreen(
                 CONNECTION_OPTIONS.forEachIndexed { index, value ->
                     SegmentedButton(
                         selected = connections == value,
-                        onClick = { connections = value },
+                        onClick = { onConnectionsChanged(value) },
                         shape = SegmentedButtonDefaults.itemShape(index = index, count = CONNECTION_OPTIONS.size),
                     ) {
                         Text(value.toString())
@@ -86,7 +87,11 @@ fun SettingsConnectionsScreen(
 
             OutlinedTextField(
                 value = speedLimitText,
-                onValueChange = { speedLimitText = it.filter(Char::isDigit) },
+                onValueChange = { input ->
+                    val filtered = input.filter(Char::isDigit)
+                    speedLimitText = filtered
+                    filtered.toIntOrNull()?.let(onSpeedLimitChanged)
+                },
                 label = { Text(stringResource(R.string.settings_speed_limit)) },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
@@ -95,25 +100,16 @@ fun SettingsConnectionsScreen(
 
             OutlinedTextField(
                 value = maxConcurrentText,
-                onValueChange = { maxConcurrentText = it.filter(Char::isDigit) },
+                onValueChange = { input ->
+                    val filtered = input.filter(Char::isDigit)
+                    maxConcurrentText = filtered
+                    filtered.toIntOrNull()?.let(onMaxConcurrentChanged)
+                },
                 label = { Text(stringResource(R.string.settings_max_concurrent)) },
                 keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
             )
-        }
-
-        Button(
-            onClick = {
-                onSave(
-                    connections,
-                    speedLimitText.toIntOrNull() ?: 0,
-                    maxConcurrentText.toIntOrNull() ?: 2,
-                )
-            },
-            modifier = Modifier.fillMaxWidth().padding(top = 20.dp).height(48.dp),
-        ) {
-            Text(stringResource(R.string.settings_save))
         }
     }
 }

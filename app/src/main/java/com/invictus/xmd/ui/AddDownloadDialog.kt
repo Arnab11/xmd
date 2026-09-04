@@ -194,12 +194,15 @@ fun AddDownloadDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
                     imageVector = when {
                         needsPrepare -> Icons.Sync
-                        needsYtDlp -> Icons.Youtube
+                        LinkParser.isYoutubeLink(link) -> Icons.Youtube
+                        needsYtDlp -> Icons.Video
                         else -> Icons.Download
                     },
                     contentDescription = null,
@@ -511,7 +514,7 @@ fun AddDownloadDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            StartChipButton(onClick = {
                 if (link.isNotBlank()) {
                     onStart(link.trim(), name.trim().takeUnless { it.isBlank() }, customSaveDir, selectedQualityOption, audioFormatPreset)
                 }

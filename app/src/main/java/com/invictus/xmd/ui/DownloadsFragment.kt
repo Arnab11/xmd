@@ -71,10 +71,13 @@ class DownloadsFragment : Fragment() {
                     onRename = { item, newName -> renameFile(item, newName) },
                     onCopyLink = { copyDownloadLink(it) },
                     onShare = { item -> shareItem(item, item.filePath?.let(::File)?.takeIf { it.exists() }) },
+                    onOpenFileLocation = { openFileLocation(it) },
                     onDelete = { deleteItem(it) },
                     onCancelAll = { DownloadService.cancelAll(requireContext()) },
                     onRetryAll = { (activity as? Callbacks)?.retryAll() },
                     onClearAllFinished = { QueueRepository.clearFinishedAndFailed() },
+                    onPauseAll = { items -> DownloadService.pauseAll(requireContext(), items.map { it.id }) },
+                    onResumeAll = { items -> DownloadService.resumeAll(requireContext(), items.map { it.id }) },
                 )
             }
         }
@@ -129,6 +132,45 @@ class DownloadsFragment : Fragment() {
             startActivity(chooser)
         } catch (e: ActivityNotFoundException) {
             Toast.makeText(requireContext(), R.string.open_file_no_app, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * Opens the file's parent folder in whichever file manager the user
+     * picks, via a chooser (mirrors [openFile]'s ACTION_VIEW + FileProvider
+     * pattern, but points at the parent directory with the "resource/folder"
+     * mime type most file managers register for -- there's no universal
+     * "show this file in its folder" intent, so this is the same trick
+     * download managers like Chrome/MX Player use).
+     */
+    private fun openFileLocation(item: QueueItem) {
+        val path = item.filePath
+        val file = path?.let { File(it) }
+        val parent = file?.parentFile
+        if (file == null || !file.exists() || parent == null) {
+            Toast.makeText(requireContext(), R.string.open_file_missing, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val context = requireContext()
+        val uri = try {
+            FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", parent)
+        } catch (e: IllegalArgumentException) {
+            Toast.makeText(context, R.string.open_file_missing, Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "resource/folder")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        val chooser = Intent.createChooser(intent, getString(R.string.action_open_file_location))
+        try {
+            startActivity(chooser)
+        } catch (e: ActivityNotFoundException) {
+            Toast.makeText(context, R.string.open_file_location_no_app, Toast.LENGTH_SHORT).show()
         }
     }
 

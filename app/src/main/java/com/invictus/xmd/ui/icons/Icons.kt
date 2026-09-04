@@ -1,9 +1,40 @@
 package com.invictus.xmd.ui.icons
 
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.vector.PathParser
+import androidx.compose.ui.unit.dp
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.roundedfilled.*
 
 typealias XmdIcons = Icons
+
+/**
+ * Hand-built to match res/drawable/ic_magnet.xml exactly (same pathData,
+ * stroke width, round caps/joins) -- built as an ImageVector instead of
+ * loaded via vectorResource() so it slots into AppIcon/Icons the same way
+ * as every Material Symbols entry below (no @Composable context needed for
+ * the `by lazy` singletons, no inconsistent icon-loading path). The stroke
+ * color here is irrelevant at render time -- Icon()'s `tint` recolors the
+ * whole glyph via ColorFilter, same as the XML's `android:tint` comment.
+ */
+private fun magnetIcon(): ImageVector = ImageVector.Builder(
+    name = "Magnet",
+    defaultWidth = 24.dp,
+    defaultHeight = 24.dp,
+    viewportWidth = 24f,
+    viewportHeight = 24f,
+).addPath(
+    pathData = PathParser().parsePathString("M5,19 L5,12 A7,7 0 0 1 19,12 L19,19").toNodes(),
+    fill = null,
+    stroke = SolidColor(Color.Black),
+    strokeLineWidth = 2.6f,
+    strokeLineCap = StrokeCap.Round,
+    strokeLineJoin = StrokeJoin.Round,
+).build()
 
 @Suppress("MemberVisibilityCanBePrivate")
 object Icons {
@@ -27,6 +58,7 @@ object Icons {
     val Dns by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Dns) }
     val Download by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Download) }
     val Downloads by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Download_for_offline) }
+    val DragHandle by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Drag_indicator) }
     val Edit by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Edit) }
     val FileOpen by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.File_open) }
     val Filter by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Filter_list) }
@@ -57,7 +89,7 @@ object Icons {
     val Star by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Star) }
     val Stop by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Stop) }
     val Sync by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Sync) }
-    val Torrent by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.P2p) }
+    val Torrent by lazy(LazyThreadSafetyMode.NONE) { AppIcon(magnetIcon()) }
     val Video by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Video_library) }
     val VisibilityOff by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Visibility_off) }
     val Wifi by lazy(LazyThreadSafetyMode.NONE) { AppIcon(MaterialSymbols.RoundedFilled.Wifi) }

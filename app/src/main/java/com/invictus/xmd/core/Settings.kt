@@ -15,6 +15,13 @@ object Settings {
      *  QueueItemRow's display logic needing to know about each other. */
     const val WIFI_WAIT_MARKER = "Waiting for Wi-Fi"
 
+    /** Same idea as [WIFI_WAIT_MARKER] but for a total internet outage
+     *  (any transport, not just Wi-Fi) -- lets a PAUSED item auto-resume
+     *  once connectivity of any kind comes back, mirroring how Chrome/the
+     *  system Downloads app shows "Waiting for network" instead of failing
+     *  outright the instant a connection drops. */
+    const val NETWORK_WAIT_MARKER = "Waiting for network"
+
     private const val PREFS = "ff_settings"
     private const val KEY_CONNECTIONS = "connections_per_download"
     private const val KEY_APP_THEME = "app_theme"
