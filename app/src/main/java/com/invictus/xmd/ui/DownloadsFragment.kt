@@ -40,6 +40,7 @@ class DownloadsFragment : Fragment() {
     interface Callbacks {
         fun retryItem(itemId: String)
         fun retryAll()
+        fun onDownloadsSelectionChanged(selectionState: DownloadsSelectionUiState?)
     }
 
     // Search query comes from MainActivity's in-header search box via
@@ -76,8 +77,40 @@ class DownloadsFragment : Fragment() {
                     onCancelAll = { DownloadService.cancelAll(requireContext()) },
                     onRetryAll = { (activity as? Callbacks)?.retryAll() },
                     onClearAllFinished = { QueueRepository.clearFinishedAndFailed() },
-                    onPauseAll = { items -> DownloadService.pauseAll(requireContext(), items.map { it.id }) },
-                    onResumeAll = { items -> DownloadService.resumeAll(requireContext(), items.map { it.id }) },
+                    onPauseAll = { items ->
+                        val toPause = items.filter {
+                            it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING || it.status == ItemStatus.SAVING
+                        }
+                        if (toPause.isNotEmpty()) {
+                            DownloadService.pauseAll(requireContext(), toPause.map { it.id })
+                        }
+                    },
+                    onStartAll = { items ->
+                        val paused = items.filter { it.status == ItemStatus.PAUSED }
+                        if (paused.isNotEmpty()) {
+                            DownloadService.resumeAll(requireContext(), paused.map { it.id })
+                        }
+                        val readyOrPending = items.filter { it.status == ItemStatus.READY || it.status == ItemStatus.PENDING }
+                        if (readyOrPending.isNotEmpty() || paused.isEmpty()) {
+                            DownloadService.start(requireContext())
+                        }
+                    },
+                    onResumeAll = { items ->
+                        val paused = items.filter { it.status == ItemStatus.PAUSED }
+                        if (paused.isNotEmpty()) {
+                            DownloadService.resumeAll(requireContext(), paused.map { it.id })
+                        }
+                        val readyOrPending = items.filter { it.status == ItemStatus.READY || it.status == ItemStatus.PENDING }
+                        if (readyOrPending.isNotEmpty() || paused.isEmpty()) {
+                            DownloadService.start(requireContext())
+                        }
+                    },
+                    onSelectionStateChanged = { state ->
+                        (activity as? Callbacks)?.onDownloadsSelectionChanged(state)
+                    },
+                    onCopyLinks = { items -> copyDownloadLinks(items) },
+                    onShareItems = { items -> shareItems(items) },
+                    onDeleteItems = { items -> deleteItems(items) },
                 )
             }
         }
@@ -234,5 +267,63 @@ class DownloadsFragment : Fragment() {
     private fun deleteItem(item: QueueItem) {
         item.filePath?.let { File(it) }?.delete()
         QueueRepository.removeItem(item.id)
+    }
+
+    private fun deleteItems(items: List<QueueItem>) {
+        for (item in items) {
+            deleteItem(item)
+        }
+    }
+
+    private fun copyDownloadLinks(items: List<QueueItem>) {
+        if (items.isEmpty()) return
+        val text = items.joinToString("\n") { it.directUrl ?: it.sourceUrl }
+        val clipboard = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.clipboard_download_link_label), text))
+        val toast = if (items.size == 1) {
+            getString(R.string.link_copied_toast)
+        } else {
+            "${items.size} links copied to clipboard"
+        }
+        Toast.makeText(requireContext(), toast, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun shareItems(items: List<QueueItem>) {
+        if (items.isEmpty()) return
+        if (items.size == 1) {
+            val item = items.first()
+            shareItem(item, item.filePath?.let(::File)?.takeIf { it.exists() })
+            return
+        }
+        val files = items.mapNotNull { it.filePath?.let(::File)?.takeIf { f -> f.exists() } }
+        if (files.isNotEmpty()) {
+            val uris = ArrayList<android.net.Uri>()
+            for (f in files) {
+                try {
+                    val uri = FileProvider.getUriForFile(requireContext(), "${requireContext().packageName}.fileprovider", f)
+                    uris.add(uri)
+                } catch (_: IllegalArgumentException) {}
+            }
+            if (uris.isNotEmpty()) {
+                val intent = Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                    type = "*/*"
+                    putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(intent, getString(R.string.action_share)))
+                return
+            }
+        }
+        val text = items.joinToString("\n") { it.directUrl ?: it.sourceUrl }
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "text/plain"
+            putExtra(Intent.EXTRA_TEXT, text)
+        }
+        startActivity(Intent.createChooser(intent, getString(R.string.action_share)))
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        (activity as? Callbacks)?.onDownloadsSelectionChanged(null)
     }
 }

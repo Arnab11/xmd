@@ -53,6 +53,7 @@
     <string name="action_clear_all">Clear All</string>
     <string name="action_clear_finished">Clear Finished</string>
     <string name="action_cancel_all">Cancel All</string>
+    <string name="action_start_all">Start All</string>
     <string name="action_pause_all">Pause All</string>
     <string name="action_resume_all">Resume All</string>
     <string name="action_add">Add</string>
@@ -70,6 +71,9 @@
     <string name="delete_download_title">Delete this download?</string>
     <string name="rename_conflict_toast">A file with that name already exists</string>
     <string name="rename_failed_toast">Couldn\'t rename the file</string>
+    <string name="select_all">Select all</string>
+    <string name="invert_selection">Invert selection</string>
+    <string name="selection_options">Selection options</string>
 
     <!-- Downloads -->
     <string name="empty_queue">Paste some links above and tap Prepare.</string>

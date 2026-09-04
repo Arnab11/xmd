@@ -11,10 +11,15 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -78,6 +83,7 @@ class BrowserFragment : Fragment() {
          *  the same way); direct video/audio goes straight to READY like
          *  any other direct-download link. */
         fun triggerSniffedMedia(url: String, needsPicker: Boolean)
+        fun onBrowserHeaderInteractionChanged(locked: Boolean)
     }
 
     companion object {
@@ -297,6 +303,7 @@ class BrowserFragment : Fragment() {
                             },
                             onAddressFocusChange = { focused ->
                                 addressBarFocused = focused
+                                updateHeaderInteractionState()
                                 if (!focused) hideSuggestions()
                             },
                             onGo = { loadUrl(addressBarText) },
@@ -1292,6 +1299,18 @@ class BrowserFragment : Fragment() {
         }
     }
 
+    fun isWebpageOpen(): Boolean = !speedDialVisible
+
+    private fun updateHeaderInteractionState() {
+        val locked = addressBarFocused || tabsOverlayVisible
+        (activity as? Callbacks)?.onBrowserHeaderInteractionChanged(locked)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateHeaderInteractionState()
+    }
+
     private fun showSpeedDial() {
         speedDialVisible = true
         addressBarText = ""
@@ -1485,10 +1504,12 @@ class BrowserFragment : Fragment() {
     private fun showTabsOverlay() {
         refreshTabsOverlaySnapshot()
         tabsOverlayVisible = true
+        updateHeaderInteractionState()
     }
 
     private fun hideTabsOverlay() {
         tabsOverlayVisible = false
+        updateHeaderInteractionState()
     }
 
     private fun refreshTabsOverlaySnapshot() {

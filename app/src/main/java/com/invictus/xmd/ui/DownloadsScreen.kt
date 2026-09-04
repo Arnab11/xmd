@@ -43,8 +43,15 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import com.invictus.xmd.ui.icons.AppIcon
 import com.invictus.xmd.ui.icons.Icon
 import com.invictus.xmd.ui.icons.Icons
@@ -56,6 +63,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -116,6 +124,11 @@ fun DownloadsScreen(
     onClearAllFinished: () -> Unit,
     onPauseAll: (List<QueueItem>) -> Unit,
     onResumeAll: (List<QueueItem>) -> Unit,
+    onStartAll: (List<QueueItem>) -> Unit = onResumeAll,
+    onSelectionStateChanged: (DownloadsSelectionUiState?) -> Unit = {},
+    onCopyLinks: (List<QueueItem>) -> Unit = { list -> list.firstOrNull()?.let(onCopyLink) },
+    onShareItems: (List<QueueItem>) -> Unit = { list -> list.firstOrNull()?.let(onShare) },
+    onDeleteItems: (List<QueueItem>) -> Unit = { list -> list.forEach(onDelete) },
 ) {
     // Same filter as DownloadsFragment.renderList: filename OR sourceUrl,
     // case-insensitive substring.
@@ -147,13 +160,116 @@ fun DownloadsScreen(
         }
     }
 
-    // Long-press options menu / rename / delete-confirm dialog state --
-    // one shared slot since only one row's menu can be open at a time,
-    // same as the old single MaterialAlertDialogBuilder instance.
-    var optionsTarget by remember { mutableStateOf<QueueItem?>(null) }
+    var selectedIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var renameTarget by remember { mutableStateOf<QueueItem?>(null) }
-    var deleteTarget by remember { mutableStateOf<QueueItem?>(null) }
+    var deleteTargets by remember { mutableStateOf<List<QueueItem>?>(null) }
     var overflowMenuExpanded by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = selectedIds.isNotEmpty()) {
+        selectedIds = emptySet()
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            onSelectionStateChanged(null)
+        }
+    }
+
+    val selectedItems = remember(items, selectedIds) {
+        items.filter { it.id in selectedIds }
+    }
+
+    LaunchedEffect(items, selectedIds) {
+        val validIds = items.map { it.id }.toSet()
+        val pruned = selectedIds.intersect(validIds)
+        if (pruned.size != selectedIds.size) {
+            selectedIds = pruned
+        }
+    }
+
+    val canPause = remember(selectedItems) {
+        selectedItems.any {
+            it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING || it.status == ItemStatus.SAVING
+        }
+    }
+    val canStart = remember(selectedItems) {
+        selectedItems.any {
+            it.status == ItemStatus.PAUSED || it.status == ItemStatus.READY || it.status == ItemStatus.PENDING
+        }
+    }
+    val canRetry = remember(selectedItems) {
+        selectedItems.any {
+            it.status == ItemStatus.FAILED || it.status == ItemStatus.DONE
+        }
+    }
+
+    val currentSelectionUiState = remember(selectedItems.size, list.size, canPause, canStart, canRetry) {
+        if (selectedItems.isEmpty()) {
+            null
+        } else {
+            DownloadsSelectionUiState(
+                selectedCount = selectedItems.size,
+                totalCount = list.size,
+                canPause = canPause,
+                canStart = canStart,
+                canRetry = canRetry,
+                canCopyLink = true,
+                canShare = true,
+                canDelete = true,
+                onPause = {
+                    val currentSelected = items.filter { it.id in selectedIds }
+                    val toPause = currentSelected.filter {
+                        it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING || it.status == ItemStatus.SAVING
+                    }
+                    toPause.forEach { onPauseResume(it) }
+                    selectedIds = emptySet()
+                },
+                onStart = {
+                    val currentSelected = items.filter { it.id in selectedIds }
+                    val toStart = currentSelected.filter {
+                        it.status == ItemStatus.PAUSED || it.status == ItemStatus.READY || it.status == ItemStatus.PENDING
+                    }
+                    toStart.forEach { onPauseResume(it) }
+                    selectedIds = emptySet()
+                },
+                onRetry = {
+                    val currentSelected = items.filter { it.id in selectedIds }
+                    val toRetry = currentSelected.filter {
+                        it.status == ItemStatus.FAILED || it.status == ItemStatus.DONE
+                    }
+                    toRetry.forEach { onRetry(it) }
+                    selectedIds = emptySet()
+                },
+                onCopyLink = {
+                    val currentSelected = items.filter { it.id in selectedIds }
+                    onCopyLinks(currentSelected)
+                    selectedIds = emptySet()
+                },
+                onShare = {
+                    val currentSelected = items.filter { it.id in selectedIds }
+                    onShareItems(currentSelected)
+                    selectedIds = emptySet()
+                },
+                onDelete = {
+                    deleteTargets = items.filter { it.id in selectedIds }
+                },
+                onClose = {
+                    selectedIds = emptySet()
+                },
+                onSelectAll = {
+                    selectedIds = list.map { it.id }.toSet()
+                },
+                onInvertSelection = {
+                    val allVisibleIds = list.map { it.id }.toSet()
+                    selectedIds = allVisibleIds - selectedIds
+                },
+            )
+        }
+    }
+
+    LaunchedEffect(currentSelectionUiState) {
+        onSelectionStateChanged(currentSelectionUiState)
+    }
 
     // Used by both the top-bar overflow menu (Cancel/Retry All + Clear) and
     // to decide whether that menu button shows at all.
@@ -165,13 +281,22 @@ fun DownloadsScreen(
     val hasClearable = list.any { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
     val showCancelOrRetry = hasActive || hasFailed
 
-    // Pause All / Resume All operate on `list` too -- same "currently
-    // visible" scope as Cancel All/Retry All/Clear above, i.e. whatever the
-    // selected filter tab + search query narrow it down to.
+    // Start All / Pause All operate on visible `list`, or fallback to `items`
+    // so they are fully functional regardless of the active filter tab.
     val pausableItems = list.filter {
-        it.status == ItemStatus.DOWNLOADING && it.platform != MediaPlatform.YOUTUBE
+        it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING || it.status == ItemStatus.SAVING
+    }.ifEmpty {
+        items.filter {
+            it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING || it.status == ItemStatus.SAVING
+        }
     }
-    val resumableItems = list.filter { it.status == ItemStatus.PAUSED }
+    val startableItems = list.filter {
+        it.status == ItemStatus.PAUSED || it.status == ItemStatus.READY || it.status == ItemStatus.PENDING
+    }.ifEmpty {
+        items.filter {
+            it.status == ItemStatus.PAUSED || it.status == ItemStatus.READY || it.status == ItemStatus.PENDING
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -182,14 +307,15 @@ fun DownloadsScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    .background(MaterialTheme.colorScheme.background)
+                    .padding(top = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(
                     modifier = Modifier
                         .weight(1f)
                         .horizontalScroll(rememberScrollState())
-                        .padding(start = 12.dp, top = 8.dp, bottom = 8.dp),
+                        .padding(start = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     DownloadFilter.entries.forEach { filter ->
@@ -233,10 +359,8 @@ fun DownloadsScreen(
                 // bottom of the screen (was visually disconnected from
                 // everything else and left a lot of dead space below a
                 // short list).
-                if (list.isNotEmpty() &&
-                    (showCancelOrRetry || hasClearable || pausableItems.isNotEmpty() || resumableItems.isNotEmpty())
-                ) {
-                    Box {
+                if (list.isNotEmpty()) {
+                    Box(modifier = Modifier.padding(end = 4.dp)) {
                         IconButton(onClick = { overflowMenuExpanded = true }) {
                             Icon(
                                 imageVector = Icons.More,
@@ -247,20 +371,32 @@ fun DownloadsScreen(
                             expanded = overflowMenuExpanded,
                             onDismissRequest = { overflowMenuExpanded = false },
                         ) {
-                            if (pausableItems.isNotEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.action_pause_all)) },
-                                    leadingIcon = { Icon(imageVector = Icons.Pause, contentDescription = null) },
-                                    onClick = { overflowMenuExpanded = false; onPauseAll(pausableItems) },
-                                )
-                            }
-                            if (resumableItems.isNotEmpty()) {
-                                DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.action_resume_all)) },
-                                    leadingIcon = { Icon(imageVector = Icons.Play, contentDescription = null) },
-                                    onClick = { overflowMenuExpanded = false; onResumeAll(resumableItems) },
-                                )
-                            }
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_start_all)) },
+                                leadingIcon = { Icon(imageVector = Icons.Play, contentDescription = null) },
+                                enabled = true,
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    val targets = startableItems.ifEmpty {
+                                        items.filter { it.status == ItemStatus.PAUSED || it.status == ItemStatus.READY || it.status == ItemStatus.PENDING }
+                                    }
+                                    onStartAll(targets.ifEmpty { items })
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.action_pause_all)) },
+                                leadingIcon = { Icon(imageVector = Icons.Pause, contentDescription = null) },
+                                enabled = true,
+                                onClick = {
+                                    overflowMenuExpanded = false
+                                    val targets = pausableItems.ifEmpty {
+                                        items.filter { it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING || it.status == ItemStatus.SAVING }
+                                    }
+                                    if (targets.isNotEmpty()) {
+                                        onPauseAll(targets)
+                                    }
+                                },
+                            )
                             if (hasActive) {
                                 DropdownMenuItem(
                                     text = {
@@ -278,7 +414,8 @@ fun DownloadsScreen(
                                     },
                                     onClick = { overflowMenuExpanded = false; onCancelAll() },
                                 )
-                            } else if (hasFailed) {
+                            }
+                            if (hasFailed) {
                                 DropdownMenuItem(
                                     text = { Text(stringResource(R.string.action_retry_all)) },
                                     leadingIcon = { Icon(imageVector = Icons.Refresh, contentDescription = null) },
@@ -305,40 +442,32 @@ fun DownloadsScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
+                    contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 88.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
                     items(list, key = { it.id }) { item ->
+                        val isSelected = item.id in selectedIds
                         QueueItemRow(
                             item = item,
+                            isSelected = isSelected,
+                            isSelectionMode = selectedIds.isNotEmpty(),
                             onPauseResume = onPauseResume,
                             onCancel = onCancel,
                             onRetry = onRetry,
                             onClear = onClear,
                             onOpen = onOpen,
-                            onLongPress = { optionsTarget = it },
+                            onToggleSelect = { toggled ->
+                                selectedIds = if (toggled.id in selectedIds) {
+                                    selectedIds - toggled.id
+                                } else {
+                                    selectedIds + toggled.id
+                                }
+                            },
                         )
                     }
                 }
             }
         }
-    }
-
-    // ── Long-press options menu ──────────────────────────────────────────
-    optionsTarget?.let { item ->
-        val file = item.filePath?.let { java.io.File(it) }?.takeIf { it.exists() }
-        DownloadOptionsSheet(
-            item = item,
-            showOpenWithAndRename = file != null,
-            onOpenWith = { onOpenWith(item); optionsTarget = null },
-            onRename = { renameTarget = item; optionsTarget = null },
-            onRedownload = { onRetry(item); optionsTarget = null },
-            onCopyLink = { onCopyLink(item); optionsTarget = null },
-            onShare = { onShare(item); optionsTarget = null },
-            onOpenFileLocation = { onOpenFileLocation(item); optionsTarget = null },
-            onDelete = { deleteTarget = item; optionsTarget = null },
-            onDismiss = { optionsTarget = null },
-        )
     }
 
     // ── Rename dialog ─────────────────────────────────────────────────────
@@ -352,22 +481,40 @@ fun DownloadsScreen(
     }
 
     // ── Delete confirm dialog ─────────────────────────────────────────────
-    deleteTarget?.let { item ->
+    deleteTargets?.let { targets ->
+        val isSingle = targets.size == 1
+        val firstItem = targets.first()
         AlertDialog(
-            onDismissRequest = { deleteTarget = null },
+            onDismissRequest = { deleteTargets = null },
             modifier = Modifier.wideDialogWidth(),
             properties = WideDialogProperties,
             shape = RoundedCornerShape(20.dp),
-            title = { Text(stringResource(R.string.delete_download_title)) },
-            text = { Text(item.fileName ?: item.sourceUrl) },
+            title = {
+                Text(
+                    if (isSingle) stringResource(R.string.delete_download_title)
+                    else "Delete ${targets.size} downloads?"
+                )
+            },
+            text = {
+                Text(
+                    if (isSingle) (firstItem.fileName ?: firstItem.sourceUrl)
+                    else "Delete the selected files from device and remove them from the queue?"
+                )
+            },
             confirmButton = {
                 TextButton(
-                    onClick = { onDelete(item); deleteTarget = null },
+                    onClick = {
+                        onDeleteItems(targets)
+                        deleteTargets = null
+                        selectedIds = emptySet()
+                    },
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 ) { Text(stringResource(R.string.action_delete)) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTarget = null }) { Text(stringResource(android.R.string.cancel)) }
+                TextButton(onClick = { deleteTargets = null }) {
+                    Text(stringResource(android.R.string.cancel))
+                }
             },
         )
     }
@@ -439,27 +586,67 @@ private fun EmptyState(showIcon: Boolean) {
 @Composable
 fun QueueItemRow(
     item: QueueItem,
+    isSelected: Boolean = false,
+    isSelectionMode: Boolean = false,
     onPauseResume: (QueueItem) -> Unit,
     onCancel: (QueueItem) -> Unit,
     onRetry: (QueueItem) -> Unit,
     onClear: (QueueItem) -> Unit,
     onOpen: (QueueItem) -> Unit,
-    onLongPress: (QueueItem) -> Unit,
+    onToggleSelect: (QueueItem) -> Unit = {},
 ) {
+    val haptics = LocalHapticFeedback.current
+    val cardBorder = if (isSelected) {
+        BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
+    } else {
+        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    }
+    val cardContainerColor = if (isSelected) {
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
         shape = RoundedCornerShape(14.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+        border = cardBorder,
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(IntrinsicSize.Min)
-                .combinedClickable(onClick = {}, onLongClick = {
-                    if (item.status == ItemStatus.DONE || item.status == ItemStatus.FAILED) onLongPress(item)
-                }),
+                .combinedClickable(
+                    onClick = {
+                        if (isSelectionMode) {
+                            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleSelect(item)
+                        } else {
+                            when (item.status) {
+                                ItemStatus.DOWNLOADING, ItemStatus.RETRYING, ItemStatus.SAVING,
+                                ItemStatus.PAUSED, ItemStatus.READY -> {
+                                    onPauseResume(item)
+                                }
+                                ItemStatus.FAILED -> {
+                                    onRetry(item)
+                                }
+                                ItemStatus.DONE -> {
+                                    if (item.filePath != null) {
+                                        onOpen(item)
+                                    }
+                                }
+                                else -> Unit
+                            }
+                        }
+                    },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onToggleSelect(item)
+                    },
+                ),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             Box(
                 modifier = Modifier
@@ -467,6 +654,42 @@ fun QueueItemRow(
                     .fillMaxHeight()
                     .background(colorForStatus(item.status)),
             )
+
+            AnimatedVisibility(
+                visible = isSelectionMode,
+                enter = fadeIn() + expandHorizontally(),
+                exit = fadeOut() + shrinkHorizontally(),
+            ) {
+                Box(
+                    modifier = Modifier.padding(start = 12.dp, end = 2.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (isSelected) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(22.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Check,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(15.dp),
+                                )
+                            }
+                        }
+                    } else {
+                        Surface(
+                            shape = CircleShape,
+                            color = Color.Transparent,
+                            border = BorderStroke(2.dp, MaterialTheme.colorScheme.outlineVariant),
+                            modifier = Modifier.size(22.dp),
+                        ) {}
+                    }
+                }
+            }
+
             Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 8.dp)) {
                 // Title row: filename + file type bubble
                 Row(
@@ -541,13 +764,12 @@ fun QueueItemRow(
                 // Pause/Resume + Cancel
                 val hidePauseResume = item.status == ItemStatus.RETRYING ||
                     item.status == ItemStatus.PENDING || item.status == ItemStatus.RESOLVING ||
-                    item.status == ItemStatus.NEEDS_CHALLENGE ||
-                    (item.platform == MediaPlatform.YOUTUBE && item.status == ItemStatus.DOWNLOADING)
+                    item.status == ItemStatus.NEEDS_CHALLENGE
                 val showActions = item.status == ItemStatus.DOWNLOADING || item.status == ItemStatus.PAUSED ||
                     item.status == ItemStatus.RETRYING || item.status == ItemStatus.READY ||
                     item.status == ItemStatus.PENDING || item.status == ItemStatus.RESOLVING ||
                     item.status == ItemStatus.NEEDS_CHALLENGE
-                if (showActions) {
+                if (showActions && !isSelectionMode) {
                     Row(modifier = Modifier.padding(top = 4.dp)) {
                         if (!hidePauseResume) {
                             RowActionButton(
@@ -580,7 +802,7 @@ fun QueueItemRow(
                 val showSecondary = item.status == ItemStatus.FAILED || item.status == ItemStatus.DONE ||
                     item.status == ItemStatus.READY || item.status == ItemStatus.PENDING ||
                     item.status == ItemStatus.RESOLVING || item.status == ItemStatus.NEEDS_CHALLENGE
-                if (showSecondary) {
+                if (showSecondary && !isSelectionMode) {
                     Row(modifier = Modifier.padding(top = 4.dp)) {
                         if (item.status == ItemStatus.FAILED) {
                             RowActionButton(
@@ -997,173 +1219,7 @@ private fun formatBytes(bytes: Long): String = when {
     else -> "$bytes B"
 }
 
-// ── Dialogs & Sheets ───────────────────────────────────────────────────────
-
-/** Long-press bottom sheet options for a completed or failed download. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun DownloadOptionsSheet(
-    item: QueueItem,
-    showOpenWithAndRename: Boolean,
-    onOpenWith: () -> Unit,
-    onRename: () -> Unit,
-    onRedownload: () -> Unit,
-    onCopyLink: () -> Unit,
-    onShare: () -> Unit,
-    onOpenFileLocation: () -> Unit,
-    onDelete: () -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val title = item.fileName ?: item.sourceUrl
-    val subtitle = when {
-        item.status == ItemStatus.DONE && item.bytesDone > 0 -> "Downloaded \u00b7 " + formatBytes(item.bytesDone)
-        item.status == ItemStatus.FAILED -> item.error ?: "Download failed"
-        else -> null
-    }
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        dragHandle = { BottomSheetDefaults.DragHandle() },
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 20.dp)
-                .padding(bottom = 20.dp),
-        ) {
-            // Header: Title & Subtitle
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 14.dp),
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (subtitle != null) {
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (item.status == ItemStatus.FAILED) MaterialTheme.colorScheme.error
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-
-            HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                modifier = Modifier.padding(bottom = 6.dp),
-            )
-
-            // Actions list
-            if (showOpenWithAndRename) {
-                SheetActionRow(
-                    icon = Icons.OpenInNew,
-                    label = stringResource(R.string.action_open_with),
-                    onClick = onOpenWith,
-                )
-                SheetActionRow(
-                    icon = Icons.Edit,
-                    label = stringResource(R.string.action_rename),
-                    onClick = onRename,
-                )
-            }
-            SheetActionRow(
-                icon = Icons.Refresh,
-                label = stringResource(R.string.action_redownload),
-                onClick = onRedownload,
-            )
-            SheetActionRow(
-                icon = Icons.Copy,
-                label = stringResource(R.string.action_copy_link),
-                onClick = onCopyLink,
-            )
-            SheetActionRow(
-                icon = Icons.Share,
-                label = stringResource(R.string.action_share),
-                onClick = onShare,
-            )
-            if (showOpenWithAndRename) {
-                SheetActionRow(
-                    icon = Icons.Folder,
-                    label = stringResource(R.string.action_open_file_location),
-                    onClick = onOpenFileLocation,
-                )
-            }
-            SheetActionRow(
-                icon = Icons.Delete,
-                label = stringResource(R.string.action_delete),
-                isDestructive = true,
-                onClick = onDelete,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SheetActionRow(
-    icon: AppIcon,
-    label: String,
-    isDestructive: Boolean = false,
-    onClick: () -> Unit,
-) {
-    val contentColor = if (isDestructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
-    val iconTint = if (isDestructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-    val containerColor = if (isDestructive) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f)
-    else MaterialTheme.colorScheme.surfaceContainerHigh
-
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(14.dp),
-        color = Color.Transparent,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 2.dp),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(containerColor),
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(18.dp),
-                )
-            }
-            Spacer(Modifier.width(14.dp))
-            Text(
-                text = label,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = contentColor,
-                modifier = Modifier.weight(1f),
-            )
-        }
-    }
-}
+// ── Dialogs ───────────────────────────────────────────────────────────────
 
 @Composable
 private fun RenameDialog(currentName: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {

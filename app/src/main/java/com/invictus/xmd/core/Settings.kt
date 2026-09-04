@@ -283,12 +283,13 @@ object Settings {
             ?.filter { it in TabId.ALL }
             ?.distinct()
             .orEmpty()
-        val missing = TabId.ALL.filterNot { it in stored }
-        return if (stored.isEmpty()) TabId.ALL else stored + missing
+        val pages = (stored.filter { it in TabId.PAGES } + TabId.PAGES).distinct()
+        return pages + TabId.ADD
     }
 
     fun setTabOrder(order: List<String>) {
-        prefs.edit().putString(KEY_TAB_ORDER, order.joinToString(",")).apply()
+        val pages = (order.filter { it in TabId.PAGES } + TabId.PAGES).distinct()
+        prefs.edit().putString(KEY_TAB_ORDER, (pages + TabId.ADD).joinToString(",")).apply()
     }
 
     /** Tabs the user has hidden from the bottom nav. At least one entry in

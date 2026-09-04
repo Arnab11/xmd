@@ -392,13 +392,15 @@ class DownloadService : LifecycleService() {
         return START_NOT_STICKY
     }
 
-    /** Pauses one item by id -- shared by [ACTION_PAUSE_ITEM] and [ACTION_PAUSE_ALL].
-     *  yt-dlp has no native pause -- QueueItemRow (DownloadsScreen.kt) already hides the
-     *  Pause button for YouTube items, this is just a defensive no-op in case
-     *  this action fires for one some other way. */
+    /** Pauses one item by id -- shared by [ACTION_PAUSE_ITEM] and [ACTION_PAUSE_ALL]. */
     private fun pauseSingleItem(id: String) {
-        val current = QueueRepository.current().firstOrNull { it.id == id }
-        if (current?.platform != MediaPlatform.YOUTUBE) {
+        val current = QueueRepository.current().firstOrNull { it.id == id } ?: return
+        if (current.platform == MediaPlatform.YOUTUBE) {
+            pausedYoutubeIds.add(id)
+            cancelledYoutubeIds.add(id)
+            YtDlpManager.cancel(id)
+            QueueRepository.update(id) { it.copy(status = ItemStatus.PAUSED, mediaStatusText = null) }
+        } else {
             engines[id]?.pause()
             torrentEngines[id]?.pause()
             QueueRepository.update(id) { it.copy(status = ItemStatus.PAUSED) }
@@ -429,8 +431,9 @@ class DownloadService : LifecycleService() {
         // temp file back up via Range: bytes=<existingSize>-, so
         // already-downloaded bytes aren't wasted.
         val current = QueueRepository.current().firstOrNull { it.id == id }
-        return if (current?.directUrl != null) {
-            QueueRepository.update(id) { it.copy(status = ItemStatus.READY, error = null) }
+        return if (current?.directUrl != null || current?.platform == MediaPlatform.YOUTUBE ||
+            LinkParser.isTorrentLink(current?.sourceUrl.orEmpty())) {
+            QueueRepository.update(id) { it.copy(status = ItemStatus.READY, error = null, mediaStatusText = null) }
             true
         } else {
             // No resolved direct link cached either -- needs a
@@ -461,6 +464,7 @@ class DownloadService : LifecycleService() {
 
     /** Same idea as [engines], for YouTube (yt-dlp) items -- keyed by processId (== item id). */
     private val cancelledYoutubeIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private val pausedYoutubeIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     private suspend fun worker() {
         while (true) {
@@ -557,8 +561,16 @@ class DownloadService : LifecycleService() {
             val cancelled = cancelledYoutubeIds.remove(itemId)
             val wifiWait = wifiWaitingYoutubeIds.remove(itemId)
             val networkWait = networkWaitingYoutubeIds.remove(itemId)
+            val userPaused = pausedYoutubeIds.remove(itemId)
             QueueRepository.update(itemId) {
                 when {
+                    // User explicitly paused this YouTube download
+                    userPaused -> it.copy(
+                        status = ItemStatus.PAUSED,
+                        error = null,
+                        progressPercent = -1,
+                        mediaStatusText = null
+                    )
                     // Cancelled specifically for a Wi-Fi or total-outage wait --
                     // land on READY (not FAILED) so a fresh worker re-claims it
                     // once connectivity is back, mirroring the non-YouTube path.
@@ -590,6 +602,7 @@ class DownloadService : LifecycleService() {
             cancelledYoutubeIds.remove(itemId)
             wifiWaitingYoutubeIds.remove(itemId)
             networkWaitingYoutubeIds.remove(itemId)
+            pausedYoutubeIds.remove(itemId)
             updateNotification()
         }
     }

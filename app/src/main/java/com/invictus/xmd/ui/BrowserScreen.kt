@@ -71,7 +71,10 @@ internal fun BrowserScreen(
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                BrowserWebViewHost(onReady = onWebViewHostReady)
+                BrowserWebViewHost(
+                    speedDialVisible = speedDialVisible,
+                    onReady = onWebViewHostReady,
+                )
                 if (speedDialVisible) {
                     Box(modifier = Modifier.fillMaxSize()) {
                         speedDial()
@@ -104,6 +107,7 @@ internal fun BrowserScreen(
 
 @Composable
 private fun BrowserWebViewHost(
+    speedDialVisible: Boolean,
     onReady: (SwipeRefreshLayout, FrameLayout) -> Unit,
 ) {
     AndroidView(
@@ -114,10 +118,32 @@ private fun BrowserWebViewHost(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                 )
             }
-            SwipeRefreshLayout(context).apply {
+            val swipeRefresh = SwipeRefreshLayout(context).apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
                 addView(webViewContainer)
                 onReady(this, webViewContainer)
             }
+            object : FrameLayout(context) {
+                override fun dispatchTouchEvent(ev: android.view.MotionEvent): Boolean {
+                    if (tag == true) {
+                        parent?.requestDisallowInterceptTouchEvent(true)
+                    }
+                    return super.dispatchTouchEvent(ev)
+                }
+            }.apply {
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                )
+                tag = !speedDialVisible
+                addView(swipeRefresh)
+            }
+        },
+        update = { host ->
+            host.tag = !speedDialVisible
         },
         modifier = Modifier.fillMaxSize(),
     )
@@ -296,7 +322,7 @@ internal fun BrowserDownloadConfirmationDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.fillMaxWidth(fraction = 0.82f),
+        modifier = Modifier.wideDialogWidth(),
         properties = WideDialogProperties,
         title = { Text(stringResource(R.string.download_confirm_title)) },
         text = {
