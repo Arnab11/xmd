@@ -178,6 +178,7 @@ class DownloadService : LifecycleService() {
     private val activeWorkers = java.util.concurrent.atomic.AtomicInteger(0)
 
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+    private var internetCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -186,13 +187,72 @@ class DownloadService : LifecycleService() {
             onWifiAvailable = { onWifiRegained() },
             onWifiLost = { onWifiLost() }
         )
+        internetCallback = NetworkMonitor.registerInternet(
+            context = this,
+            onAvailable = { onInternetRegained() },
+            onLost = { onInternetLost() }
+        )
     }
 
     override fun onDestroy() {
         networkCallback?.let { NetworkMonitor.unregister(this, it) }
         networkCallback = null
+        internetCallback?.let { NetworkMonitor.unregister(this, it) }
+        internetCallback = null
         super.onDestroy()
     }
+
+    /** Total internet outage (airplane mode, no signal, router down --
+     *  regardless of the Wi-Fi-only setting, which only cares about Wi-Fi
+     *  specifically). Pause every live download in place as "Waiting for
+     *  network", the same shape as [onWifiLost] but for any transport. */
+    private fun onInternetLost() {
+        val live = QueueRepository.current()
+            .filter { it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING }
+        live.forEach { item ->
+            if (item.platform == MediaPlatform.YOUTUBE) {
+                networkWaitingYoutubeIds.add(item.id)
+                cancelledYoutubeIds.add(item.id)
+                YtDlpManager.cancel(item.id)
+            } else {
+                engines[item.id]?.pause()
+                torrentEngines[item.id]?.pause()
+                QueueRepository.update(item.id) {
+                    it.copy(status = ItemStatus.PAUSED, error = Settings.NETWORK_WAIT_MARKER)
+                }
+            }
+        }
+        if (live.isNotEmpty()) updateNotification()
+    }
+
+    /** Internet is back (any transport) -- resume anything auto-paused for
+     *  a total outage and top workers back up so anything still READY gets
+     *  picked up automatically, no manual Retry needed (mirrors Chrome). */
+    private fun onInternetRegained() {
+        val autoPaused = QueueRepository.current()
+            .filter { it.status == ItemStatus.PAUSED && it.error == Settings.NETWORK_WAIT_MARKER }
+        autoPaused.forEach { item ->
+            val liveEngine = engines[item.id] != null || torrentEngines[item.id] != null
+            if (liveEngine) {
+                engines[item.id]?.resume()
+                torrentEngines[item.id]?.resume()
+                QueueRepository.update(item.id) { it.copy(status = ItemStatus.DOWNLOADING, error = null) }
+            } else {
+                QueueRepository.update(item.id) { it.copy(status = ItemStatus.READY, error = null) }
+            }
+        }
+        val hadWaitingYoutube = networkWaitingYoutubeIds.isNotEmpty()
+        if (autoPaused.isNotEmpty() || hadWaitingYoutube) {
+            startForeground(NOTIFICATION_ID, buildNotification())
+            topUpWorkers()
+            updateNotification()
+        }
+    }
+
+    /** YouTube item ids cancelled by [onInternetLost] specifically -- same
+     *  idea as [wifiWaitingYoutubeIds] but for a total outage, so their
+     *  catch block in [downloadYoutube] knows to land on READY, not FAILED. */
+    private val networkWaitingYoutubeIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
 
     /** Wi-Fi dropped (or vanished entirely) while Wi-Fi-only downloads is ON --
      *  pause every live download in place, marking each with [Settings.WIFI_WAIT_MARKER]
@@ -405,6 +465,11 @@ class DownloadService : LifecycleService() {
     private suspend fun worker() {
         while (true) {
             if (Settings.wifiOnlyDownloads() && !NetworkMonitor.isOnWifi(this)) break
+            // No internet at all -- don't even attempt to start a fresh item
+            // just to have it immediately fail; leave it READY and let
+            // onInternetRegained()'s topUpWorkers() spin a worker back up
+            // the moment connectivity returns.
+            if (!NetworkMonitor.hasInternet(this)) break
             val item = QueueRepository.claimNextReady() ?: break
             when {
                 item.platform == MediaPlatform.YOUTUBE -> downloadYoutube(item)
@@ -491,14 +556,25 @@ class DownloadService : LifecycleService() {
             // binary invocation can surface as an Error subtype.
             val cancelled = cancelledYoutubeIds.remove(itemId)
             val wifiWait = wifiWaitingYoutubeIds.remove(itemId)
+            val networkWait = networkWaitingYoutubeIds.remove(itemId)
             QueueRepository.update(itemId) {
                 when {
-                    // Cancelled specifically for Wi-Fi wait -- land on READY
-                    // (not FAILED) so a fresh worker re-claims it once Wi-Fi
-                    // is back, mirroring the non-YouTube pause path.
-                    wifiWait -> it.copy(
+                    // Cancelled specifically for a Wi-Fi or total-outage wait --
+                    // land on READY (not FAILED) so a fresh worker re-claims it
+                    // once connectivity is back, mirroring the non-YouTube path.
+                    wifiWait || networkWait -> it.copy(
                         status = ItemStatus.READY,
                         error = null,
+                        progressPercent = -1,
+                        mediaStatusText = null
+                    )
+                    // Not an explicit cancel/wait, but there's genuinely no
+                    // internet right now -- pause as "Waiting for network"
+                    // instead of failing outright; onInternetRegained() will
+                    // put it back to READY once connectivity returns.
+                    !cancelled && !NetworkMonitor.hasInternet(this@DownloadService) -> it.copy(
+                        status = ItemStatus.PAUSED,
+                        error = Settings.NETWORK_WAIT_MARKER,
                         progressPercent = -1,
                         mediaStatusText = null
                     )
@@ -513,6 +589,7 @@ class DownloadService : LifecycleService() {
         } finally {
             cancelledYoutubeIds.remove(itemId)
             wifiWaitingYoutubeIds.remove(itemId)
+            networkWaitingYoutubeIds.remove(itemId)
             updateNotification()
         }
     }
@@ -710,6 +787,20 @@ class DownloadService : LifecycleService() {
                 // automatically would just burn battery/data for nothing; those need
                 // the user's manual Retry (which can re-resolve a fresh link).
                 val isNetworkError = e is IOException
+                if (isNetworkError && !NetworkMonitor.hasInternet(this)) {
+                    // Not a flaky link -- there's genuinely no internet at all
+                    // right now (Wi-Fi/data dropped, airplane mode, router
+                    // down...). Sit as "Waiting for network" like Chrome does
+                    // instead of burning retries or failing outright;
+                    // onInternetRegained() flips it back to READY/DOWNLOADING
+                    // the instant connectivity returns, no manual Retry needed.
+                    engines.remove(itemId)
+                    QueueRepository.update(itemId) {
+                        it.copy(status = ItemStatus.PAUSED, error = Settings.NETWORK_WAIT_MARKER)
+                    }
+                    updateNotification()
+                    return
+                }
                 if (isNetworkError && Settings.autoRetryEnabled() && attempt < MAX_AUTO_RETRIES) {
                     attempt++
                     engines.remove(itemId)

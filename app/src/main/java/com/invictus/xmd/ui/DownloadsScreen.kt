@@ -287,7 +287,7 @@ fun DownloadsScreen(
                             }
                             if (hasClearable) {
                                 DropdownMenuItem(
-                                    text = { Text(stringResource(R.string.action_clear)) },
+                                    text = { Text(stringResource(R.string.action_clear_all)) },
                                     leadingIcon = { Icon(imageVector = Icons.DeleteSweep, contentDescription = null) },
                                     onClick = { overflowMenuExpanded = false; onClearAllFinished() },
                                 )
@@ -903,7 +903,11 @@ private fun statusText(item: QueueItem, speedEta: String?): String = when (item.
             item.bytesTotal > 0 -> "${(item.bytesDone * 100 / item.bytesTotal)}%"
             else -> null
         }
-        val label = if (item.error == Settings.WIFI_WAIT_MARKER) "Waiting for Wi-Fi" else "Paused"
+        val label = when (item.error) {
+            Settings.WIFI_WAIT_MARKER -> "Waiting for Wi-Fi"
+            Settings.NETWORK_WAIT_MARKER -> "Waiting for network"
+            else -> "Paused"
+        }
         if (pct != null) "$pct • $label" else label
     }
     ItemStatus.RETRYING -> item.error ?: "Retrying…"
