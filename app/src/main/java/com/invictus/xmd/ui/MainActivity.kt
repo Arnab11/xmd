@@ -59,7 +59,6 @@ import okhttp3.OkHttpClient
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
-import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.ui.graphics.toArgb
@@ -795,23 +794,10 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
 
     // ── Add Download / Torrent Dialogs ─────────────────────────────────────
 
-    private fun defaultSavePath(): String = if (Settings.saveToDownloadsFolder()) {
-        Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).absolutePath
-    } else {
-        File(Environment.getExternalStorageDirectory(), "Xmd").absolutePath
-    }
+    private fun defaultSavePath(): String = Settings.defaultSaveLocation()
 
-    private fun resolveTreeUriToPath(treeUri: Uri): String? {
-        return runCatching {
-            val docId = DocumentsContract.getTreeDocumentId(treeUri)
-            val parts = docId.split(":", limit = 2)
-            val volume = parts.getOrNull(0)
-            val relativePath = parts.getOrNull(1).orEmpty()
-            if (!volume.equals("primary", ignoreCase = true)) return@runCatching null
-            val base = Environment.getExternalStorageDirectory()
-            (if (relativePath.isBlank()) base else File(base, relativePath)).absolutePath
-        }.getOrNull()
-    }
+    private fun resolveTreeUriToPath(treeUri: Uri): String? =
+        com.invictus.xmd.core.StorageUtils.resolveTreeUriToPath(treeUri)
 
     private fun magnetDisplayName(link: String): String? {
         if (!LinkParser.isMagnetLink(link)) return null

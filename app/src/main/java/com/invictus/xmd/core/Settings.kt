@@ -2,7 +2,9 @@ package com.invictus.xmd.core
 
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Environment
 import com.invictus.xmd.ui.theme.AppTheme
+import java.io.File
 
 /**
  * Simple SharedPreferences-backed settings, initialized once from FfApp.
@@ -30,7 +32,8 @@ object Settings {
     private const val KEY_SPEED_LIMIT_KBPS = "speed_limit_kbps"
     private const val KEY_MAX_CONCURRENT = "max_concurrent_downloads"
     private const val KEY_AUTO_RETRY = "auto_retry_network_errors"
-    private const val KEY_SAVE_TO_DOWNLOADS = "save_to_downloads_folder"
+    private const val KEY_DEFAULT_SAVE_LOCATION = "default_save_location_path"
+    private const val KEY_DISABLE_CATEGORIZATION = "disable_folder_categorization"
     private const val KEY_WIFI_ONLY = "wifi_only_downloads"
     private const val KEY_ADBLOCK_ENABLED = "browser_adblock_enabled"
 
@@ -98,12 +101,28 @@ object Settings {
         prefs.edit().putBoolean(KEY_AUTO_RETRY, value).apply()
     }
 
-    /** When true, downloads skip the app's own Xmd/<Category> subfolders and
-     *  land flat in the device's standard Download folder instead -- same
-     *  as Chrome. Default OFF (existing categorized Xmd/... behavior). */
-    fun saveToDownloadsFolder(): Boolean = prefs.getBoolean(KEY_SAVE_TO_DOWNLOADS, false)
-    fun setSaveToDownloadsFolder(value: Boolean) {
-        prefs.edit().putBoolean(KEY_SAVE_TO_DOWNLOADS, value).apply()
+    /** The base folder new downloads are saved under when no per-download
+     *  custom save dir was picked (see [com.invictus.xmd.core.Models.QueueItem.customSaveDirPath]).
+     *  Falls back to the original <sdcard>/Xmd folder until the user picks
+     *  something else via the SAF folder picker in Settings. Whether
+     *  [categorizationDisabled] is on or off, this is always the *root* --
+     *  category subfolders (Videos/Music/.../Torrents) are appended under it,
+     *  never baked into the stored value itself. */
+    fun defaultSaveLocation(): String =
+        prefs.getString(KEY_DEFAULT_SAVE_LOCATION, null)
+            ?: File(Environment.getExternalStorageDirectory(), "Xmd").absolutePath
+
+    fun setDefaultSaveLocation(path: String) {
+        prefs.edit().putString(KEY_DEFAULT_SAVE_LOCATION, path).apply()
+    }
+
+    /** When true, downloads skip the category subfolder (Videos/Music/
+     *  Documents/Apps/Others/Torrents) entirely and land flat in
+     *  [defaultSaveLocation] instead -- same as Chrome. Default OFF
+     *  (existing categorized <location>/<Category> behavior). */
+    fun categorizationDisabled(): Boolean = prefs.getBoolean(KEY_DISABLE_CATEGORIZATION, false)
+    fun setCategorizationDisabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_DISABLE_CATEGORIZATION, value).apply()
     }
 
     /** When true, no download (HTTP, torrent, or YouTube) is allowed to start

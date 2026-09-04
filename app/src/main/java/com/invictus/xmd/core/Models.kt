@@ -75,8 +75,8 @@ data class QueueItem(
      * FileProvider. Reconstructing this from category/fileName/settings at
      * open-time would be fragile (three different download paths compute
      * their own base dir -- see DownloadService's downloadOne/
-     * downloadTorrentOne/downloadYoutube -- and Settings.
-     * saveToDownloadsFolder() could change between download and open), so
+     * downloadTorrentOne/downloadYoutube -- and Settings.defaultSaveLocation()/
+     * categorizationDisabled() could change between download and open), so
      * it's captured directly from the actual File the download wrote.
      */
     var filePath: String? = null,

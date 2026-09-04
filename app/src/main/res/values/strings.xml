@@ -181,8 +181,10 @@
     <string name="settings_max_concurrent">Maximum Simultaneous Downloads (1–5)</string>
     <string name="settings_auto_retry">Auto Retry on Network Error</string>
     <string name="settings_auto_retry_hint">Retries up to 3 times automatically if the connection times out or drops. Expired links still require a manual retry.</string>
-    <string name="settings_save_to_downloads">Save to Downloads Folder</string>
-    <string name="settings_save_to_downloads_hint">Save files directly to the Downloads folder instead of the app folder.</string>
+    <string name="settings_default_location">Default Save Location</string>
+    <string name="settings_default_location_hint">Where new downloads are saved unless a custom folder is picked for that download.</string>
+    <string name="settings_disable_categorization">Disable Folder Categorization</string>
+    <string name="settings_disable_categorization_hint">Save all downloads directly into the default location instead of sorting them into Videos, Music, Documents, and other subfolders.</string>
     <string name="settings_wifi_only">Download on Wi-Fi Only</string>
     <string name="settings_wifi_only_hint">Pause all downloads on cellular data and resume automatically when Wi-Fi is back.</string>
     <string name="settings_adblock">Block Ads</string>

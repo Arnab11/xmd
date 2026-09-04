@@ -29,7 +29,6 @@ import com.composables.icons.materialsymbols.roundedfilled.R as MaterialSymbols
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import android.os.Environment
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
@@ -519,10 +518,11 @@ class DownloadService : LifecycleService() {
             isAudioOnly = formatSelector == YtDlpManager.AUDIO_ONLY_SELECTOR
         )
 
-        val outputDir = if (Settings.saveToDownloadsFolder()) {
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val saveRoot = File(Settings.defaultSaveLocation())
+        val outputDir = if (Settings.categorizationDisabled()) {
+            saveRoot
         } else {
-            File(Environment.getExternalStorageDirectory(), "Xmd/${item.category.folderName}")
+            File(saveRoot, item.category.folderName)
         }
 
         try {
@@ -629,14 +629,17 @@ class DownloadService : LifecycleService() {
                 // HomeFragment/MainActivity) -- overrides both the settings
                 // default and the Torrents-subfolder convention below.
                 File(customSaveDirPath)
-            } else if (Settings.saveToDownloadsFolder()) {
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
             } else {
-                // Own subfolder rather than DownloadCategory.folderName -- a
-                // torrent is very often a multi-file batch (a whole season,
-                // an album, a repack's several parts) that belongs together
-                // as one folder rather than split across Videos/Music/Others.
-                File(Environment.getExternalStorageDirectory(), "Xmd/Torrents")
+                val saveRoot = File(Settings.defaultSaveLocation())
+                if (Settings.categorizationDisabled()) {
+                    saveRoot
+                } else {
+                    // Own subfolder rather than DownloadCategory.folderName -- a
+                    // torrent is very often a multi-file batch (a whole season,
+                    // an album, a repack's several parts) that belongs together
+                    // as one folder rather than split across Videos/Music/Others.
+                    File(saveRoot, "Torrents")
+                }
             }
 
             val result = withContext(Dispatchers.IO) {
@@ -742,12 +745,15 @@ class DownloadService : LifecycleService() {
                 val customDir = currentItem?.customSaveDirPath
                 val finalDir = if (!customDir.isNullOrBlank()) {
                     File(customDir)
-                } else if (Settings.saveToDownloadsFolder()) {
-                    // Chrome-style: flat, straight into the device's standard
-                    // Download folder, no Xmd/<Category> subfolder at all.
-                    Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 } else {
-                    File(Environment.getExternalStorageDirectory(), "Xmd/${category.folderName}")
+                    val saveRoot = File(Settings.defaultSaveLocation())
+                    if (Settings.categorizationDisabled()) {
+                        // Chrome-style: flat, straight into the default save
+                        // location, no <location>/<Category> subfolder at all.
+                        saveRoot
+                    } else {
+                        File(saveRoot, category.folderName)
+                    }
                 }
                 val finalFile = File(finalDir, fileName)
 

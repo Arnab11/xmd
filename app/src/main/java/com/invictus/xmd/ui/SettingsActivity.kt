@@ -8,6 +8,7 @@ import android.os.Environment
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
@@ -585,24 +586,47 @@ private fun DownloadsRoute() {
     var autoRetry by remember {
         mutableStateOf(com.invictus.xmd.core.Settings.autoRetryEnabled())
     }
-    var saveToDownloads by remember {
-        mutableStateOf(com.invictus.xmd.core.Settings.saveToDownloadsFolder())
+    var defaultLocationPath by remember {
+        mutableStateOf(com.invictus.xmd.core.Settings.defaultSaveLocation())
+    }
+    var categorizeIntoFolders by remember {
+        mutableStateOf(!com.invictus.xmd.core.Settings.categorizationDisabled())
     }
     var wifiOnly by remember {
         mutableStateOf(com.invictus.xmd.core.Settings.wifiOnlyDownloads())
     }
 
+    // Same SAF folder-picker flow as the per-download "Change" button in
+    // AddDownloadDialog/AddTorrentDialog (MainActivity's pickSaveDirLauncher) --
+    // resolved back to a plain path via the shared StorageUtils helper.
+    val pickDefaultLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        val path = com.invictus.xmd.core.StorageUtils.resolveTreeUriToPath(uri)
+        if (path != null) {
+            defaultLocationPath = path
+            com.invictus.xmd.core.Settings.setDefaultSaveLocation(path)
+        } else {
+            Toast.makeText(context, R.string.torrent_dialog_save_path_failed, Toast.LENGTH_LONG).show()
+        }
+    }
+
     SettingsDownloadsScreen(
         autoRetry = autoRetry,
-        saveToDownloads = saveToDownloads,
+        defaultLocationPath = defaultLocationPath,
+        categorizeIntoFolders = categorizeIntoFolders,
         wifiOnly = wifiOnly,
         onAutoRetryChanged = { checked ->
             autoRetry = checked
             com.invictus.xmd.core.Settings.setAutoRetryEnabled(checked)
         },
-        onSaveToDownloadsChanged = { checked ->
-            saveToDownloads = checked
-            com.invictus.xmd.core.Settings.setSaveToDownloadsFolder(checked)
+        onChangeDefaultLocation = {
+            pickDefaultLocationLauncher.launch(null)
+        },
+        onCategorizeIntoFoldersChanged = { checked ->
+            categorizeIntoFolders = checked
+            com.invictus.xmd.core.Settings.setCategorizationDisabled(!checked)
         },
         onWifiOnlyChanged = { checked ->
             val wifiOnlyJustEnabled = checked && !com.invictus.xmd.core.Settings.wifiOnlyDownloads()
