@@ -107,8 +107,8 @@ class HomeFragment : Fragment() {
     /**
      * Clipboard reads only work while the app is in the foreground (Android 10+
      * privacy restriction). We show a banner so the user can tap to add the link
-     * rather than auto-adding it silently. Generic: any share/fitgirl link OR
-     * a YouTube link triggers the banner.
+     * rather than auto-adding it silently. Generic: any share/fitgirl link, or
+     * a YouTube/Instagram link, triggers the banner.
      */
     private fun checkClipboard() {
         val clip = clipboardManager.primaryClip ?: return
@@ -118,7 +118,8 @@ class HomeFragment : Fragment() {
         if (text.isEmpty() || text == lastHandledClipboardText) return
         val isRecognized = LinkParser.isShareLink(text) ||
             LinkParser.isFitgirlPage(text) ||
-            LinkParser.isYoutubeLink(text)
+            LinkParser.isYoutubeLink(text) ||
+            LinkParser.isInstagramLink(text)
         if (!isRecognized) return
         if (linksText.contains(text)) return
         if (QueueRepository.current().any { it.sourceUrl == text }) return
@@ -204,7 +205,23 @@ class HomeFragment : Fragment() {
             Toast.makeText(requireContext(), R.string.home_links_required, Toast.LENGTH_SHORT).show()
             return
         }
-        (activity as? Callbacks)?.triggerDownloadDirect(lines)
+
+        // Drop anything that isn't a real link before handing off -- without
+        // this, plain garbage text (e.g. "uu") sailed through untouched and
+        // got "downloaded" as a literal URL.
+        val (valid, invalid) = lines.partition { LinkParser.isSupportedDirectInput(it) }
+        if (valid.isEmpty()) {
+            Toast.makeText(requireContext(), R.string.home_no_valid_links, Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (invalid.isNotEmpty()) {
+            Toast.makeText(
+                requireContext(),
+                getString(R.string.home_skipped_invalid_links, invalid.size),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        (activity as? Callbacks)?.triggerDownloadDirect(valid)
         linksText = ""
     }
 

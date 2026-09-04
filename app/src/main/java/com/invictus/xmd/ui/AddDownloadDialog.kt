@@ -201,7 +201,8 @@ fun AddDownloadDialog(
                 Icon(
                     imageVector = when {
                         needsPrepare -> Icons.Sync
-                        needsYtDlp -> Icons.Youtube
+                        LinkParser.isYoutubeLink(link) -> Icons.Youtube
+                        needsYtDlp -> Icons.Video
                         else -> Icons.Download
                     },
                     contentDescription = null,

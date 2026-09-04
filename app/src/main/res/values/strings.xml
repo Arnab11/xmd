@@ -7,6 +7,8 @@
     <string name="hint_links">Paste direct links, YouTube links, or FuckingFast links — one per line.</string>
     <string name="home_paste_links_hint">Paste links above to start downloading</string>
     <string name="home_links_required">Paste at least one link</string>
+    <string name="home_no_valid_links">No valid links found — paste a real URL, magnet link, or supported site link</string>
+    <string name="home_skipped_invalid_links">Skipped %1$d line(s) that weren\'t valid links</string>
     <string name="no_ready_files_yet">No ready files yet. Tap Prepare first.</string>
     <string name="home_supported_sources">Direct links · FuckingFast · yt-dlp</string>
     <string name="home_download_activity">Download activity</string>
