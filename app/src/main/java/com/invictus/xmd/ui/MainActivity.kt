@@ -170,12 +170,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     private var mainViewPager: ViewPager2? = null
     private var pagerPosition by mutableFloatStateOf(0f)
     private var downloadsSelectionState: DownloadsSelectionUiState? by mutableStateOf(null)
-    private var isBrowserWebpageOpen: Boolean = false
+    private var isBrowserHeaderLocked: Boolean = false
 
     private fun updateViewPagerUserInputEnabled() {
-        val webpageOpen = browserFragment()?.isWebpageOpen() ?: isBrowserWebpageOpen
         val disabled = (downloadsSelectionState != null) ||
-            (mainDestination == MainDestination.Browser && webpageOpen)
+            (mainDestination == MainDestination.Browser && isBrowserHeaderLocked)
         mainViewPager?.isUserInputEnabled = !disabled
     }
 
@@ -1208,29 +1207,9 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         savedPagesDestination = SavedPagesDestination.Bookmarks
     }
 
-    override fun onBrowserWebpageStateChanged(isWebpageOpen: Boolean) {
-        this.isBrowserWebpageOpen = isWebpageOpen
+    override fun onBrowserHeaderInteractionChanged(locked: Boolean) {
+        this.isBrowserHeaderLocked = locked
         updateViewPagerUserInputEnabled()
-    }
-
-    override fun onBrowserHeaderDragStart() {
-        if (mainViewPager?.isFakeDragging == false) {
-            mainViewPager?.beginFakeDrag()
-        }
-    }
-
-    override fun onBrowserHeaderDrag(dragAmount: Float) {
-        if (mainViewPager?.isFakeDragging == true) {
-            mainViewPager?.fakeDragBy(-dragAmount)
-        }
-    }
-
-    override fun onBrowserHeaderDragEnd() {
-        if (mainViewPager?.isFakeDragging == true) {
-            try {
-                mainViewPager?.endFakeDrag()
-            } catch (_: Throwable) {}
-        }
     }
 
     // ── DownloadsFragment.Callbacks ─────────────────────────────────────────

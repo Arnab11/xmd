@@ -2,6 +2,7 @@ package com.invictus.xmd.ui
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExtendedFloatingActionButton
@@ -57,13 +58,16 @@ fun BrowserFabs(
     val contentColor = MaterialTheme.colorScheme.onPrimaryContainer
 
     Box(modifier = Modifier.fillMaxSize()) {
+        val baseBottomPadding = 88.dp
         if (sniffedMediaVisible) {
+            val bottomPadding = if (detectedLinkVisible) baseBottomPadding + 64.dp else baseBottomPadding
             ExtendedFloatingActionButton(
                 onClick = onSniffedMediaTap,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
+                    .navigationBarsPadding()
                     .padding(horizontal = 20.dp)
-                    .padding(bottom = 88.dp),
+                    .padding(bottom = bottomPadding),
                 shape = fabShape,
                 containerColor = containerColor,
                 contentColor = contentColor,
@@ -81,7 +85,8 @@ fun BrowserFabs(
                 onClick = onDetectedLinkTap,
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(20.dp),
+                    .navigationBarsPadding()
+                    .padding(end = 20.dp, bottom = baseBottomPadding),
                 shape = fabShape,
                 containerColor = containerColor,
                 contentColor = contentColor,

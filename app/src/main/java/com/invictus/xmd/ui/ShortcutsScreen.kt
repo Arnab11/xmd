@@ -190,7 +190,7 @@ private fun ReorderableShortcutGrid(
     LazyVerticalGrid(
         columns = GridCells.Fixed(GRID_COLUMNS),
         modifier = modifier,
-        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 16.dp),
+        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 96.dp),
     ) {
         itemsIndexed(shortcuts, key = { _, s -> s.id }) { index, shortcut ->
             val isDragging = index == draggingIndex
