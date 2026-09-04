@@ -10,6 +10,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -72,6 +73,8 @@ private fun HistoryOverlay(
     if (confirmingClearAll) {
         AlertDialog(
             onDismissRequest = { confirmingClearAll = false },
+            modifier = Modifier.wideDialogWidth(),
+            properties = WideDialogProperties,
             title = { Text(stringResource(R.string.history_clear_all)) },
             confirmButton = {
                 TextButton(
@@ -127,6 +130,8 @@ private fun BookmarksOverlay(
     if (confirmingClearAll) {
         AlertDialog(
             onDismissRequest = { confirmingClearAll = false },
+            modifier = Modifier.wideDialogWidth(),
+            properties = WideDialogProperties,
             title = { Text(stringResource(R.string.bookmarks_clear_all)) },
             confirmButton = {
                 TextButton(

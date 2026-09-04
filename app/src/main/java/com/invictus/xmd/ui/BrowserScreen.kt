@@ -225,6 +225,8 @@ internal fun ClearBrowsingDataDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = { Text(stringResource(R.string.clear_data_title)) },
         text = {
             Column {
@@ -292,6 +294,8 @@ internal fun BrowserDownloadConfirmationDialog(
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = { Text(stringResource(R.string.download_confirm_title)) },
         text = { Text(stringResource(R.string.download_confirm_message, prompt.fileName)) },
         confirmButton = {

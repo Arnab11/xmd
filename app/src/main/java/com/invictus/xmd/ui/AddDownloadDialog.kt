@@ -194,6 +194,8 @@ fun AddDownloadDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -511,7 +513,7 @@ fun AddDownloadDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            StartChipButton(onClick = {
                 if (link.isNotBlank()) {
                     onStart(link.trim(), name.trim().takeUnless { it.isBlank() }, customSaveDir, selectedQualityOption, audioFormatPreset)
                 }

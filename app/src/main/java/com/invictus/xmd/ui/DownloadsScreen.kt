@@ -353,6 +353,8 @@ fun DownloadsScreen(
     deleteTarget?.let { item ->
         AlertDialog(
             onDismissRequest = { deleteTarget = null },
+            modifier = Modifier.wideDialogWidth(),
+            properties = WideDialogProperties,
             shape = RoundedCornerShape(20.dp),
             title = { Text(stringResource(R.string.delete_download_title)) },
             text = { Text(item.fileName ?: item.sourceUrl) },
@@ -1154,6 +1156,8 @@ private fun RenameDialog(currentName: String, onConfirm: (String) -> Unit, onDis
     var text by remember(currentName) { mutableStateOf(currentName) }
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         shape = RoundedCornerShape(20.dp),
         title = { Text(stringResource(R.string.action_rename)) },
         text = {

@@ -112,6 +112,8 @@ fun AddTorrentDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(
@@ -389,7 +391,7 @@ fun AddTorrentDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = {
+            StartChipButton(onClick = {
                 val selectedIndices = if (filesState.files.isNotEmpty()) {
                     if (allSelected) null else filesState.files.filter { it.isSelected }.map { it.index }.joinToString(",")
                 } else null

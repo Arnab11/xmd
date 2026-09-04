@@ -65,6 +65,8 @@ fun QualityPickerDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
         title = { Text(titleText) },
         text = {
             Column(
