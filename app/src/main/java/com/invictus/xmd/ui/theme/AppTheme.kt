@@ -421,6 +421,9 @@ enum class AppTheme(
       activity.window.setBackgroundDrawable(
         android.graphics.drawable.ColorDrawable(resolveCurrentXmdColorScheme(activity).background.toArgb())
       )
+      if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+        activity.window.isNavigationBarContrastEnforced = false
+      }
     }
   }
 

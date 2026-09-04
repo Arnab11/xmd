@@ -2,11 +2,14 @@ package com.invictus.xmd.ui
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -25,13 +28,16 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -48,6 +54,8 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.invictus.xmd.R
 import com.invictus.xmd.core.ShortcutRepository
+import com.invictus.xmd.ui.theme.rememberThemeTransitionState
+import kotlinx.coroutines.flow.first
 import com.invictus.xmd.ui.icons.Icon
 import com.invictus.xmd.ui.icons.Icons
 import com.invictus.xmd.ui.theme.LocalThemeTransitionState
@@ -89,6 +97,25 @@ class SettingsActivity : ComponentActivity() {
         if (uri != null) writeAndShareExport(uri)
     }
 
+    private var appliedEdgeToEdgeDarkMode: Boolean? = null
+
+    private fun applyEdgeToEdge(isDarkMode: Boolean) {
+        if (appliedEdgeToEdgeDarkMode == isDarkMode) return
+
+        val synchronizedBarStyle = SystemBarStyle.auto(
+            lightScrim = Color(0xFFF4F6F9).toArgb(),
+            darkScrim = Color(0xFF0E1521).toArgb(),
+        ) { isDarkMode }
+        enableEdgeToEdge(
+            statusBarStyle = synchronizedBarStyle,
+            navigationBarStyle = synchronizedBarStyle,
+        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.isNavigationBarContrastEnforced = false
+        }
+        appliedEdgeToEdgeDarkMode = isDarkMode
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must run before super.onCreate() -- Activity.setTheme() only
         // takes effect if called before the window/decor is created. Same
@@ -97,14 +124,7 @@ class SettingsActivity : ComponentActivity() {
         // actually repaint instead of recreating with the default theme.
         com.invictus.xmd.ui.theme.AppTheme.applyTo(this)
         super.onCreate(savedInstanceState)
-
-        val isDark = com.invictus.xmd.core.Settings.isDarkMode()
-        val colorScheme = resolveCurrentXmdColorScheme(this)
-        window.statusBarColor = colorScheme.surfaceContainerLow.toArgb()
-        window.navigationBarColor = colorScheme.background.toArgb()
-        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-        insetsController.isAppearanceLightStatusBars = !isDark
-        insetsController.isAppearanceLightNavigationBars = !isDark
+        applyEdgeToEdge(isDarkMode = com.invictus.xmd.core.Settings.isDarkMode())
 
         // Deep-link straight into a category (e.g. the "Install now" button
         // on the yt-dlp-not-installed dialog) instead of always landing on
@@ -120,8 +140,22 @@ class SettingsActivity : ComponentActivity() {
         }
 
         setContent {
+            val isDark by com.invictus.xmd.core.Settings.darkModeFlow.collectAsState()
+            val themeTransitionState = rememberThemeTransitionState()
+
+            LaunchedEffect(isDark) {
+                if (themeTransitionState.isAnimating) {
+                    snapshotFlow {
+                        themeTransitionState.animationProgress.value to themeTransitionState.isAnimating
+                    }.first { (progress, isAnimating) ->
+                        !isAnimating || progress >= SYSTEM_BAR_THEME_SWITCH_PROGRESS
+                    }
+                }
+                applyEdgeToEdge(isDark)
+            }
+
             navController = rememberNavController()
-            XmdTheme {
+            XmdTheme(transitionState = themeTransitionState) {
                 SettingsScreenRoot(
                     navController = navController,
                     startRoute = startRoute,
@@ -397,6 +431,8 @@ class SettingsActivity : ComponentActivity() {
     }
 
     companion object {
+        private const val SYSTEM_BAR_THEME_SWITCH_PROGRESS = 0.55f
+
         /** Intent extra: which category to land on directly, skipping the
          *  root list. See [CATEGORY_YOUTUBE]. */
         const val EXTRA_OPEN_CATEGORY = "open_category"

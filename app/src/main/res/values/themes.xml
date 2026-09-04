@@ -1,23 +1,25 @@
 <?xml version="1.0" encoding="utf-8"?>
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Android requires a manifest-time window theme before Compose starts. -->
     <style name="Theme.Xmd" parent="Theme.Material3.Dark.NoActionBar">
         <item name="android:windowBackground">#0E1521</item>
         <item name="android:colorBackground">#0E1521</item>
-        <item name="android:statusBarColor">#161D2A</item>
-        <item name="android:navigationBarColor">#0E1521</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar">false</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
     </style>
 
     <style name="Theme.Xmd.Light" parent="Theme.Material3.Light.NoActionBar">
         <item name="android:windowBackground">#FAFAFA</item>
         <item name="android:colorBackground">#FAFAFA</item>
-        <item name="android:statusBarColor">#F3F3F6</item>
-        <item name="android:navigationBarColor">#FAFAFA</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:enforceNavigationBarContrast" tools:targetApi="q">false</item>
     </style>
 
     <style name="Theme.Xmd.Transparent" parent="Theme.Xmd">

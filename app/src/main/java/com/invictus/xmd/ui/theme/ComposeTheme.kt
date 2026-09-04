@@ -1,28 +1,22 @@
 package com.invictus.xmd.ui.theme
 
-import android.app.Activity
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.Typography
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.view.WindowCompat
 import com.invictus.xmd.R
 import com.invictus.xmd.core.Settings
-import kotlinx.coroutines.flow.first
 
 private val HeadingFont = FontFamily(
     Font(R.font.space_grotesk_semibold, weight = FontWeight.SemiBold),
@@ -74,30 +68,6 @@ fun XmdTheme(
 
     val colorScheme = remember(context, theme, isDark, isAmoled) {
         resolveXmdColorScheme(context, theme, isDark, isAmoled)
-    }
-
-    val view = LocalView.current
-    if (!view.isInEditMode) {
-        androidx.compose.runtime.LaunchedEffect(isDark, isAmoled, colorScheme) {
-            if (transitionState.isAnimating) {
-                // Wait for the circular reveal to fully cover the screen before
-                // flipping the bars -- the reveal is a circle expanding from the
-                // tap point, so it doesn't reach the screen edges (where the
-                // status/nav bars sit) until the animation is essentially done.
-                // Flipping earlier (e.g. at 55%) made the bars visibly change
-                // color before the reveal had drawn over them, so they'd pop to
-                // the new theme while the rest of the screen was still mid-wipe.
-                androidx.compose.runtime.snapshotFlow {
-                    transitionState.isAnimating
-                }.first { isAnimating -> !isAnimating }
-            }
-            val window = (view.context as? Activity)?.window ?: return@LaunchedEffect
-            window.statusBarColor = colorScheme.surfaceContainerLow.toArgb()
-            window.navigationBarColor = colorScheme.background.toArgb()
-            val insetsController = WindowCompat.getInsetsController(window, view)
-            insetsController.isAppearanceLightStatusBars = !isDark
-            insetsController.isAppearanceLightNavigationBars = !isDark
-        }
     }
 
     CompositionLocalProvider(

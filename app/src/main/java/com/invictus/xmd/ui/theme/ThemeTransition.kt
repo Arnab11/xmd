@@ -92,7 +92,7 @@ val LocalThemeTransitionState = staticCompositionLocalOf<ThemeTransitionState?> 
 @Composable
 fun rememberThemeTransitionState(): ThemeTransitionState = remember { ThemeTransitionState() }
 
-private const val THEME_REVEAL_DURATION_MS = 350
+private const val THEME_REVEAL_DURATION_MS = 650
 private const val THEME_CONTENT_SETTLE_DELAY_MS = 100L
 private val THEME_REVEAL_FEATHER = 30.dp
 
