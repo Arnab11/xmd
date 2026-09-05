@@ -39,6 +39,12 @@ object Settings {
 
     private lateinit var prefs: SharedPreferences
 
+    /** Application context, kept around for callers (e.g. the Browser's DoH
+     *  HTTP disk cache in BrowserViewModel) that need a cache/files dir but
+     *  aren't themselves an Activity/Fragment/AndroidViewModel. */
+    private lateinit var appContext: Context
+    fun appContext(): Context = appContext
+
     private val _themeFlow = kotlinx.coroutines.flow.MutableStateFlow(AppTheme.Default)
     val themeFlow: kotlinx.coroutines.flow.StateFlow<AppTheme> = _themeFlow
 
@@ -49,7 +55,8 @@ object Settings {
     val amoledModeFlow: kotlinx.coroutines.flow.StateFlow<Boolean> = _amoledModeFlow
 
     fun init(context: Context) {
-        prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        appContext = context.applicationContext
+        prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         _themeFlow.value = appTheme()
         _darkModeFlow.value = isDarkMode()
         _amoledModeFlow.value = isAmoledMode()

@@ -7,9 +7,11 @@ import com.invictus.xmd.core.MediaSniffer
 import com.invictus.xmd.core.Settings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import okhttp3.Cache
 import okhttp3.ConnectionPool
 import okhttp3.Dispatcher
 import okhttp3.OkHttpClient
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 /**
@@ -99,8 +101,12 @@ class BrowserViewModel : ViewModel() {
             if (signature == dohClientSignature) return dohClient
             val built = OkHttpClient.Builder()
                 .dns(DnsOverHttpsResolver(dohUrl))
-                .connectTimeout(15, TimeUnit.SECONDS)
-                .readTimeout(20, TimeUnit.SECONDS)
+                // 15s/20s let a single hung sub-resource stall that long
+                // before failing back -- WebView's own network stack times
+                // out far sooner than that, so a slow host used to look
+                // like the whole page hanging instead of one broken image.
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(12, TimeUnit.SECONDS)
                 // Default OkHttp concurrency (64 total / 5 per host) throttles
                 // pages that pull many sub-resources from the same CDN host --
                 // each shouldInterceptRequest call blocks its WebView thread
@@ -112,6 +118,16 @@ class BrowserViewModel : ViewModel() {
                     maxRequestsPerHost = 16
                 })
                 .connectionPool(ConnectionPool(24, 5, TimeUnit.MINUTES))
+                // Without this, every DoH-routed request re-fetches its
+                // resource over the network even when the origin sent
+                // Cache-Control/ETag/Last-Modified that would let it be
+                // served from disk or cheaply revalidated -- WebView's own
+                // native stack always gets this for free, so pages full of
+                // shared/repeated assets (fonts, CDN JS, analytics, icons)
+                // were paying a full re-download on every single page in
+                // the session, and again on every revisit, purely because
+                // Private DNS was on.
+                .cache(Cache(File(Settings.appContext().cacheDir, "browser_doh_cache"), 20L * 1024 * 1024))
                 .build()
             dohClient = built
             dohClientSignature = signature

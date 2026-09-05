@@ -887,17 +887,26 @@ class BrowserFragment : Fragment() {
             }
 
             /**
-             * Routes every request the page makes -- the page itself and
-             * every sub-resource (images, JS, CSS, XHR, etc.) -- through
-             * OkHttp using DnsOverHttpsResolver, so DNS resolution follows
-             * the Browser's Private DNS setting instead of the system
-             * resolver. Only GET requests with no body are intercepted;
-             * anything else (POST forms, main-frame navigations WebView
-             * needs to handle itself for redirects/cookies/etc.) is left
-             * to fall through to WebView's own network stack by returning
-             * null, same as if this override didn't exist. When DNS mode
-             * is OFF, browserViewModel.currentDohClient() returns null and every request
-             * falls through untouched -- zero overhead in that mode.
+             * Routes every *sub-resource* GET request a page makes (images,
+             * JS, CSS, XHR, etc.) through OkHttp using DnsOverHttpsResolver,
+             * so DNS resolution for those follows the Browser's Private DNS
+             * setting instead of the system resolver. The main-frame
+             * document request itself is deliberately NOT intercepted (see
+             * the isForMainFrame check below) -- WebView's own network
+             * stack handles top-level navigation, redirects, HSTS, Safe
+             * Browsing, etc. natively. Trade-off worth knowing: this means
+             * the page's own hostname is resolved via system DNS, not the
+             * chosen DoH provider -- only its sub-resources get DoH
+             * resolution. There's no WebView API that lets us hand it a
+             * pre-resolved IP for a request and still have it do the fetch
+             * itself, so "DoH for literally every hostname including the
+             * main frame" and "no extra overhead on the page's critical
+             * request" aren't both achievable here.
+             * Non-GET requests (POST forms, etc.) also fall through to
+             * WebView's own network stack by returning null, same as if
+             * this override didn't exist. When DNS mode is OFF,
+             * browserViewModel.currentDohClient() returns null and every
+             * request falls through untouched -- zero overhead in that mode.
              */
             override fun shouldInterceptRequest(
                 view: WebView, request: android.webkit.WebResourceRequest
@@ -919,6 +928,20 @@ class BrowserFragment : Fragment() {
                 }
 
                 sniffRequest(view, request)
+
+                // Main-frame navigations (the page document itself) are
+                // deliberately left to WebView's own network stack -- see
+                // the class doc above. This used to be aspirational rather
+                // than enforced: nothing here actually checked
+                // isForMainFrame, so the top-level document was silently
+                // getting proxied through OkHttp too, on top of every
+                // sub-resource -- doubling the connection/TLS setup cost on
+                // the one request that's on the critical path of the whole
+                // page load, and giving up WebView's own handling of
+                // top-level redirects, HSTS, Safe Browsing, etc. for no
+                // benefit (the DoH setting still applies to every
+                // sub-resource that follows).
+                if (request.isForMainFrame) return null
 
                 if (request.method != "GET") return null
                 val client = browserViewModel.currentDohClient() ?: return null
@@ -942,7 +965,22 @@ class BrowserFragment : Fragment() {
 
                 return try {
                     val reqBuilder = Request.Builder().url(url)
-                    request.requestHeaders.forEach { (name, value) -> reqBuilder.header(name, value) }
+                    request.requestHeaders.forEach { (name, value) ->
+                        // Chromium/WebView sends its own "Accept-Encoding"
+                        // (typically including "br" -- Brotli -- which
+                        // OkHttp can't decode). Forwarding it verbatim
+                        // disables OkHttp's transparent gzip handling too
+                        // (it only kicks in when OkHttp set the header
+                        // itself), so a Brotli or gzip response could reach
+                        // WebView still compressed with headers that no
+                        // longer match what's actually in the stream --
+                        // manifesting as a stalled/broken load rather than
+                        // a clean failure. Let OkHttp negotiate and decode
+                        // encoding itself instead.
+                        if (!name.equals("Accept-Encoding", ignoreCase = true)) {
+                            reqBuilder.header(name, value)
+                        }
+                    }
                     val response = client.newCall(reqBuilder.build()).execute()
                     // OkHttp's default CookieJar is CookieJar.NO_COOKIES -- it
                     // doesn't touch WebView's CookieManager at all, so any
