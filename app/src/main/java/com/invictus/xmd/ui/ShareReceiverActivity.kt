@@ -124,7 +124,7 @@ class ShareReceiverActivity : AppCompatActivity() {
                         defaultSavePath = defaultSavePath(),
                         magnetDisplayName = { magnetDisplayName(it) },
                         extractYoutubeFallbackName = { extractYoutubeFallbackName(it) },
-                        probeYoutubeTitle = { probeYoutubeTitle(it) },
+                        probeYoutubeTitle = { link -> withContext(Dispatchers.IO) { probeYoutubeTitle(link) } },
                         probeRealFilename = { link ->
                             withContext(Dispatchers.IO) { DownloadEngine.probeRealFilename(filenameClient, link) }
                         },
