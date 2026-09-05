@@ -6,7 +6,7 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.ui.graphics.Color
-import com.invictus.xmd.core.Settings
+import com.invictus.xmd.preferences.Settings
 
 private val backgroundPureBlack = Color.Black
 private val surfacePureBlack = Color.Black

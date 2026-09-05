@@ -19,21 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.lifecycleScope
 import com.invictus.xmd.BuildConfig
 import com.invictus.xmd.R
-import com.invictus.xmd.core.CategoryDetector
-import com.invictus.xmd.core.DownloadCategory
-import com.invictus.xmd.core.DownloadEngine
-import com.invictus.xmd.core.FileNameUtils
-import com.invictus.xmd.core.ItemStatus
-import com.invictus.xmd.core.LinkParser
-import com.invictus.xmd.core.MediaPlatform
-import com.invictus.xmd.core.OnDuplicateStrategy
-import com.invictus.xmd.core.QueueItem
-import com.invictus.xmd.core.QueueRepository
-import com.invictus.xmd.core.Settings
-import com.invictus.xmd.core.StorageUtils
-import com.invictus.xmd.core.TorrentSession
 import java.util.UUID
-import com.invictus.xmd.core.YtDlpManager
 import com.invictus.xmd.service.DownloadService
 import com.invictus.xmd.ui.theme.XmdTheme
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +33,24 @@ import org.libtorrent4j.TorrentInfo
 import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import com.invictus.xmd.database.entities.QueueItem
+import com.invictus.xmd.domain.download.CategoryDetector
+import com.invictus.xmd.domain.download.DownloadCategory
+import com.invictus.xmd.domain.download.DownloadEngine
+import com.invictus.xmd.domain.download.ItemStatus
+import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.domain.download.YtDlpManager
+import com.invictus.xmd.domain.torrent.TorrentSession
+import com.invictus.xmd.preferences.Settings
+import com.invictus.xmd.repository.QueueRepository
+import com.invictus.xmd.ui.downloads.AddDownloadDialog
+import com.invictus.xmd.ui.downloads.AddTorrentDialog
+import com.invictus.xmd.ui.downloads.TorrentFileRow
+import com.invictus.xmd.ui.downloads.TorrentFilesUiState
+import com.invictus.xmd.utils.LinkParser
+import com.invictus.xmd.utils.storage.FileNameUtils
+import com.invictus.xmd.utils.storage.OnDuplicateStrategy
+import com.invictus.xmd.utils.storage.StorageUtils
 
 /**
  * Transparent floating activity that intercepts:

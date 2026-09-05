@@ -1,0 +1,184 @@
+package com.invictus.xmd.database
+
+import android.content.Context
+import androidx.room.Database
+import androidx.room.Room
+import androidx.room.RoomDatabase
+import androidx.room.TypeConverters
+import androidx.sqlite.db.SupportSQLiteDatabase
+import androidx.room.migration.Migration
+import com.invictus.xmd.database.converters.Converters
+import com.invictus.xmd.database.dao.BookmarkDao
+import com.invictus.xmd.database.dao.HistoryDao
+import com.invictus.xmd.database.dao.QueueItemDao
+import com.invictus.xmd.database.dao.ShortcutDao
+import com.invictus.xmd.database.entities.Bookmark
+import com.invictus.xmd.database.entities.HistoryEntry
+import com.invictus.xmd.database.entities.QueueItem
+import com.invictus.xmd.database.entities.Shortcut
+import com.invictus.xmd.preferences.Settings
+import com.invictus.xmd.ui.downloads.DownloadsFragment
+
+@Database(entities = [QueueItem::class, Shortcut::class, HistoryEntry::class, Bookmark::class], version = 12, exportSchema = false)
+@TypeConverters(Converters::class)
+abstract class AppDatabase : RoomDatabase() {
+
+    abstract fun queueItemDao(): QueueItemDao
+    abstract fun shortcutDao(): ShortcutDao
+    abstract fun historyDao(): HistoryDao
+    abstract fun bookmarkDao(): BookmarkDao
+
+    companion object {
+        @Volatile private var instance: AppDatabase? = null
+
+        // v1 -> v2: adds the bookmarks table (Browser tab speed-dial).
+        // Explicit migration instead of fallbackToDestructiveMigration so
+        // the existing queue_items table (and any in-flight downloads) on
+        // upgrading installs isn't wiped.
+        private val MIGRATION_1_2 = object : Migration(1, 2) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `bookmarks` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `title` TEXT NOT NULL,
+                        `url` TEXT NOT NULL,
+                        `faviconUrl` TEXT,
+                        `sortOrder` INTEGER NOT NULL DEFAULT 0,
+                        `createdAtMs` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // v2 -> v3: adds the history_entries table (Browser tab visited pages).
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `history_entries` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `url` TEXT NOT NULL,
+                        `title` TEXT NOT NULL,
+                        `visitedAtMs` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // v3 -> v4: adds YouTube (yt-dlp) fields to queue_items -- platform,
+        // the chosen quality's format selector/label, and percent-based
+        // progress (yt-dlp reports 0-100%, not bytes, unlike DIRECT/torrent).
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN platform TEXT NOT NULL DEFAULT 'DIRECT'")
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN mediaFormatSelector TEXT")
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN mediaFormatLabel TEXT")
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN progressPercent INTEGER NOT NULL DEFAULT -1")
+            }
+        }
+
+        // v4 -> v5: adds mediaStatusText to queue_items -- speed/ETA/size for
+        // the current yt-dlp stage, parsed from its raw stdout line (see
+        // Models.kt for why this can't come from the library's own callback
+        // alone during postprocessing stages).
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN mediaStatusText TEXT")
+            }
+        }
+
+        // v5 -> v6: adds filePath to queue_items -- the real absolute path a
+        // completed download was written to, captured directly at DONE time
+        // instead of reconstructed later (see Models.kt for why). Powers the
+        // "Open" action in DownloadsFragment.
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN filePath TEXT")
+            }
+        }
+
+        // v6 -> v7: adds customSaveDirPath to queue_items -- an optional
+        // per-item save-folder override for magnet/torrent downloads, set
+        // via the Editor dialog's Advanced -> Change (folder picker) when
+        // adding a torrent, instead of always using the Settings default.
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN customSaveDirPath TEXT")
+            }
+        }
+
+        // v7 -> v8: the old "bookmarks" table was actually the speed-dial
+        // shortcuts list -- renamed to "shortcuts" (and its Kotlin class to
+        // Shortcut) to free up "bookmarks" for the real bookmark feature
+        // added in v8 -> v9 below. A plain rename keeps every existing
+        // speed-dial tile intact across the upgrade.
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE bookmarks RENAME TO shortcuts")
+            }
+        }
+
+        // v8 -> v9: adds the real "bookmarks" table -- pages the user
+        // starred in the Browser toolbar, separate from the shortcuts
+        // speed-dial (see Bookmark.kt).
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `bookmarks` (
+                        `id` TEXT NOT NULL PRIMARY KEY,
+                        `title` TEXT NOT NULL,
+                        `url` TEXT NOT NULL,
+                        `faviconUrl` TEXT,
+                        `createdAtMs` INTEGER NOT NULL DEFAULT 0
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
+        // v9 -> v10: adds customIconPath to shortcuts -- an optional
+        // user-picked icon (copied into app-private storage) that overrides
+        // the live-fetched favicon for that speed-dial tile.
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE shortcuts ADD COLUMN customIconPath TEXT")
+            }
+        }
+
+        // v10 -> v11: adds selectedFileIndices to queue_items (torrent multi-file selection).
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN selectedFileIndices TEXT")
+            }
+        }
+
+        // v11 -> v12: adds downloadFinishedAtMs to queue_items.
+        private val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN downloadFinishedAtMs INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        fun get(context: Context): AppDatabase =
+            instance ?: synchronized(this) {
+                instance ?: Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "ff_queue.db"
+                )
+                    .addMigrations(
+                        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+                        MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12
+                    )
+                    // Safety net only for schema drift beyond the explicit
+                    // migrations above (shouldn't trigger in practice).
+                    .fallbackToDestructiveMigration()
+                    .build()
+                    .also { instance = it }
+            }
+    }
+}

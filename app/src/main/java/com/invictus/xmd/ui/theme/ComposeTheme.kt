@@ -16,7 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.invictus.xmd.R
-import com.invictus.xmd.core.Settings
+import com.invictus.xmd.preferences.Settings
 
 private val HeadingFont = FontFamily(
     Font(R.font.space_grotesk_semibold, weight = FontWeight.SemiBold),
