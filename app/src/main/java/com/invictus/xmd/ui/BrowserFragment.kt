@@ -307,12 +307,17 @@ class BrowserFragment : Fragment() {
                                 // Chrome shows its "current page" +
                                 // "link you copied" rows the instant you
                                 // tap the omnibox, before you've typed
-                                // anything -- scheduleSuggest(text) used to
-                                // only ever run from onAddressTextChange,
-                                // so tapping an untouched address bar
-                                // showed nothing at all. Re-run it here too
-                                // so focusing alone is enough.
-                                if (focused) scheduleSuggest(addressBarText) else hideSuggestions()
+                                // anything of your own -- tapping the bar
+                                // doesn't clear its text first, so calling
+                                // scheduleSuggest(addressBarText) here ran
+                                // the *real* history/search filter against
+                                // the full page URL already sitting in the
+                                // field, which just matches that same
+                                // page's own history entries over and over
+                                // (see showQuickSuggestions doc). Only an
+                                // actual edit (onAddressTextChange) should
+                                // ever reach scheduleSuggest.
+                                if (focused) showQuickSuggestions() else hideSuggestions()
                             },
                             onGo = { loadUrl(addressBarText) },
                             clearFocusSignal = addressBarClearFocusSignal,
@@ -1110,15 +1115,14 @@ class BrowserFragment : Fragment() {
         suggestJob?.cancel()
         val trimmed = query.trim()
         if (trimmed.length < 2) {
-            // Nothing typed yet (including the instant the bar is first
-            // focused, before any edit) -- show the same "quick" rows
-            // Chrome shows at this point instead of an empty dropdown.
-            suggestJob = null
-            suggestionItems = quickSuggestions()
+            // Nothing typed yet -- show the same "quick" rows Chrome shows
+            // at this point instead of an empty dropdown.
+            showQuickSuggestions()
             return
         }
         val historyMatches = HistoryRepository.entries.value
             .filter { it.title.contains(trimmed, ignoreCase = true) || it.url.contains(trimmed, ignoreCase = true) }
+            .distinctBy { it.url }
             .take(MAX_HISTORY_SUGGESTIONS)
             .map { Suggestion.History(text = it.title, url = it.url) }
 
@@ -1139,11 +1143,32 @@ class BrowserFragment : Fragment() {
     }
 
     /**
+     * Shows the "nothing typed yet" rows directly, bypassing
+     * [scheduleSuggest]'s real history/search filter entirely.
+     *
+     * This -- not scheduleSuggest(addressBarText) -- is what
+     * onAddressFocusChange calls on focus. Tapping the address bar doesn't
+     * clear its text first (it still holds the loaded page's full URL), so
+     * running the real filter against that text just matches that same
+     * page's own history entries -- if you've reloaded/retried a page a
+     * few times, that's several near-identical rows and nothing else,
+     * drowning out the current-page/clipboard rows entirely. Only a real
+     * edit (onAddressTextChange -> scheduleSuggest) should ever reach the
+     * actual filter.
+     */
+    private fun showQuickSuggestions() {
+        suggestJob?.cancel()
+        suggestJob = null
+        suggestionItems = quickSuggestions()
+    }
+
+    /**
      * The address bar's "nothing typed yet" suggestions -- current page
      * (with copy/share/edit actions) and, if present, an http(s) link
      * sitting in the clipboard. Same rows Chrome shows the instant you tap
      * its omnibox, before you've typed a query of your own; see
-     * [scheduleSuggest] and [AddressBarSuggestions]'s doc comment.
+     * [showQuickSuggestions], [scheduleSuggest] and [AddressBarSuggestions]'s
+     * doc comment.
      */
     private fun quickSuggestions(): List<Suggestion> {
         val quick = mutableListOf<Suggestion>()
