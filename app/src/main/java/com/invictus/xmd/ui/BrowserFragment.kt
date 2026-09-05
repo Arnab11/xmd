@@ -211,13 +211,15 @@ class BrowserFragment : Fragment() {
     // urlInput/pageProgress/siteSecurityIcon/bookmarkStarButton/tabsCount
     // used to hold directly on their Views.
     private var addressBarText: String by mutableStateOf("")
-    // Read-only mirror of BrowserToolbarRow's TextField focus state,
-    // reported up via its onAddressFocusChange callback -- same gate
+    // Mirror of BrowserToolbarRow's TextField focus state, reported up via
+    // its onAddressFocusChange callback -- doubles as the gate
     // urlInput.hasFocus() used to provide in the old TextWatcher, so a
     // programmatic addressBarText set (onPageStarted, applyTabUiState,
-    // etc.) still doesn't trigger scheduleSuggest. Plain var, not Compose
-    // state: nothing renders off this directly.
-    private var addressBarFocused: Boolean = false
+    // etc.) still doesn't trigger scheduleSuggest, and also drives
+    // BrowserToolbarRow's own addressBarFocused param (hiding the new-tab/
+    // tabs/overflow buttons while editing), so it has to be real Compose
+    // state, not a plain var, for that second use to recompose.
+    private var addressBarFocused: Boolean by mutableStateOf(false)
     // Bumped (never read for its value, just its change) to tell
     // BrowserToolbarRow's composition to clear focus + hide the IME --
     // replaces the old urlInput.clearFocus() + hideSoftInputFromWindow()
@@ -297,6 +299,7 @@ class BrowserFragment : Fragment() {
                     toolbar = {
                         BrowserToolbarRow(
                             addressText = addressBarText,
+                            addressBarFocused = addressBarFocused,
                             onAddressTextChange = { text ->
                                 addressBarText = text
                                 if (addressBarFocused) scheduleSuggest(text)
@@ -702,6 +705,14 @@ class BrowserFragment : Fragment() {
         webView.settings.javaScriptEnabled = true
         webView.settings.domStorageEnabled = true
         webView.settings.databaseEnabled = true
+        // Pinch-to-zoom: builtInZoomControls actually enables the pinch
+        // gesture itself (it's not just "show the +/- buttons" despite the
+        // name); displayZoomControls=false just hides those on-screen
+        // +/- buttons so pinch is the only visible way to zoom, matching
+        // every normal mobile browser.
+        webView.settings.setSupportZoom(true)
+        webView.settings.builtInZoomControls = true
+        webView.settings.displayZoomControls = false
         // Android's WebView default (true) blocks any <video>/<audio> from
         // starting until a real tap on the player itself -- a page that
         // autoplays or auto-resumes via JS (no direct tap) silently never

@@ -93,6 +93,7 @@ import com.invictus.xmd.R
 @Composable
 fun BrowserToolbarRow(
     addressText: String,
+    addressBarFocused: Boolean,
     onAddressTextChange: (String) -> Unit,
     onAddressFocusChange: (Boolean) -> Unit,
     onGo: () -> Unit,
@@ -148,24 +149,26 @@ fun BrowserToolbarRow(
                     bookmarkFilled = bookmarkFilled,
                     onBookmarkTap = onBookmarkTap,
                 )
-                ToolbarIconButton(
-                    icon = Icons.Add,
-                    contentDescription = stringResource(R.string.action_new_tab),
-                    onClick = onNewTabTap,
-                    modifier = Modifier.padding(start = 2.dp),
-                )
-                TabsButton(
-                    count = tabsCount,
-                    contentDescription = stringResource(R.string.action_tabs),
-                    onClick = onTabsTap,
-                )
-                Box {
+                if (!addressBarFocused) {
                     ToolbarIconButton(
-                        icon = Icons.More,
-                        contentDescription = stringResource(R.string.action_more),
-                        onClick = onOverflowTap,
+                        icon = Icons.Add,
+                        contentDescription = stringResource(R.string.action_new_tab),
+                        onClick = onNewTabTap,
+                        modifier = Modifier.padding(start = 2.dp),
                     )
-                    overflowMenu()
+                    TabsButton(
+                        count = tabsCount,
+                        contentDescription = stringResource(R.string.action_tabs),
+                        onClick = onTabsTap,
+                    )
+                    Box {
+                        ToolbarIconButton(
+                            icon = Icons.More,
+                            contentDescription = stringResource(R.string.action_more),
+                            onClick = onOverflowTap,
+                        )
+                        overflowMenu()
+                    }
                 }
             }
         }
@@ -217,6 +220,9 @@ private fun AddressPill(
     // BrowserFragment.addressBarText) so a real edit in progress here
     // doesn't get its cursor position clobbered on every recomposition.
     var fieldValue by remember { mutableStateOf(TextFieldValue(text)) }
+    // See the onFocusChanged/onValueChange pair below -- catches the tap's
+    // own cursor-placement update so it doesn't clobber the select-all.
+    var pendingSelectAll by remember { mutableStateOf(false) }
     LaunchedEffect(text) {
         if (text != fieldValue.text) {
             // Cursor at the *start*, not the end -- this runs on every
@@ -265,8 +271,17 @@ private fun AddressPill(
                 BasicTextField(
                     value = fieldValue,
                     onValueChange = { newValue ->
-                        fieldValue = newValue
-                        onTextChange(newValue.text)
+                        fieldValue = if (pendingSelectAll) {
+                            // This is the tap-that-focused-us delivering its
+                            // own cursor placement (same text, selection
+                            // collapsed to the tap point) -- force it back
+                            // to a full selection instead, one time only.
+                            pendingSelectAll = false
+                            newValue.copy(selection = TextRange(0, newValue.text.length))
+                        } else {
+                            newValue
+                        }
+                        onTextChange(fieldValue.text)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
@@ -274,8 +289,13 @@ private fun AddressPill(
                         .onFocusChanged { state ->
                             // Chrome-style: focusing the bar selects the
                             // full text (was urlInput.selectAll() in the
-                            // XML version's focus-change listener).
+                            // XML version's focus-change listener). Setting
+                            // this here covers focus gained without a tap
+                            // (e.g. hardware-keyboard tab); pendingSelectAll
+                            // covers focus gained *by* a tap, whose own
+                            // selection update lands right after this.
                             if (state.isFocused) {
+                                pendingSelectAll = true
                                 fieldValue = fieldValue.copy(
                                     selection = TextRange(0, fieldValue.text.length)
                                 )
