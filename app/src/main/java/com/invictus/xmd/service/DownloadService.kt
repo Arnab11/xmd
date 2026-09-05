@@ -15,6 +15,7 @@ import com.invictus.xmd.core.CategoryDetector
 import com.invictus.xmd.core.DownloadCancelledException
 import com.invictus.xmd.core.DownloadCategory
 import com.invictus.xmd.core.DownloadEngine
+import com.invictus.xmd.core.ErrorUtils
 import com.invictus.xmd.core.ItemStatus
 import com.invictus.xmd.core.LinkParser
 import com.invictus.xmd.core.MediaPlatform
@@ -590,12 +591,15 @@ class DownloadService : LifecycleService() {
                         progressPercent = -1,
                         mediaStatusText = null
                     )
-                    else -> it.copy(
-                        status = ItemStatus.FAILED,
-                        error = if (cancelled) "Cancelled" else (e.message ?: "YouTube download failed"),
-                        progressPercent = -1,
-                        mediaStatusText = null
-                    )
+                    else -> {
+                        val cleanMsg = e.message?.let { msg -> ErrorUtils.cleanErrorText(msg).takeIf { it.isNotBlank() } }
+                        it.copy(
+                            status = ItemStatus.FAILED,
+                            error = if (cancelled) "Cancelled" else (cleanMsg ?: "YouTube download failed"),
+                            progressPercent = -1,
+                            mediaStatusText = null
+                        )
+                    }
                 }
             }
         } finally {
