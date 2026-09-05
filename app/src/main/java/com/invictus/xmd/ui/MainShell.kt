@@ -131,6 +131,7 @@ internal fun MainShell(
     onBottomBarDragStart: () -> Unit = {},
     onBottomBarDrag: (Float) -> Unit = {},
     onBottomBarDragEnd: () -> Unit = {},
+    overlayActive: Boolean = false,
     overlay: @Composable BoxScope.() -> Unit,
 ) {
     val density = LocalDensity.current
@@ -151,7 +152,11 @@ internal fun MainShell(
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
-            if (destination != MainDestination.Browser) {
+            // Hidden while the History/Bookmarks overlay is showing --
+            // SavedPagesScreen draws its own full-width header, and this bar
+            // was still reserving its own height underneath/above it, which
+            // showed up as a blank gap above the History/Bookmarks title.
+            if (destination != MainDestination.Browser && !overlayActive) {
                 DownloadsTopBar(
                     destination = destination,
                     searchActive = searchActive,

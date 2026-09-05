@@ -228,6 +228,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             override fun onPageSelected(position: Int) {
                 val dest = destinations.getOrNull(position) ?: return
                 if (mainDestination != dest) {
+                    // A physical swipe (unlike selectMainDestination, which
+                    // only runs for bottom-nav taps) skipped this cleanup,
+                    // so swiping off History/Bookmarks left the overlay
+                    // stuck on top of the newly-selected tab underneath.
+                    savedPagesDestination = null
                     mainDestination = dest
                     currentTabTag = tagFor(dest)
                     closeHeaderSearch()
@@ -404,8 +409,20 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         navigationItems = configuredNavigationItems()
         if (savedInstanceState == null) {
             mainDestination = configuredDefaultDestination()
-            currentTabTag = tagFor(mainDestination)
+        } else {
+            // Process death/recreation (e.g. the app was backgrounded -- say,
+            // while the user hopped into the Browser tab and hit back --
+            // long enough for the system to kill it): mainDestination's
+            // in-class default (Downloads) would otherwise win here, which
+            // re-shows the Downloads/Home header even though the user was
+            // last on the Browser tab. Restore whichever tab was actually
+            // showing so the header stays correctly hidden/shown.
+            mainDestination = savedInstanceState
+                .getString(STATE_MAIN_DESTINATION)
+                ?.let { savedName -> MainDestination.entries.firstOrNull { it.name == savedName } }
+                ?: configuredDefaultDestination()
         }
+        currentTabTag = tagFor(mainDestination)
         savedPagesDestination = savedInstanceState
             ?.getString(STATE_SAVED_PAGES_DESTINATION)
             ?.let { savedName ->
@@ -447,6 +464,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                     onOpenSettings = { openSettingsScreen() },
                     onToggleTheme = ::toggleDarkMode,
                     onViewPagerReady = ::setupViewPager,
+                    overlayActive = savedPagesDestination != null,
                     onBottomBarDragStart = {
                         if (mainViewPager?.isFakeDragging == false) {
                             mainViewPager?.beginFakeDrag()
@@ -719,6 +737,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_MAIN_DESTINATION, mainDestination.name)
         savedPagesDestination?.let { destination ->
             outState.putString(STATE_SAVED_PAGES_DESTINATION, destination.name)
         }
@@ -1656,5 +1675,6 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         private const val TAG_BROWSER   = "browser"
         private const val TAG_DOWNLOADS = "downloads"
         private const val STATE_SAVED_PAGES_DESTINATION = "saved_pages_destination"
+        private const val STATE_MAIN_DESTINATION = "main_destination"
     }
 }
