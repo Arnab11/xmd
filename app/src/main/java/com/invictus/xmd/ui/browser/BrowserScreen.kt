@@ -31,6 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -56,6 +59,8 @@ internal data class BrowserDownloadPrompt(
 @Composable
 internal fun BrowserScreen(
     speedDialVisible: Boolean,
+    addressBarFocused: Boolean = false,
+    onDismissAddressBar: () -> Unit = {},
     toolbar: @Composable () -> Unit,
     onWebViewHostReady: (SwipeRefreshLayout, FrameLayout) -> Unit,
     speedDial: @Composable () -> Unit,
@@ -66,6 +71,9 @@ internal fun BrowserScreen(
     dialogs: @Composable BoxScope.() -> Unit,
     tabsOverlay: @Composable BoxScope.() -> Unit,
 ) {
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             toolbar()
@@ -82,6 +90,21 @@ internal fun BrowserScreen(
                     Box(modifier = Modifier.fillMaxSize()) {
                         speedDial()
                     }
+                }
+                if (addressBarFocused) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = {
+                                    focusManager.clearFocus()
+                                    keyboardController?.hide()
+                                    onDismissAddressBar()
+                                },
+                            ),
+                    )
                 }
                 Box(
                     modifier = Modifier
