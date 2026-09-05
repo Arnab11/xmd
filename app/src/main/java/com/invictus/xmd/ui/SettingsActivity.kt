@@ -648,8 +648,24 @@ private fun BrowserRoute(onImportWebsites: () -> Unit, onExportWebsites: () -> U
     var adblockEnabled by remember {
         mutableStateOf(com.invictus.xmd.core.Settings.adblockEnabled())
     }
+    var blockedDomainCount by remember {
+        mutableStateOf(com.invictus.xmd.core.AdblockFilter.blockedDomainCount())
+    }
+    // The host list loads off the main thread (AdblockFilter.init, called
+    // from FfApp.onCreate) and a background remote refresh may still be
+    // in flight -- poll briefly rather than wiring up a dedicated
+    // callback/broadcast just for this settings subtitle. Stops once the
+    // count is non-zero and stable, or after a few seconds either way.
+    LaunchedEffect(Unit) {
+        repeat(10) {
+            kotlinx.coroutines.delay(500)
+            val count = com.invictus.xmd.core.AdblockFilter.blockedDomainCount()
+            if (count != blockedDomainCount) blockedDomainCount = count
+        }
+    }
     SettingsBrowserScreen(
         adblockEnabled = adblockEnabled,
+        blockedDomainCount = blockedDomainCount,
         onAdblockChanged = { checked ->
             adblockEnabled = checked
             com.invictus.xmd.core.Settings.setAdblockEnabled(checked)

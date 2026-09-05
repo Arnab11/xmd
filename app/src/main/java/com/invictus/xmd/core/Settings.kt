@@ -150,6 +150,16 @@ object Settings {
         prefs.edit().putBoolean(KEY_ADBLOCK_ENABLED, value).apply()
     }
 
+    // Epoch millis of the last successful AdblockListUpdater.refresh() --
+    // 0L means "never" (first run, or every attempted refresh has failed
+    // so far), which AdblockFilter treats as always-stale so it keeps
+    // retrying on subsequent Browser opens rather than giving up forever.
+    private const val KEY_ADBLOCK_LIST_UPDATED_AT = "browser_adblock_list_updated_at"
+    fun adblockListUpdatedAt(): Long = prefs.getLong(KEY_ADBLOCK_LIST_UPDATED_AT, 0L)
+    fun setAdblockListUpdatedAt(value: Long) {
+        prefs.edit().putLong(KEY_ADBLOCK_LIST_UPDATED_AT, value).apply()
+    }
+
     // ── Browser: Private DNS (DNS-over-HTTPS for in-app browsing only) ────
     enum class DnsMode { ADGUARD, GOOGLE, CLOUDFLARE, CLOUDFLARE_ADBLOCK, OFF, CUSTOM }
 

@@ -2,7 +2,14 @@
 # starting with # are ignored. Matches the request host exactly or any
 # subdomain of it (see AdblockFilter.isBlocked). Curated set of common
 # ad-serving, analytics, and tracking domains; not a full EasyList port.
-# Update by editing this file and cutting a new app release.
+#
+# This is the OFFLINE FALLBACK only -- AdblockFilter also fetches a much
+# larger, actively-maintained hosts-format list over the network
+# (AdblockListUpdater) and merges it with this file, refreshing weekly.
+# This file is what's used before that first fetch completes (or if the
+# device is offline / every remote source fails), so it's still worth
+# keeping reasonably current -- update by editing this file and cutting
+# a new app release.
 
 # --- Google ads / analytics ---
 doubleclick.net
@@ -15,8 +22,11 @@ adservice.google.com
 pagead2.googlesyndication.com
 
 # --- Facebook / Meta trackers ---
+# (facebook.com/tr is a *path* on facebook.com itself, not a separate
+# host, so it can't live in this file -- see blockedUrlPatterns in
+# AdblockFilter.kt, which matches against the full URL instead of just
+# the host, for that and the other path-based entries below.)
 connect.facebook.net
-facebook.com/tr
 an.facebook.com
 
 # --- Major ad networks ---
@@ -94,3 +104,148 @@ adsafeprotected.com
 moatads.com
 adform.com
 serving-sys.com
+
+# --- Amazon / retail ad tech ---
+amazon-adsystem.com
+assoc-amazon.com
+adsymptotic.com
+
+# --- Mobile app-install / in-app ad SDKs ---
+mopub.com
+vungle.com
+chartboost.com
+ironsrc.com
+supersonicads.com
+tapjoy.com
+inmobi.com
+startapp.com
+adcolony.com
+appnext.com
+fyber.com
+smaato.com
+adjust.com
+appsflyer.com
+kochava.com
+singular.net
+branch.io
+liftoff.io
+adcash.com
+adtdp.com
+mintegral.com
+digitalturbine.com
+flurry.com
+
+# --- Header bidding / programmatic SSPs & DSPs ---
+indexexchange.com
+sonobi.com
+sovrn.com
+lijit.com
+gumgum.com
+triplelift.com
+spotx.tv
+spotxchange.com
+telaria.com
+freewheel.com
+yieldlab.net
+adition.net
+smartadserver.com
+appnexus.com
+contextweb.com
+districtm.io
+onetag-sys.com
+loopme.com
+verizonmedia.com
+oath.com
+adsafeprotected.com
+adform.net
+bidr.io
+33across.com
+tremorhub.com
+undertone.com
+sharethis.com
+
+# --- Popunder / redirect / malvertising networks common on
+#     streaming & torrent sites ---
+propellerads.com
+popads.net
+popcash.net
+adsterra.com
+hilltopads.net
+exoclick.com
+juicyads.com
+trafficjunky.net
+mgid.com
+adnium.com
+galaksion.com
+richads.com
+clickadu.com
+adskeeper.co.uk
+revcontent.com
+zedo.com
+bidvertiser.com
+onclkds.com
+exosrv.com
+trafficfactory.biz
+adtng.com
+smartyads.com
+yellowblue.io
+popmyads.com
+cpmstar.com
+adprime.com
+clickaine.com
+
+# --- Video ad / VAST-VPAID infra ---
+imasdk.googleapis.com
+ads.yahoo.com
+video-ads.tv
+tremorvideo.com
+teads.tv
+innovid.com
+springserve.com
+aniview.com
+
+# --- Yandex / regional ad-tech ---
+# (yandex.ru/ads is a path, not a host -- see blockedUrlPatterns.)
+mc.yandex.ru
+an.yandex.ru
+
+# --- Social ad pixels / trackers beyond FB ---
+# (pinimg.com/ct, tiktok.com/ads, snapchat.com/ads are paths on
+# otherwise-legitimate hosts -- see blockedUrlPatterns, not this file.)
+ads-twitter.com
+analytics.twitter.com
+ads.linkedin.com
+px.ads.linkedin.com
+analytics.tiktok.com
+sc-static.net
+
+# --- Consent/CMP-adjacent ad measurement, viewability, fraud detection ---
+moatads.com
+doubleverify.com
+integralads.com
+adsafeprotected.com
+pixel.wp.com
+scorecardresearch.com
+comscore.com
+nielsen.com
+
+# --- Push/notification & in-page ad injection abused on piracy sites ---
+onclickmax.com
+adsyield.com
+prpops.com
+displaycontent.online
+push.house
+pushwelcome.com
+adskeeper.com
+clickfuse.com
+
+# --- Additional analytics / telemetry ---
+matomo.cloud
+piwik.pro
+fullstory.com
+heap.io
+inspectlet.com
+luckyorange.com
+optimizely.com
+kissmetrics.com
+woopra.com

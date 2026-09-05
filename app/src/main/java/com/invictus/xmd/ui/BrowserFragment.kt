@@ -791,6 +791,15 @@ class BrowserFragment : Fragment() {
                 if (!tab.isPrivate && !url.isNullOrBlank() && url.startsWith("http")) {
                     HistoryRepository.record(url, title)
                 }
+                // Hides leftover ad containers that shouldInterceptRequest's
+                // network-level blocking can't catch -- ad markup the page
+                // rendered itself (same-origin ad iframes, server-rendered
+                // ad slots) rather than fetched via a separately-blockable
+                // request. Cheap (a single style tag) and idempotent, so
+                // running it again on redirects/re-finishes is harmless.
+                if (Settings.adblockEnabled()) {
+                    view.evaluateJavascript(com.invictus.xmd.core.AdblockFilter.cosmeticHideScript(), null)
+                }
                 if (isCurrentTab(tab)) {
                     toolbarProgressVisible = false
                     webViewSwipeRefresh.isRefreshing = false
@@ -912,15 +921,17 @@ class BrowserFragment : Fragment() {
                 view: WebView, request: android.webkit.WebResourceRequest
             ): android.webkit.WebResourceResponse? {
                 // Cheapest possible check first, ahead of even the media
-                // sniff -- a Set lookup on the request's own host, no
-                // network, no DNS. Applies regardless of method or DNS
-                // mode: an ad request is an ad request whether it's a GET
-                // for an image or a POST beacon. An empty 200 (rather than
+                // sniff -- a Set lookup on the request's host (plus a
+                // short substring scan of the full URL for path-based ad
+                // requests -- see AdblockFilter.isBlocked), no network, no
+                // DNS. Applies regardless of method or DNS mode: an ad
+                // request is an ad request whether it's a GET for an
+                // image or a POST beacon. An empty 200 (rather than
                 // returning null and letting it 404/timeout naturally) is
                 // what keeps pages from stalling on a blocked request or
                 // logging it as a load failure.
                 if (Settings.adblockEnabled() &&
-                    com.invictus.xmd.core.AdblockFilter.isBlocked(request.url.host)
+                    com.invictus.xmd.core.AdblockFilter.isBlocked(request.url)
                 ) {
                     return android.webkit.WebResourceResponse(
                         "text/plain", "UTF-8", java.io.ByteArrayInputStream(ByteArray(0))

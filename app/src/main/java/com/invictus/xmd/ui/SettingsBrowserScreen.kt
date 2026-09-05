@@ -28,6 +28,7 @@ import com.invictus.xmd.R
 @Composable
 fun SettingsBrowserScreen(
     adblockEnabled: Boolean,
+    blockedDomainCount: Int,
     onAdblockChanged: (Boolean) -> Unit,
     onImportWebsites: () -> Unit,
     onExportWebsites: () -> Unit,
@@ -41,7 +42,14 @@ fun SettingsBrowserScreen(
         SettingsSectionCard {
             SwitchSettingRow(
                 title = stringResource(R.string.settings_adblock),
-                subtitle = stringResource(R.string.settings_adblock_hint),
+                // Falls back to the static hint while the list is still
+                // loading (or hasn't loaded at all yet) rather than
+                // showing a "Blocking 0 domains" that reads as broken.
+                subtitle = if (blockedDomainCount > 0) {
+                    stringResource(R.string.settings_adblock_hint_count, blockedDomainCount)
+                } else {
+                    stringResource(R.string.settings_adblock_hint)
+                },
                 checked = adblockEnabled,
                 onCheckedChange = onAdblockChanged,
             )
