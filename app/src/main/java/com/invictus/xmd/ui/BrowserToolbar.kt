@@ -219,7 +219,15 @@ private fun AddressPill(
     var fieldValue by remember { mutableStateOf(TextFieldValue(text)) }
     LaunchedEffect(text) {
         if (text != fieldValue.text) {
-            fieldValue = TextFieldValue(text, selection = TextRange(text.length))
+            // Cursor at the *start*, not the end -- this runs on every
+            // programmatic update (onPageStarted, a tapped suggestion,
+            // etc.), and a single-line BasicTextField auto-scrolls to keep
+            // the cursor visible. Putting it at the end meant a long URL
+            // that overflows the field's width always displayed scrolled
+            // to its tail (e.g. "...480p-720p-1080p-web-dl/") instead of
+            // showing the domain, which is what every other browser leads
+            // with when the bar isn't focused.
+            fieldValue = TextFieldValue(text, selection = TextRange(0))
         }
     }
     // Old urlInput.clearFocus() + hideSoftInputFromWindow(), now driven by

@@ -304,7 +304,15 @@ class BrowserFragment : Fragment() {
                             onAddressFocusChange = { focused ->
                                 addressBarFocused = focused
                                 updateHeaderInteractionState()
-                                if (!focused) hideSuggestions()
+                                // Chrome shows its "current page" +
+                                // "link you copied" rows the instant you
+                                // tap the omnibox, before you've typed
+                                // anything -- scheduleSuggest(text) used to
+                                // only ever run from onAddressTextChange,
+                                // so tapping an untouched address bar
+                                // showed nothing at all. Re-run it here too
+                                // so focusing alone is enough.
+                                if (focused) scheduleSuggest(addressBarText) else hideSuggestions()
                             },
                             onGo = { loadUrl(addressBarText) },
                             clearFocusSignal = addressBarClearFocusSignal,
@@ -367,6 +375,17 @@ class BrowserFragment : Fragment() {
                                         addressBarText = item.text
                                         loadUrl(item.text)
                                     }
+                                    is Suggestion.Clipboard -> {
+                                        addressBarText = item.url
+                                        loadUrl(item.url)
+                                    }
+                                    is Suggestion.CurrentPage -> {
+                                        // Already the page we're on -- the
+                                        // field already holds this exact
+                                        // URL, editable. Just dismiss the
+                                        // dropdown, same as tapping Edit.
+                                        hideSuggestions()
+                                    }
                                 }
                             },
                             onAddTap = { phrase ->
@@ -378,6 +397,9 @@ class BrowserFragment : Fragment() {
                                     Toast.LENGTH_SHORT,
                                 ).show()
                             },
+                            onCopyTap = ::copyLinkToClipboard,
+                            onShareTap = ::shareLink,
+                            onEditTap = { hideSuggestions() },
                         )
                     },
                     findInPage = {
@@ -1088,7 +1110,11 @@ class BrowserFragment : Fragment() {
         suggestJob?.cancel()
         val trimmed = query.trim()
         if (trimmed.length < 2) {
-            hideSuggestions()
+            // Nothing typed yet (including the instant the bar is first
+            // focused, before any edit) -- show the same "quick" rows
+            // Chrome shows at this point instead of an empty dropdown.
+            suggestJob = null
+            suggestionItems = quickSuggestions()
             return
         }
         val historyMatches = HistoryRepository.entries.value
@@ -1108,12 +1134,40 @@ class BrowserFragment : Fragment() {
             val searchResults = withContext(Dispatchers.IO) { SuggestApi.suggest(trimmed, suggestClient) }
             if (!isAdded) return@launch
             val merged = historyMatches + searchResults.map { Suggestion.Search(it) }
-            if (merged.isEmpty()) {
-                hideSuggestions()
-            } else {
-                suggestionItems = merged
-            }
+            suggestionItems = merged.ifEmpty { quickSuggestions() }
         }
+    }
+
+    /**
+     * The address bar's "nothing typed yet" suggestions -- current page
+     * (with copy/share/edit actions) and, if present, an http(s) link
+     * sitting in the clipboard. Same rows Chrome shows the instant you tap
+     * its omnibox, before you've typed a query of your own; see
+     * [scheduleSuggest] and [AddressBarSuggestions]'s doc comment.
+     */
+    private fun quickSuggestions(): List<Suggestion> {
+        val quick = mutableListOf<Suggestion>()
+        val pageUrl = currentPageUrl()
+        if (!speedDialVisible && pageUrl != null) {
+            quick.add(Suggestion.CurrentPage(text = pageUrl, url = pageUrl))
+        }
+        clipboardUrlOrNull()?.let { clip ->
+            if (clip != pageUrl) quick.add(Suggestion.Clipboard(text = clip, url = clip))
+        }
+        return quick
+    }
+
+    /** The clipboard's current text, if (and only if) it's a plain http(s)
+     *  link -- deliberately narrow, same as [currentPageUrl]'s own filter,
+     *  so a copied search phrase or random text never turns into a bogus
+     *  "link you copied" suggestion. */
+    private fun clipboardUrlOrNull(): String? {
+        val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE)
+                as? android.content.ClipboardManager ?: return null
+        val text = clipboard.primaryClip
+            ?.takeIf { it.itemCount > 0 }
+            ?.getItemAt(0)?.text?.toString()?.trim()
+        return text?.takeIf { it.startsWith("http://", ignoreCase = true) || it.startsWith("https://", ignoreCase = true) }
     }
 
     private fun hideSuggestions() {
