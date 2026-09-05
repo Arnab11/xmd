@@ -47,6 +47,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
@@ -85,6 +88,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -445,6 +449,19 @@ fun DownloadsScreen(
             if (list.isEmpty()) {
                 EmptyState(showIcon = query.isBlank())
             } else {
+                val onSwipeClearItem: (QueueItem) -> Unit = { swipedItem ->
+                    if (swipedItem.status == ItemStatus.DOWNLOADING ||
+                        swipedItem.status == ItemStatus.RETRYING ||
+                        swipedItem.status == ItemStatus.SAVING
+                    ) {
+                        onCancel(swipedItem)
+                    }
+                    onClear(swipedItem)
+                    if (swipedItem.id in selectedIds) {
+                        selectedIds = selectedIds - swipedItem.id
+                    }
+                }
+
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(start = 12.dp, top = 8.dp, end = 12.dp, bottom = 88.dp),
@@ -456,11 +473,13 @@ fun DownloadsScreen(
                             item = item,
                             isSelected = isSelected,
                             isSelectionMode = selectedIds.isNotEmpty(),
+                            modifier = Modifier.animateItem(),
                             onPauseResume = onPauseResume,
                             onCancel = onCancel,
                             onRetry = onRetry,
                             onClear = { deleteTargets = listOf(it) },
                             onOpen = onOpen,
+                            onSwipeClear = onSwipeClearItem,
                             onToggleSelect = { toggled ->
                                 selectedIds = if (toggled.id in selectedIds) {
                                     selectedIds - toggled.id
@@ -629,37 +648,88 @@ fun QueueItemRow(
     item: QueueItem,
     isSelected: Boolean = false,
     isSelectionMode: Boolean = false,
+    modifier: Modifier = Modifier,
     onPauseResume: (QueueItem) -> Unit,
     onCancel: (QueueItem) -> Unit,
     onRetry: (QueueItem) -> Unit,
     onClear: (QueueItem) -> Unit,
     onOpen: (QueueItem) -> Unit,
+    onSwipeClear: (QueueItem) -> Unit = onClear,
     onToggleSelect: (QueueItem) -> Unit = {},
 ) {
     val haptics = LocalHapticFeedback.current
+    val currentOnSwipeClear by rememberUpdatedState(onSwipeClear)
+    val currentItem by rememberUpdatedState(item)
+
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.EndToStart) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                currentOnSwipeClear(currentItem)
+                true
+            } else {
+                false
+            }
+        },
+    )
+
+    LaunchedEffect(item.id) {
+        if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+            dismissState.reset()
+        }
+    }
+
     val cardBorder = if (isSelected) {
         BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary)
     } else {
         BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     }
     val cardContainerColor = if (isSelected) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.22f)
+        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+            .compositeOver(MaterialTheme.colorScheme.surfaceContainer)
     } else {
         MaterialTheme.colorScheme.surfaceContainer
     }
 
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 72.dp),
-        colors = CardDefaults.cardColors(containerColor = cardContainerColor),
-        shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = cardBorder,
+    SwipeToDismissBox(
+        state = dismissState,
+        modifier = modifier.fillMaxWidth(),
+        enableDismissFromStartToEnd = false,
+        enableDismissFromEndToStart = !isSelectionMode,
+        backgroundContent = {
+            val isSwiping = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart ||
+                dismissState.progress > 0.05f && dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
+            if (isSwiping && !isSelectionMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(horizontal = 20.dp),
+                    contentAlignment = Alignment.CenterEnd,
+                ) {
+                    Icon(
+                        imageVector = Icons.DeleteSweep,
+                        contentDescription = stringResource(R.string.action_clear),
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.size(24.dp),
+                    )
+                }
+            }
+        },
     ) {
-        Row(
+        Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .defaultMinSize(minHeight = 72.dp),
+            colors = CardDefaults.cardColors(containerColor = cardContainerColor),
+            shape = RoundedCornerShape(14.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+            border = cardBorder,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
                 .height(IntrinsicSize.Min)
                 .combinedClickable(
                     onClick = {
@@ -695,7 +765,7 @@ fun QueueItemRow(
                 modifier = Modifier
                     .width(3.5.dp)
                     .fillMaxHeight()
-                    .background(colorForStatus(item.status)),
+                    .background(if (isSelected) MaterialTheme.colorScheme.primary else colorForStatus(item.status)),
             )
 
             AnimatedVisibility(
@@ -737,7 +807,12 @@ fun QueueItemRow(
                 modifier = Modifier
                     .weight(1f)
                     .defaultMinSize(minHeight = 72.dp)
-                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                    .padding(
+                        start = if (isSelectionMode) 8.dp else 14.dp,
+                        end = 14.dp,
+                        top = 11.dp,
+                        bottom = 11.dp,
+                    ),
                 verticalArrangement = Arrangement.Center,
             ) {
                 // Title row: filename + file type bubble
@@ -765,12 +840,12 @@ fun QueueItemRow(
                         progress = progressValue,
                         isDownloading = item.status == ItemStatus.DOWNLOADING,
                         isIndeterminate = indeterminate,
-                        modifier = Modifier.padding(top = 8.dp, bottom = 6.dp),
+                        modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
                         color = MaterialTheme.colorScheme.primary,
                         trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     )
                 } else {
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(7.dp))
                 }
 
                 // Status row: icon + unified status text + inline action buttons
@@ -863,20 +938,6 @@ fun QueueItemRow(
                                         tint = MaterialTheme.colorScheme.primary,
                                         onClick = { onRetry(item) },
                                     )
-                                    CompactIconButton(
-                                        icon = Icons.DeleteSweep,
-                                        contentDescription = stringResource(R.string.action_clear),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        onClick = { onClear(item) },
-                                    )
-                                }
-                                ItemStatus.DONE -> {
-                                    CompactIconButton(
-                                        icon = Icons.DeleteSweep,
-                                        contentDescription = stringResource(R.string.action_clear),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        onClick = { onClear(item) },
-                                    )
                                 }
                                 else -> Unit
                             }
@@ -886,6 +947,7 @@ fun QueueItemRow(
             }
         }
     }
+}
 }
 
 @Composable
@@ -1050,7 +1112,7 @@ private fun CompactIconButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     size: androidx.compose.ui.unit.Dp = 28.dp,
-    iconSize: androidx.compose.ui.unit.Dp = 16.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 20.dp,
 ) {
     Box(
         modifier = modifier
