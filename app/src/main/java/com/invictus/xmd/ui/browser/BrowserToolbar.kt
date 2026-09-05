@@ -221,19 +221,9 @@ private fun AddressPill(
     // BrowserFragment.addressBarText) so a real edit in progress here
     // doesn't get its cursor position clobbered on every recomposition.
     var fieldValue by remember { mutableStateOf(TextFieldValue(text)) }
-    // See the onFocusChanged/onValueChange pair below -- catches the tap's
-    // own cursor-placement update so it doesn't clobber the select-all.
-    var pendingSelectAll by remember { mutableStateOf(false) }
     LaunchedEffect(text) {
         if (text != fieldValue.text) {
-            // Cursor at the *start*, not the end -- this runs on every
-            // programmatic update (onPageStarted, a tapped suggestion,
-            // etc.), and a single-line BasicTextField auto-scrolls to keep
-            // the cursor visible. Putting it at the end meant a long URL
-            // that overflows the field's width always displayed scrolled
-            // to its tail (e.g. "...480p-720p-1080p-web-dl/") instead of
-            // showing the domain, which is what every other browser leads
-            // with when the bar isn't focused.
+            // Cursor at the start on programmatic update so the domain stays visible
             fieldValue = TextFieldValue(text, selection = TextRange(0))
         }
     }
@@ -272,43 +262,13 @@ private fun AddressPill(
                 BasicTextField(
                     value = fieldValue,
                     onValueChange = { newValue ->
-                        fieldValue = if (pendingSelectAll && newValue.text == fieldValue.text) {
-                            // This is the tap-that-focused-us delivering its
-                            // own cursor placement (same text, selection
-                            // collapsed to the tap point) -- force it back
-                            // to a full selection instead, one time only.
-                            // Guarded on the text being unchanged: if it
-                            // differs, this is a real edit (e.g. the first
-                            // letter typed right after focusing, when the
-                            // tap itself never produced a separate
-                            // selection-only callback), and forcing a full
-                            // select here would instead select the letter
-                            // that was just typed.
-                            pendingSelectAll = false
-                            newValue.copy(selection = TextRange(0, newValue.text.length))
-                        } else {
-                            pendingSelectAll = false
-                            newValue
-                        }
+                        fieldValue = newValue
                         onTextChange(fieldValue.text)
                     },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 14.dp, end = 4.dp)
+                        .padding(horizontal = 12.dp)
                         .onFocusChanged { state ->
-                            // Chrome-style: focusing the bar selects the
-                            // full text (was urlInput.selectAll() in the
-                            // XML version's focus-change listener). Setting
-                            // this here covers focus gained without a tap
-                            // (e.g. hardware-keyboard tab); pendingSelectAll
-                            // covers focus gained *by* a tap, whose own
-                            // selection update lands right after this.
-                            if (state.isFocused) {
-                                pendingSelectAll = true
-                                fieldValue = fieldValue.copy(
-                                    selection = TextRange(0, fieldValue.text.length)
-                                )
-                            }
                             onFocusChange(state.isFocused)
                         },
                     singleLine = true,
