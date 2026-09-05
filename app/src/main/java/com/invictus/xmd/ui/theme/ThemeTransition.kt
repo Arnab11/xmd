@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.view.drawToBitmap
 import kotlinx.coroutines.delay
 import kotlin.math.hypot
+import com.invictus.xmd.R
 
 class ThemeTransitionState {
     var isAnimating by mutableStateOf(false)

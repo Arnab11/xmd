@@ -11,21 +11,6 @@ import androidx.lifecycle.LifecycleService
 import androidx.lifecycle.lifecycleScope
 import com.invictus.xmd.FfApp
 import com.invictus.xmd.R
-import com.invictus.xmd.core.CategoryDetector
-import com.invictus.xmd.core.DownloadCancelledException
-import com.invictus.xmd.core.DownloadCategory
-import com.invictus.xmd.core.DownloadEngine
-import com.invictus.xmd.core.ErrorUtils
-import com.invictus.xmd.core.ItemStatus
-import com.invictus.xmd.core.LinkParser
-import com.invictus.xmd.core.MediaPlatform
-import com.invictus.xmd.core.NetworkMonitor
-import com.invictus.xmd.core.QueueItem
-import com.invictus.xmd.core.QueueRepository
-import com.invictus.xmd.core.Settings
-import com.invictus.xmd.core.TorrentEngine
-import com.invictus.xmd.core.YtDlpManager
-import com.invictus.xmd.ui.MainActivity
 import com.composables.icons.materialsymbols.roundedfilled.R as MaterialSymbols
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -40,6 +25,25 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import com.invictus.xmd.database.entities.QueueItem
+import com.invictus.xmd.domain.download.CategoryDetector
+import com.invictus.xmd.domain.download.DownloadCancelledException
+import com.invictus.xmd.domain.download.DownloadCategory
+import com.invictus.xmd.domain.download.DownloadEngine
+import com.invictus.xmd.domain.download.ItemStatus
+import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.domain.download.YtDlpManager
+import com.invictus.xmd.domain.torrent.TorrentEngine
+import com.invictus.xmd.network.NetworkMonitor
+import com.invictus.xmd.preferences.Settings
+import com.invictus.xmd.repository.QueueRepository
+import com.invictus.xmd.ui.MainActivity
+import com.invictus.xmd.ui.downloads.DownloadsScreen
+import com.invictus.xmd.ui.downloads.QueueItemRow
+import com.invictus.xmd.ui.home.HomeFragment
+import com.invictus.xmd.utils.ErrorUtils
+import com.invictus.xmd.utils.LinkParser
+import com.invictus.xmd.utils.formatRemainingTimeChrome
 
 /**
  * Runs the download queue with up to [Settings.maxConcurrentDownloads] items
@@ -1087,7 +1091,7 @@ class DownloadService : LifecycleService() {
         val remaining = (total - done).coerceAtLeast(0)
         var etaSec = if (total > 0) (remaining / speedBps).toLong() else -1L
         if (etaSec >= 0 && etaHoldKey != null) etaSec = holdSteadyEtaSec(etaHoldKey, etaSec)
-        val etaPart = if (etaSec >= 0) "  •  " + com.invictus.xmd.core.formatRemainingTimeChrome(etaSec) else ""
+        val etaPart = if (etaSec >= 0) "  •  " + com.invictus.xmd.utils.formatRemainingTimeChrome(etaSec) else ""
 
         return "$sizePart  •  $speedPart$etaPart"
     }

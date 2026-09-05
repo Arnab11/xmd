@@ -4,13 +4,13 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
-import com.invictus.xmd.core.BookmarkRepository
-import com.invictus.xmd.core.ShortcutRepository
-import com.invictus.xmd.core.AdblockFilter
-import com.invictus.xmd.core.FaviconLoader
-import com.invictus.xmd.core.HistoryRepository
-import com.invictus.xmd.core.QueueRepository
-import com.invictus.xmd.core.Settings
+import com.invictus.xmd.domain.browser.AdblockFilter
+import com.invictus.xmd.preferences.Settings
+import com.invictus.xmd.repository.BookmarkRepository
+import com.invictus.xmd.repository.HistoryRepository
+import com.invictus.xmd.repository.QueueRepository
+import com.invictus.xmd.repository.ShortcutRepository
+import com.invictus.xmd.utils.FaviconLoader
 
 class FfApp : Application() {
 

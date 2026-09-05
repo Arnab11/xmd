@@ -17,6 +17,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
 import com.invictus.xmd.R
+import com.invictus.xmd.preferences.Settings
 
 /**
  * App themes inspired by Aniyomi design
@@ -416,7 +417,7 @@ enum class AppTheme(
     }
 
     fun applyTo(activity: android.app.Activity) {
-      val isDark = com.invictus.xmd.core.Settings.isDarkMode()
+      val isDark = com.invictus.xmd.preferences.Settings.isDarkMode()
       activity.setTheme(if (isDark) R.style.Theme_Xmd else R.style.Theme_Xmd_Light)
       activity.window.setBackgroundDrawable(
         android.graphics.drawable.ColorDrawable(resolveCurrentXmdColorScheme(activity).background.toArgb())

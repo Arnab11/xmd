@@ -9,6 +9,8 @@ import androidx.compose.ui.graphics.vector.PathParser
 import androidx.compose.ui.unit.dp
 import com.composables.icons.materialsymbols.MaterialSymbols
 import com.composables.icons.materialsymbols.roundedfilled.*
+import com.invictus.xmd.database.entities.Bookmark
+import com.invictus.xmd.preferences.Settings
 
 typealias XmdIcons = Icons
 

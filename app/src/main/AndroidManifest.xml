@@ -94,7 +94,7 @@
             android:label="@string/challenge_title" />
 
         <activity
-            android:name=".ui.SettingsActivity"
+            android:name=".ui.settings.SettingsActivity"
             android:exported="false"
             android:label="@string/settings_title" />
 

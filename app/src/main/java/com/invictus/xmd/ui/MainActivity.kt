@@ -38,19 +38,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.invictus.xmd.R
 import com.invictus.xmd.BuildConfig
-import com.invictus.xmd.core.CategoryDetector
-import com.invictus.xmd.core.DnsOverHttpsResolver
-import com.invictus.xmd.core.DownloadCategory
-import com.invictus.xmd.core.FileNameUtils
-import com.invictus.xmd.core.ItemStatus
-import com.invictus.xmd.core.LinkParser
-import com.invictus.xmd.core.MediaPlatform
-import com.invictus.xmd.core.OnDuplicateStrategy
-import com.invictus.xmd.core.QueueItem
-import com.invictus.xmd.core.QueueRepository
-import com.invictus.xmd.core.ResolutionError
-import com.invictus.xmd.core.Settings
-import com.invictus.xmd.core.YtDlpManager
 import java.util.UUID
 import com.invictus.xmd.service.DownloadService
 import kotlinx.coroutines.Dispatchers
@@ -66,8 +53,6 @@ import android.content.Context
 import android.provider.OpenableColumns
 import androidx.activity.result.ActivityResultLauncher
 import androidx.compose.ui.graphics.toArgb
-import com.invictus.xmd.core.DownloadEngine
-import com.invictus.xmd.core.TorrentSession
 import com.invictus.xmd.ui.theme.rememberThemeTransitionState
 import com.invictus.xmd.ui.theme.resolveCurrentXmdColorScheme
 import kotlinx.coroutines.flow.first
@@ -79,6 +64,40 @@ import java.io.File
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
+import com.invictus.xmd.FfApp
+import com.invictus.xmd.database.entities.QueueItem
+import com.invictus.xmd.domain.download.CategoryDetector
+import com.invictus.xmd.domain.download.DownloadCategory
+import com.invictus.xmd.domain.download.DownloadEngine
+import com.invictus.xmd.domain.download.ItemStatus
+import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.domain.download.ResolutionError
+import com.invictus.xmd.domain.download.YtDlpManager
+import com.invictus.xmd.domain.torrent.TorrentSession
+import com.invictus.xmd.preferences.Settings
+import com.invictus.xmd.repository.QueueRepository
+import com.invictus.xmd.ui.browser.BrowserFragment
+import com.invictus.xmd.ui.browser.BrowserMenuAction
+import com.invictus.xmd.ui.browser.SavedPagesDestination
+import com.invictus.xmd.ui.browser.SavedPagesOverlay
+import com.invictus.xmd.ui.components.MainShell
+import com.invictus.xmd.ui.components.MainDestination
+import com.invictus.xmd.ui.components.MainNavigationItem
+import com.invictus.xmd.ui.components.AppMessageDialog
+import com.invictus.xmd.ui.components.AppMessageDialogState
+import com.invictus.xmd.ui.downloads.AddDownloadDialog
+import com.invictus.xmd.ui.downloads.AddTorrentDialog
+import com.invictus.xmd.ui.downloads.DownloadsFragment
+import com.invictus.xmd.ui.downloads.DownloadsSelectionUiState
+import com.invictus.xmd.ui.downloads.TorrentFileRow
+import com.invictus.xmd.ui.downloads.TorrentFilesUiState
+import com.invictus.xmd.ui.home.HomeFragment
+import com.invictus.xmd.ui.settings.DnsSettingsDialog
+import com.invictus.xmd.ui.settings.SettingsActivity
+import com.invictus.xmd.utils.LinkParser
+import com.invictus.xmd.utils.storage.FileNameUtils
+import com.invictus.xmd.utils.storage.OnDuplicateStrategy
+import com.invictus.xmd.utils.storage.StorageUtils
 
 class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFragment.Callbacks,
     HomeFragment.Callbacks {
@@ -820,7 +839,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     private fun defaultSavePath(): String = Settings.defaultSaveLocation()
 
     private fun resolveTreeUriToPath(treeUri: Uri): String? =
-        com.invictus.xmd.core.StorageUtils.resolveTreeUriToPath(treeUri)
+        com.invictus.xmd.utils.storage.StorageUtils.resolveTreeUriToPath(treeUri)
 
     private fun magnetDisplayName(link: String): String? {
         if (!LinkParser.isMagnetLink(link)) return null
