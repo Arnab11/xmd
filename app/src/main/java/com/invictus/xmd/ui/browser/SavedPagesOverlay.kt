@@ -37,19 +37,61 @@ internal fun SavedPagesOverlay(
 ) {
     key(destination) {
         when (destination) {
-            SavedPagesDestination.History -> HistoryOverlay(onBack, onOpenUrl)
-            SavedPagesDestination.Bookmarks -> BookmarksOverlay(onBack, onOpenUrl)
+            SavedPagesDestination.History -> SavedPagesListOverlay(
+                entriesFlow = HistoryRepository.entries,
+                titleRes = R.string.history_clear_all,
+                clearAllToastRes = R.string.history_cleared_toast,
+                getTitle = { it.title },
+                getUrl = { it.url },
+                onBack = onBack,
+                onOpenUrl = onOpenUrl,
+                onDelete = HistoryRepository::remove,
+                onClearAll = HistoryRepository::clearAll,
+                screen = { entries, query, onQueryChange, back, clearAll, tap, delete ->
+                    HistoryScreen(entries, query, onQueryChange, back, clearAll, tap, delete)
+                },
+            )
+            SavedPagesDestination.Bookmarks -> SavedPagesListOverlay(
+                entriesFlow = BookmarkRepository.bookmarks,
+                titleRes = R.string.bookmarks_clear_all,
+                clearAllToastRes = R.string.bookmarks_cleared_toast,
+                getTitle = { it.title },
+                getUrl = { it.url },
+                onBack = onBack,
+                onOpenUrl = onOpenUrl,
+                onDelete = BookmarkRepository::remove,
+                onClearAll = BookmarkRepository::clearAll,
+                screen = { entries, query, onQueryChange, back, clearAll, tap, delete ->
+                    BookmarkScreen(entries, query, onQueryChange, back, clearAll, tap, delete)
+                },
+            )
         }
     }
 }
 
 @Composable
-private fun HistoryOverlay(
+private fun <T> SavedPagesListOverlay(
+    entriesFlow: kotlinx.coroutines.flow.StateFlow<List<T>>,
+    titleRes: Int,
+    clearAllToastRes: Int,
+    getTitle: (T) -> String,
+    getUrl: (T) -> String,
     onBack: () -> Unit,
     onOpenUrl: (String) -> Unit,
+    onDelete: (T) -> Unit,
+    onClearAll: () -> Unit,
+    screen: @Composable (
+        entries: List<T>,
+        query: String,
+        onQueryChange: (String) -> Unit,
+        onBack: () -> Unit,
+        onClearAll: () -> Unit,
+        onTap: (T) -> Unit,
+        onDelete: (T) -> Unit,
+    ) -> Unit,
 ) {
     val context = LocalContext.current
-    val allEntries by HistoryRepository.entries.collectAsStateWithLifecycle()
+    val allEntries by entriesFlow.collectAsStateWithLifecycle()
     var query by remember { mutableStateOf("") }
     var confirmingClearAll by remember { mutableStateOf(false) }
     val visibleEntries = remember(allEntries, query) {
@@ -58,20 +100,20 @@ private fun HistoryOverlay(
             allEntries
         } else {
             allEntries.filter { entry ->
-                entry.title.contains(trimmedQuery, ignoreCase = true) ||
-                    entry.url.contains(trimmedQuery, ignoreCase = true)
+                getTitle(entry).contains(trimmedQuery, ignoreCase = true) ||
+                    getUrl(entry).contains(trimmedQuery, ignoreCase = true)
             }
         }
     }
 
-    HistoryScreen(
-        entries = visibleEntries,
-        query = query,
-        onQueryChange = { query = it },
-        onBack = onBack,
-        onClearAll = { confirmingClearAll = true },
-        onTap = { entry: HistoryEntry -> onOpenUrl(entry.url) },
-        onDelete = HistoryRepository::remove,
+    screen(
+        visibleEntries,
+        query,
+        { query = it },
+        onBack,
+        { confirmingClearAll = true },
+        { entry -> onOpenUrl(getUrl(entry)) },
+        onDelete,
     )
 
     if (confirmingClearAll) {
@@ -79,73 +121,16 @@ private fun HistoryOverlay(
             onDismissRequest = { confirmingClearAll = false },
             modifier = Modifier.wideDialogWidth(),
             properties = WideDialogProperties,
-            title = { Text(stringResource(R.string.history_clear_all)) },
+            title = { Text(stringResource(titleRes)) },
             confirmButton = {
                 TextButton(
                     onClick = {
                         confirmingClearAll = false
-                        HistoryRepository.clearAll()
-                        Toast.makeText(context, R.string.history_cleared_toast, Toast.LENGTH_SHORT).show()
+                        onClearAll()
+                        Toast.makeText(context, clearAllToastRes, Toast.LENGTH_SHORT).show()
                     },
                 ) {
-                    Text(stringResource(R.string.history_clear_all))
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { confirmingClearAll = false }) {
-                    Text(stringResource(android.R.string.cancel))
-                }
-            },
-        )
-    }
-}
-
-@Composable
-private fun BookmarksOverlay(
-    onBack: () -> Unit,
-    onOpenUrl: (String) -> Unit,
-) {
-    val context = LocalContext.current
-    val allBookmarks by BookmarkRepository.bookmarks.collectAsStateWithLifecycle()
-    var query by remember { mutableStateOf("") }
-    var confirmingClearAll by remember { mutableStateOf(false) }
-    val visibleBookmarks = remember(allBookmarks, query) {
-        val trimmedQuery = query.trim()
-        if (trimmedQuery.isEmpty()) {
-            allBookmarks
-        } else {
-            allBookmarks.filter { entry ->
-                entry.title.contains(trimmedQuery, ignoreCase = true) ||
-                    entry.url.contains(trimmedQuery, ignoreCase = true)
-            }
-        }
-    }
-
-    BookmarkScreen(
-        entries = visibleBookmarks,
-        query = query,
-        onQueryChange = { query = it },
-        onBack = onBack,
-        onClearAll = { confirmingClearAll = true },
-        onTap = { bookmark: Bookmark -> onOpenUrl(bookmark.url) },
-        onDelete = BookmarkRepository::remove,
-    )
-
-    if (confirmingClearAll) {
-        AlertDialog(
-            onDismissRequest = { confirmingClearAll = false },
-            modifier = Modifier.wideDialogWidth(),
-            properties = WideDialogProperties,
-            title = { Text(stringResource(R.string.bookmarks_clear_all)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmingClearAll = false
-                        BookmarkRepository.clearAll()
-                        Toast.makeText(context, R.string.bookmarks_cleared_toast, Toast.LENGTH_SHORT).show()
-                    },
-                ) {
-                    Text(stringResource(R.string.bookmarks_clear_all))
+                    Text(stringResource(titleRes))
                 }
             },
             dismissButton = {

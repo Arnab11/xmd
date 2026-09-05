@@ -113,6 +113,9 @@ import java.util.Locale
 import com.invictus.xmd.database.entities.QueueItem
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.utils.formatBytes
+import com.invictus.xmd.utils.formatSpeed
+import com.invictus.xmd.utils.formatRemainingTimeChrome
 import com.invictus.xmd.preferences.Settings
 import com.invictus.xmd.repository.QueueRepository
 import com.invictus.xmd.ui.MainActivity
@@ -1333,14 +1336,9 @@ private fun formatElapsedDuration(durationMs: Long): String {
  * this directly on every recomposition.
  */
 private fun buildSpeedEtaText(item: QueueItem): String {
-    val bps = item.speedBps
-    val speedStr = when {
-        bps >= 1_048_576.0 -> "%.1f MB/s".format(bps / 1_048_576.0)
-        bps >= 1_024.0 -> "%.0f KB/s".format(bps / 1_024.0)
-        else -> "%.0f B/s".format(bps)
-    }
+    val speedStr = formatSpeed(item.speedBps)
     val remaining = (item.bytesTotal - item.bytesDone).coerceAtLeast(0)
-    val etaSec = if (bps > 1.0 && item.bytesTotal > 0) (remaining / bps).toLong() else -1L
+    val etaSec = if (item.speedBps > 1.0 && item.bytesTotal > 0) (remaining / item.speedBps).toLong() else -1L
     return if (etaSec >= 0) "$speedStr  •  ${formatRemainingTimeChrome(etaSec)}" else speedStr
 }
 
@@ -1368,20 +1366,6 @@ private fun rememberThrottledSpeedEtaText(item: QueueItem): String? {
         }
     }
     return text
-}
-
-/**
- * Formats remaining time using [formatRemainingTimeChrome] -- see that
- * function for details.
- */
-private fun formatRemainingTimeChrome(totalSeconds: Long): String =
-    com.invictus.xmd.utils.formatRemainingTimeChrome(totalSeconds)
-
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1_073_741_824L -> "%.2f GB".format(bytes / 1_073_741_824.0)
-    bytes >= 1_048_576L -> "%.1f MB".format(bytes / 1_048_576.0)
-    bytes >= 1_024L -> "%.0f KB".format(bytes / 1_024.0)
-    else -> "$bytes B"
 }
 
 // ── Dialogs ───────────────────────────────────────────────────────────────

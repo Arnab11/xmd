@@ -51,40 +51,16 @@ fun SettingsBrowserScreen(
             .padding(16.dp),
     ) {
         SettingsSectionCard {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable(onClick = onSearchEngineClick)
-                    .padding(horizontal = 16.dp, vertical = 14.dp),
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.settings_search_engine),
-                        style = MaterialTheme.typography.bodyLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    val engineSubtitle = if (searchEngine == Settings.SearchEngine.CUSTOM && customSearchName.isNotBlank()) {
-                        "${stringResource(R.string.search_engine_custom)} ($customSearchName)"
-                    } else {
-                        searchEngine.displayName
-                    }
-                    Text(
-                        text = engineSubtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Icon(
-                    imageVector = Icons.ChevronRight,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.size(22.dp),
-                )
+            val engineSubtitle = if (searchEngine == Settings.SearchEngine.CUSTOM && customSearchName.isNotBlank()) {
+                "${stringResource(R.string.search_engine_custom)} ($customSearchName)"
+            } else {
+                searchEngine.displayName
             }
+            ClickableSettingRow(
+                title = stringResource(R.string.settings_search_engine),
+                subtitle = engineSubtitle,
+                onClick = onSearchEngineClick,
+            )
         }
 
         Spacer(Modifier.height(8.dp))
