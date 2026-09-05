@@ -267,8 +267,27 @@ class BrowserFragment : Fragment() {
     // later visit restore instantly instead of reloading from the network.
     private val webViews = mutableMapOf<Long, WebView>()
     private val webViewStates = mutableMapOf<Long, android.os.Bundle>()
+    private val tabThumbnails = mutableMapOf<Long, android.graphics.Bitmap>()
 
     private fun webViewFor(tab: BrowserTab?): WebView? = tab?.let { webViews[it.id] }
+
+    private fun captureTabThumbnail(tab: BrowserTab) {
+        if (tab.isPrivate) return
+        val view = webViewFor(tab) ?: return
+        if (view.width <= 0 || view.height <= 0) return
+        try {
+            val scale = 0.25f
+            val w = (view.width * scale).toInt().coerceAtLeast(1)
+            val h = (view.height * scale).toInt().coerceAtLeast(1)
+            val bitmap = android.graphics.Bitmap.createBitmap(w, h, android.graphics.Bitmap.Config.RGB_565)
+            val canvas = android.graphics.Canvas(bitmap)
+            canvas.scale(scale, scale)
+            view.draw(canvas)
+            tabThumbnails[tab.id]?.recycle()
+            tabThumbnails[tab.id] = bitmap
+        } catch (_: Throwable) {
+        }
+    }
 
     // Most-recently-used order of tab IDs that currently have a live
     // WebView, oldest first. Drives LRU eviction in evictIfNeeded().
@@ -534,6 +553,10 @@ class BrowserFragment : Fragment() {
                                 if (index != -1) closeTab(index)
                                 refreshTabsOverlaySnapshot()
                             },
+                            onCloseAll = {
+                                closeAllTabs()
+                                hideTabsOverlay()
+                            },
                             onAddNew = {
                                 addNewTab()
                                 hideTabsOverlay()
@@ -577,6 +600,8 @@ class BrowserFragment : Fragment() {
     override fun onDestroyView() {
         suggestJob?.cancel()
         tabs.toList().forEach(::destroyTabWebView)
+        tabThumbnails.values.forEach { it.recycle() }
+        tabThumbnails.clear()
         fullscreenView?.let { view ->
             (view.parent as? ViewGroup)?.removeView(view)
         }
@@ -1563,6 +1588,7 @@ class BrowserFragment : Fragment() {
         index: Int,
         previousView: WebView? = webViewFor(tabs.getOrNull(currentTabIndex))
     ) {
+        tabs.getOrNull(currentTabIndex)?.let { captureTabThumbnail(it) }
         currentTabIndex = index
         val tab = tabs[index]
         // CookieManager.setAcceptCookie is a single global flag, not scoped
@@ -1627,12 +1653,14 @@ class BrowserFragment : Fragment() {
     private fun closeTab(index: Int) {
         if (index !in tabs.indices) return
         if (tabs.size == 1) {
+            tabThumbnails.remove(tabs[0].id)?.recycle()
             resetTabToBlank(tabs[0])
             showSpeedDial()
             updateTabsCount()
             return
         }
         val closingTab = tabs[index]
+        tabThumbnails.remove(closingTab.id)?.recycle()
         val closingCurrent = index == currentTabIndex
         destroyTabWebView(closingTab)
         tabs.removeAt(index)
@@ -1643,6 +1671,19 @@ class BrowserFragment : Fragment() {
             index < currentTabIndex -> currentTabIndex--
         }
         updateTabsCount()
+    }
+
+    private fun closeAllTabs() {
+        tabs.toList().forEach(::destroyTabWebView)
+        tabs.clear()
+        tabThumbnails.values.forEach { it.recycle() }
+        tabThumbnails.clear()
+        val blankTab = BrowserTab(id = nextTabId++)
+        tabs.add(blankTab)
+        currentTabIndex = 0
+        showSpeedDial()
+        updateTabsCount()
+        refreshTabsOverlaySnapshot()
     }
 
     private fun switchToTab(index: Int) {
@@ -1670,8 +1711,15 @@ class BrowserFragment : Fragment() {
     }
 
     private fun refreshTabsOverlaySnapshot() {
+        tabs.getOrNull(currentTabIndex)?.let { captureTabThumbnail(it) }
         tabsOverlaySnapshot = tabs.map { tab ->
-            TabOverlayItem(id = tab.id, title = tab.title, url = tab.url, isPrivate = tab.isPrivate)
+            TabOverlayItem(
+                id = tab.id,
+                title = tab.title,
+                url = tab.url,
+                isPrivate = tab.isPrivate,
+                thumbnail = tabThumbnails[tab.id],
+            )
         }
     }
 

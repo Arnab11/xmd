@@ -1,43 +1,61 @@
 package com.invictus.xmd.ui.browser
 
-import androidx.compose.animation.AnimatedVisibility
+import android.graphics.Bitmap
+import android.net.Uri
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import com.invictus.xmd.ui.icons.Icon
-import com.invictus.xmd.ui.icons.Icons
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -45,56 +63,52 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
+import android.content.res.Configuration
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.invictus.xmd.R
+import com.invictus.xmd.preferences.Settings
+import com.invictus.xmd.ui.icons.Icon
+import com.invictus.xmd.ui.icons.Icons
+import com.invictus.xmd.utils.FaviconLoader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import com.invictus.xmd.utils.FaviconLoader
 
 /**
- * Phase 5 (Browser) conversion of the old showTabsDialog() -- previously a
- * BottomSheetDialog hand-building one MaterialCardView pill row per tab
- * inside a plain LinearLayout. Kept the same single-column pill-list layout
- * (not the Chrome-style grid this migration originally sketched -- a
- * deliberate scope call, see COMPOSE_MIGRATION.md) and the same
- * favicon+title row content (no page thumbnails).
+ * Phase 5 (Browser) Tabs tray rendered via Material 3 ModalBottomSheet.
  *
- * Hosted in tabsListOverlay, a dedicated full-bleed ComposeView sibling to
- * browserDialogHost (not reusing that host) -- this is an overlay with real
- * on-screen bounds anchored in fragment_browser.xml, not a Dialog-window
- * popup, same reasoning Phase 5 Step 3 used for AddressBarSuggestions.
+ * Rendered in a platform dialog/popup window so it automatically renders
+ * above the Activity's bottom navigation bar, dimming the entire screen
+ * behind it with a native scrim, downward swipe-to-dismiss gesture, and
+ * predictive/system back handling.
  *
- * BrowserTabState (BrowserViewModel.tabs) isn't Compose-observable, so
- * BrowserFragment owns a one-shot [tabs] snapshot here -- mirrors the
- * sniffedSheetStreams/suggestionItems pattern already used elsewhere in
- * this Fragment -- refreshed explicitly after every mutation (open/close)
- * rather than this composable reading BrowserViewModel directly.
- *
- * "New tab" used to be its own FloatingActionButton in a dedicated row
- * below the list -- pushed well clear of the last tab row and needing an
- * 80dp bottom-padding reservation to sit above the app's own bottom nav.
- * It's now an IconButton in the header instead (Chrome/Firefox tab-switcher
- * convention: title + add, top-aligned), which is what let the bottom
- * reservation shrink to just [navigationBarsPadding] -- see the header Row
- * and the Column's padding below.
+ * Supports:
+ * 1. Chrome-style 2-column Grid view with live webpage content thumbnails
+ * 2. Compact List view (rows with swipe-to-dismiss)
+ * 3. Clear all open tabs button with confirmation prompt
  */
 data class TabOverlayItem(
     val id: Long,
     val title: String,
     val url: String?,
     val isPrivate: Boolean,
+    val thumbnail: Bitmap? = null,
 )
 
 // Private tabs get a fixed dark tonal treatment regardless of app theme --
-// same idea as Chrome's distinct grey/black incognito tab strip, ported
-// unchanged from the old dialog's hardcoded hex values.
+// same idea as Chrome's distinct grey/black incognito tab strip.
 private val PrivateTabActiveColor = Color(0xFF3A3A3A)
 private val PrivateTabInactiveColor = Color(0xFF2A2A2A)
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TabsListOverlay(
     visible: Boolean,
@@ -102,81 +116,367 @@ fun TabsListOverlay(
     currentTabId: Long?,
     onSwitch: (Long) -> Unit,
     onClose: (Long) -> Unit,
+    onCloseAll: () -> Unit,
     onAddNew: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    AnimatedVisibility(
-        visible = visible,
-        enter = fadeIn(tween(160)),
-        exit = fadeOut(tween(120)),
+    if (!visible) return
+
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scope = rememberCoroutineScope()
+    var isGridMode by remember { mutableStateOf(Settings.isTabsGridMode()) }
+    var showConfirmCloseAll by remember { mutableStateOf(false) }
+
+    fun closeWith(action: () -> Unit) {
+        scope.launch { sheetState.hide() }.invokeOnCompletion {
+            if (!sheetState.isVisible) {
+                onDismiss()
+                action()
+            }
+        }
+    }
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
     ) {
-        Box(
+        Column(
             modifier = Modifier
-                .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.45f))
-                .clickable(
-                    indication = null,
-                    interactionSource = remember { MutableInteractionSource() },
-                    onClick = onDismiss,
-                ),
-            contentAlignment = Alignment.BottomCenter,
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(bottom = 12.dp),
         ) {
-            Surface(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable(
-                        // Swallows taps that land on panel whitespace so
-                        // they don't fall through to the scrim's dismiss
-                        // click behind it.
-                        indication = null,
-                        interactionSource = remember { MutableInteractionSource() },
-                        onClick = {},
-                    ),
-                color = MaterialTheme.colorScheme.surface,
-                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Column(
-                    modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                        .navigationBarsPadding()
-                        .padding(bottom = 8.dp),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 4.dp, bottom = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
+                Text(
+                    text = stringResource(R.string.tabs_overlay_header, tabs.size),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                if (tabs.size > 1 || (tabs.size == 1 && tabs[0].url != null)) {
+                    IconButton(
+                        onClick = { showConfirmCloseAll = true }
                     ) {
-                        Text(
-                            text = stringResource(R.string.tabs_overlay_header, tabs.size),
-                            style = MaterialTheme.typography.titleMedium,
-                            modifier = Modifier.weight(1f),
+                        Icon(
+                            imageVector = Icons.DeleteSweep,
+                            contentDescription = stringResource(R.string.action_close_all_tabs),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                        IconButton(onClick = onAddNew) {
-                            Icon(
-                                imageVector = Icons.Add,
-                                contentDescription = stringResource(R.string.action_new_tab),
-                            )
-                        }
-                    }
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 360.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        tabs.forEachIndexed { index, tab ->
-                            TabRow(
-                                item = tab,
-                                index = index,
-                                isActive = tab.id == currentTabId,
-                                onClick = { onSwitch(tab.id) },
-                                onCloseClick = { onClose(tab.id) },
-                            )
-                        }
                     }
                 }
+                IconButton(
+                    onClick = {
+                        val newMode = !isGridMode
+                        isGridMode = newMode
+                        Settings.setTabsGridMode(newMode)
+                    }
+                ) {
+                    Icon(
+                        imageVector = if (isGridMode) Icons.ViewList else Icons.GridView,
+                        contentDescription = if (isGridMode) "Switch to list view" else "Switch to grid view",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                IconButton(
+                    onClick = {
+                        closeWith { onAddNew() }
+                    }
+                ) {
+                    Icon(
+                        imageVector = Icons.Add,
+                        contentDescription = stringResource(R.string.action_new_tab),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            AnimatedContent(
+                targetState = isGridMode,
+                transitionSpec = {
+                    (fadeIn(tween(180)) + scaleIn(initialScale = 0.95f, animationSpec = tween(180)))
+                        .togetherWith(fadeOut(tween(140)))
+                },
+                label = "TabsViewModeTransition",
+            ) { gridMode ->
+                if (gridMode) {
+                    TabsGridView(
+                        tabs = tabs,
+                        currentTabId = currentTabId,
+                        onSwitch = { id -> closeWith { onSwitch(id) } },
+                        onClose = onClose,
+                    )
+                } else {
+                    TabsListView(
+                        tabs = tabs,
+                        currentTabId = currentTabId,
+                        onSwitch = { id -> closeWith { onSwitch(id) } },
+                        onClose = onClose,
+                    )
+                }
+            }
+        }
+    }
+
+    if (showConfirmCloseAll) {
+        AlertDialog(
+            onDismissRequest = { showConfirmCloseAll = false },
+            title = {
+                Text(
+                    text = stringResource(R.string.action_close_all_tabs),
+                    style = MaterialTheme.typography.titleLarge,
+                )
+            },
+            text = {
+                Text(
+                    text = stringResource(R.string.close_all_tabs_confirmation),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showConfirmCloseAll = false
+                        closeWith { onCloseAll() }
+                    }
+                ) {
+                    Text(
+                        text = stringResource(R.string.action_close_all_tabs),
+                        color = MaterialTheme.colorScheme.error,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showConfirmCloseAll = false }) {
+                    Text(text = stringResource(R.string.action_cancel))
+                }
+            },
+        )
+    }
+}
+
+@Composable
+private fun TabsGridView(
+    tabs: List<TabOverlayItem>,
+    currentTabId: Long?,
+    onSwitch: (Long) -> Unit,
+    onClose: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val isTablet = configuration.screenWidthDp >= 600
+    val isLandscapeOrTablet = isLandscape || isTablet
+    val columns = if (isLandscapeOrTablet) 4 else 2
+    val cardAspectRatio = if (isLandscape) 0.95f else 0.85f
+    val maxGridHeight = if (isLandscape) {
+        (configuration.screenHeightDp * 0.72f).coerceIn(200f, 340f).dp
+    } else {
+        (configuration.screenHeightDp * 0.70f).coerceIn(240f, 540f).dp
+    }
+
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(columns),
+            modifier = Modifier
+                .widthIn(max = if (isTablet && !isLandscape) 640.dp else 740.dp)
+                .fillMaxWidth()
+                .heightIn(min = 160.dp, max = maxGridHeight),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            items(
+                items = tabs,
+                key = { it.id },
+            ) { tab ->
+                TabGridCard(
+                    item = tab,
+                    isActive = tab.id == currentTabId,
+                    aspectRatio = cardAspectRatio,
+                    onClick = { onSwitch(tab.id) },
+                    onCloseClick = { onClose(tab.id) },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabGridCard(
+    item: TabOverlayItem,
+    isActive: Boolean,
+    aspectRatio: Float = 0.85f,
+    onClick: () -> Unit,
+    onCloseClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val tonalColor = when {
+        item.isPrivate -> if (isActive) PrivateTabActiveColor else PrivateTabInactiveColor
+        isActive -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val onTonalColor = when {
+        item.isPrivate -> Color.White
+        isActive -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val borderColor = when {
+        isActive -> MaterialTheme.colorScheme.primary
+        item.isPrivate -> Color(0xFF4A4A4A)
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    }
+
+    val domain = remember(item.url) {
+        item.url?.let { extractDomain(it) }.orEmpty()
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .aspectRatio(aspectRatio)
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(onClick = onClick),
+        color = tonalColor,
+        shape = RoundedCornerShape(14.dp),
+        border = BorderStroke(if (isActive) 2.dp else 1.dp, borderColor),
+        tonalElevation = if (isActive) 4.dp else 1.dp,
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            // Card Top Header
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 8.dp, end = 4.dp, top = 6.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TabFavicon(
+                    item = item,
+                    size = 22.dp,
+                    iconSize = 13.dp,
+                    imageSize = 15.dp,
+                )
+                Text(
+                    text = item.title.ifBlank { item.url ?: stringResource(R.string.action_new_tab) },
+                    color = onTonalColor,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 6.dp),
+                )
+                IconButton(
+                    onClick = onCloseClick,
+                    modifier = Modifier.size(28.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Close,
+                        contentDescription = stringResource(R.string.action_dismiss),
+                        tint = onTonalColor.copy(alpha = 0.8f),
+                        modifier = Modifier.size(16.dp),
+                    )
+                }
+            }
+
+            // Card Body Preview
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .padding(start = 6.dp, end = 6.dp, bottom = 6.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (item.isPrivate) Color(0xFF1C1C1C)
+                        else MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.85f)
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (item.thumbnail != null) {
+                    Image(
+                        bitmap = item.thumbnail.asImageBitmap(),
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        alignment = Alignment.TopCenter,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (item.isPrivate) Icons.VisibilityOff else Icons.Globe,
+                        contentDescription = null,
+                        tint = onTonalColor.copy(alpha = 0.12f),
+                        modifier = Modifier.size(44.dp),
+                    )
+
+                    Text(
+                        text = if (item.isPrivate) "Incognito" else domain.ifBlank { stringResource(R.string.action_new_tab) },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = onTonalColor.copy(alpha = 0.65f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 8.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TabsListView(
+    tabs: List<TabOverlayItem>,
+    currentTabId: Long?,
+    onSwitch: (Long) -> Unit,
+    onClose: (Long) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val configuration = LocalConfiguration.current
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val maxListHeight = if (isLandscape) {
+        (configuration.screenHeightDp * 0.72f).coerceIn(200f, 340f).dp
+    } else {
+        (configuration.screenHeightDp * 0.70f).coerceIn(240f, 540f).dp
+    }
+
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.TopCenter,
+    ) {
+        LazyColumn(
+            modifier = Modifier
+                .widthIn(max = 680.dp)
+                .fillMaxWidth()
+                .heightIn(min = 160.dp, max = maxListHeight),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(
+                items = tabs,
+                key = { it.id },
+            ) { tab ->
+                TabRow(
+                    item = tab,
+                    index = tabs.indexOf(tab),
+                    isActive = tab.id == currentTabId,
+                    onClick = { onSwitch(tab.id) },
+                    onCloseClick = { onClose(tab.id) },
+                )
             }
         }
     }
@@ -191,14 +491,10 @@ private fun TabRow(
     onClick: () -> Unit,
     onCloseClick: () -> Unit,
 ) {
-    // Small staggered fade-in so the list doesn't just pop in -- same idea
-    // as the old dialog's row.animate().alpha(1f)... entrance, minus the
-    // translationY rise (fade-only; not reproduced 1:1, a deliberate
-    // simplification).
     val alpha = remember { Animatable(0f) }
     LaunchedEffect(item.id) {
-        delay((index * 24L).coerceAtMost(200L))
-        alpha.animateTo(1f, tween(160))
+        delay((index * 20L).coerceAtMost(160L))
+        alpha.animateTo(1f, tween(140))
     }
 
     val tonalColor = when {
@@ -212,9 +508,6 @@ private fun TabRow(
         else -> MaterialTheme.colorScheme.onSurface
     }
 
-    // Swipe-to-close in either direction, same haptic-on-confirm pattern
-    // DownloadsScreen's queue-item swipe-to-clear already uses -- see that
-    // file's rememberSwipeToDismissBoxState call for the twin of this one.
     val haptics = LocalHapticFeedback.current
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -227,9 +520,7 @@ private fun TabRow(
             }
         },
     )
-    // Tab list entries get reused/recomposed by id as tabs open and close
-    // (same reasoning as the queue-item version) -- without this, a row
-    // that reused a just-closed tab's slot could inherit a mid-swipe state.
+
     LaunchedEffect(item.id) {
         if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
             dismissState.reset()
@@ -272,12 +563,13 @@ private fun TabRow(
                 .clickable(onClick = onClick),
             color = tonalColor,
             shape = RoundedCornerShape(28.dp),
+            border = if (isActive) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 6.dp, end = 10.dp),
             ) {
-                TabFavicon(item = item, tint = onTonalColor)
+                TabFavicon(item = item)
                 Text(
                     text = item.title.ifBlank { item.url ?: stringResource(R.string.action_new_tab) },
                     color = onTonalColor,
@@ -301,13 +593,15 @@ private fun TabRow(
 }
 
 /**
- * Private tabs always show the incognito glyph, never the site's real
- * favicon -- fetching/showing it here would be a minor but real leak of
- * what a "private" tab is looking at (ported unchanged from the old
- * dialog's same check).
+ * Private tabs always show the incognito glyph, never the site's real favicon.
  */
 @Composable
-private fun TabFavicon(item: TabOverlayItem, tint: Color) {
+private fun TabFavicon(
+    item: TabOverlayItem,
+    size: Dp = 28.dp,
+    iconSize: Dp = 16.dp,
+    imageSize: Dp = 18.dp,
+) {
     val bitmapState = if (!item.isPrivate && item.url != null) {
         produceState<android.graphics.Bitmap?>(initialValue = null, key1 = item.url) {
             value = withContext(Dispatchers.IO) { FaviconLoader.load(item.url) }
@@ -316,7 +610,7 @@ private fun TabFavicon(item: TabOverlayItem, tint: Color) {
 
     Box(
         modifier = Modifier
-            .size(28.dp)
+            .size(size)
             .background(color = Color.White, shape = CircleShape),
         contentAlignment = Alignment.Center,
     ) {
@@ -325,15 +619,29 @@ private fun TabFavicon(item: TabOverlayItem, tint: Color) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = null,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(imageSize),
             )
         } else {
             Icon(
                 imageVector = if (item.isPrivate) Icons.VisibilityOff else Icons.Link,
                 contentDescription = null,
                 tint = Color(0xFF1A1A1A),
-                modifier = Modifier.size(16.dp),
+                modifier = Modifier.size(iconSize),
             )
         }
+    }
+}
+
+private fun extractDomain(url: String): String {
+    return try {
+        val uri = Uri.parse(url)
+        val host = uri.host
+        if (!host.isNullOrBlank()) {
+            host.removePrefix("www.")
+        } else {
+            url
+        }
+    } catch (_: Exception) {
+        url
     }
 }
