@@ -178,6 +178,73 @@ object Settings {
         prefs.edit().putBoolean(KEY_TABS_GRID_MODE, enabled).apply()
     }
 
+    // ── Browser: Search Engine ─────────────────────────────────────────
+    enum class SearchEngine(
+        val id: String,
+        val displayName: String,
+        val queryUrlTemplate: String,
+        val domain: String,
+    ) {
+        GOOGLE("google", "Google", "https://www.google.com/search?q=%s", "google.com"),
+        DUCKDUCKGO("duckduckgo", "DuckDuckGo", "https://duckduckgo.com/?q=%s", "duckduckgo.com"),
+        BING("bing", "Bing", "https://www.bing.com/search?q=%s", "bing.com"),
+        BRAVE("brave", "Brave", "https://search.brave.com/search?q=%s", "search.brave.com"),
+        YAHOO("yahoo", "Yahoo", "https://search.yahoo.com/search?p=%s", "search.yahoo.com"),
+        ECOSIA("ecosia", "Ecosia", "https://www.ecosia.org/search?q=%s", "ecosia.org"),
+        CUSTOM("custom", "Custom", "", "Custom URL");
+
+        companion object {
+            fun fromId(id: String?): SearchEngine =
+                entries.firstOrNull { it.id.equals(id, ignoreCase = true) } ?: GOOGLE
+        }
+    }
+
+    private const val KEY_SEARCH_ENGINE = "browser_search_engine"
+    private const val KEY_CUSTOM_SEARCH_URL = "browser_custom_search_url"
+    private const val KEY_CUSTOM_SEARCH_NAME = "browser_custom_search_name"
+
+    fun searchEngine(): SearchEngine =
+        SearchEngine.fromId(prefs.getString(KEY_SEARCH_ENGINE, SearchEngine.GOOGLE.id))
+
+    fun setSearchEngine(engine: SearchEngine) {
+        prefs.edit().putString(KEY_SEARCH_ENGINE, engine.id).apply()
+    }
+
+    fun customSearchUrl(): String = prefs.getString(KEY_CUSTOM_SEARCH_URL, "").orEmpty()
+
+    fun setCustomSearchUrl(url: String) {
+        prefs.edit().putString(KEY_CUSTOM_SEARCH_URL, url.trim()).apply()
+    }
+
+    fun customSearchName(): String = prefs.getString(KEY_CUSTOM_SEARCH_NAME, "").orEmpty()
+
+    fun setCustomSearchName(name: String) {
+        prefs.edit().putString(KEY_CUSTOM_SEARCH_NAME, name.trim()).apply()
+    }
+
+    /**
+     * Builds a full search URL for the given query using the configured search engine.
+     * Supports %s or {q} placeholders in custom search URLs, with fallback to Google.
+     */
+    fun buildSearchUrl(query: String): String {
+        val encoded = android.net.Uri.encode(query.trim())
+        val engine = searchEngine()
+        if (engine == SearchEngine.CUSTOM) {
+            val customUrl = customSearchUrl().trim()
+            if (customUrl.isNotBlank()) {
+                return when {
+                    customUrl.contains("%s") -> customUrl.replace("%s", encoded)
+                    customUrl.contains("{q}") -> customUrl.replace("{q}", encoded)
+                    customUrl.endsWith("=") || customUrl.endsWith("/") || customUrl.endsWith("?") -> "$customUrl$encoded"
+                    customUrl.contains("?") -> "$customUrl&$encoded"
+                    else -> "$customUrl?q=$encoded"
+                }
+            }
+        }
+        val template = engine.queryUrlTemplate.ifBlank { SearchEngine.GOOGLE.queryUrlTemplate }
+        return template.replace("%s", encoded)
+    }
+
     // Epoch millis of the last successful AdblockListUpdater.refresh() --
     // 0L means "never" (first run, or every attempted refresh has failed
     // so far), which AdblockFilter treats as always-stale so it keeps

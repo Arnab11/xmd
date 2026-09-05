@@ -657,6 +657,18 @@ private fun DownloadsRoute() {
 
 @Composable
 private fun BrowserRoute(onImportWebsites: () -> Unit, onExportWebsites: () -> Unit) {
+    val context = LocalContext.current
+    var searchEngine by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.searchEngine())
+    }
+    var customSearchUrl by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.customSearchUrl())
+    }
+    var customSearchName by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.customSearchName())
+    }
+    var showSearchEngineDialog by remember { mutableStateOf(false) }
+
     var adblockEnabled by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.adblockEnabled())
     }
@@ -678,7 +690,32 @@ private fun BrowserRoute(onImportWebsites: () -> Unit, onExportWebsites: () -> U
             if (count != blockedDomainCount) blockedDomainCount = count
         }
     }
+
+    if (showSearchEngineDialog) {
+        SearchEngineDialog(
+            currentEngine = searchEngine,
+            currentCustomUrl = customSearchUrl,
+            currentCustomName = customSearchName,
+            onDismiss = { showSearchEngineDialog = false },
+            onSave = { engine, customUrl, customName ->
+                searchEngine = engine
+                customSearchUrl = customUrl
+                customSearchName = customName
+                com.invictus.xmd.preferences.Settings.setSearchEngine(engine)
+                com.invictus.xmd.preferences.Settings.setCustomSearchUrl(customUrl)
+                com.invictus.xmd.preferences.Settings.setCustomSearchName(customName)
+                showSearchEngineDialog = false
+            },
+            onInvalidCustomUrl = {
+                android.widget.Toast.makeText(context, R.string.search_engine_invalid_url, android.widget.Toast.LENGTH_SHORT).show()
+            },
+        )
+    }
+
     SettingsBrowserScreen(
+        searchEngine = searchEngine,
+        customSearchName = customSearchName,
+        onSearchEngineClick = { showSearchEngineDialog = true },
         adblockEnabled = adblockEnabled,
         blockedDomainCount = blockedDomainCount,
         onAdblockChanged = { checked ->
