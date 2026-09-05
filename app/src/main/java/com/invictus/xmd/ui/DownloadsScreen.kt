@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -648,7 +649,9 @@ fun QueueItemRow(
     }
 
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .defaultMinSize(minHeight = 72.dp),
         colors = CardDefaults.cardColors(containerColor = cardContainerColor),
         shape = RoundedCornerShape(14.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
@@ -730,7 +733,13 @@ fun QueueItemRow(
                 }
             }
 
-            Column(modifier = Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 7.dp)) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .defaultMinSize(minHeight = 72.dp)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalArrangement = Arrangement.Center,
+            ) {
                 // Title row: filename + file type bubble
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -740,7 +749,7 @@ fun QueueItemRow(
                         text = item.fileName ?: item.sourceUrl,
                         color = MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.SemiBold,
-                        fontSize = 13.sp,
+                        fontSize = 14.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f),
@@ -749,12 +758,25 @@ fun QueueItemRow(
                     FileTypeBubble(item)
                 }
 
+                // Progress bar above progress details
+                if (showsProgressBar(item.status)) {
+                    val (progressValue, indeterminate) = progressFor(item)
+                    DownloadProgressBar(
+                        progress = progressValue,
+                        isDownloading = item.status == ItemStatus.DOWNLOADING,
+                        isIndeterminate = indeterminate,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 6.dp),
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    )
+                } else {
+                    Spacer(Modifier.height(8.dp))
+                }
+
                 // Status row: icon + unified status text + inline action buttons
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 2.dp),
+                    modifier = Modifier.fillMaxWidth(),
                 ) {
                     val statusIcon = when (item.status) {
                         ItemStatus.PAUSED -> Icons.Pause
@@ -782,7 +804,7 @@ fun QueueItemRow(
                     Text(
                         text = statusText(item, throttledSpeedEta),
                         color = if (item.status == ItemStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -849,14 +871,6 @@ fun QueueItemRow(
                                     )
                                 }
                                 ItemStatus.DONE -> {
-                                    if (item.filePath != null) {
-                                        CompactIconButton(
-                                            icon = Icons.FileOpen,
-                                            contentDescription = stringResource(R.string.action_open),
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            onClick = { onOpen(item) },
-                                        )
-                                    }
                                     CompactIconButton(
                                         icon = Icons.DeleteSweep,
                                         contentDescription = stringResource(R.string.action_clear),
@@ -868,18 +882,6 @@ fun QueueItemRow(
                             }
                         }
                     }
-                }
-
-                if (showsProgressBar(item.status)) {
-                    val (progressValue, indeterminate) = progressFor(item)
-                    DownloadProgressBar(
-                        progress = progressValue,
-                        isDownloading = item.status == ItemStatus.DOWNLOADING,
-                        isIndeterminate = indeterminate,
-                        modifier = Modifier.padding(top = 4.dp),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    )
                 }
             }
         }
@@ -1047,8 +1049,8 @@ private fun CompactIconButton(
     tint: Color,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    size: androidx.compose.ui.unit.Dp = 26.dp,
-    iconSize: androidx.compose.ui.unit.Dp = 15.dp,
+    size: androidx.compose.ui.unit.Dp = 28.dp,
+    iconSize: androidx.compose.ui.unit.Dp = 16.dp,
 ) {
     Box(
         modifier = modifier
