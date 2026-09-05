@@ -773,6 +773,13 @@ class BrowserFragment : Fragment() {
                 tab.isLoading = true
                 tab.progress = 0
                 tab.sniffedMedia.clear()
+                // Has to run from here, not onPageFinished -- needs to land
+                // before the new page's own scripts read document.hidden or
+                // attach their own visibilitychange listener. See
+                // BackgroundPlaybackScript's doc comment.
+                if (Settings.backgroundPlaybackEnabled()) {
+                    view.evaluateJavascript(com.invictus.xmd.core.BackgroundPlaybackScript.script(), null)
+                }
                 if (isCurrentTab(tab)) {
                     toolbarProgress = 0
                     toolbarProgressVisible = true

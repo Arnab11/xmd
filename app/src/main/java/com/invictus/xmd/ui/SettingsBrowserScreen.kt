@@ -30,6 +30,8 @@ fun SettingsBrowserScreen(
     adblockEnabled: Boolean,
     blockedDomainCount: Int,
     onAdblockChanged: (Boolean) -> Unit,
+    backgroundPlaybackEnabled: Boolean,
+    onBackgroundPlaybackChanged: (Boolean) -> Unit,
     onImportWebsites: () -> Unit,
     onExportWebsites: () -> Unit,
 ) {
@@ -52,6 +54,16 @@ fun SettingsBrowserScreen(
                 },
                 checked = adblockEnabled,
                 onCheckedChange = onAdblockChanged,
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+        SettingsSectionCard {
+            SwitchSettingRow(
+                title = stringResource(R.string.settings_background_playback),
+                subtitle = stringResource(R.string.settings_background_playback_hint),
+                checked = backgroundPlaybackEnabled,
+                onCheckedChange = onBackgroundPlaybackChanged,
             )
         }
 

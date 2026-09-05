@@ -271,14 +271,22 @@ private fun AddressPill(
                 BasicTextField(
                     value = fieldValue,
                     onValueChange = { newValue ->
-                        fieldValue = if (pendingSelectAll) {
+                        fieldValue = if (pendingSelectAll && newValue.text == fieldValue.text) {
                             // This is the tap-that-focused-us delivering its
                             // own cursor placement (same text, selection
                             // collapsed to the tap point) -- force it back
                             // to a full selection instead, one time only.
+                            // Guarded on the text being unchanged: if it
+                            // differs, this is a real edit (e.g. the first
+                            // letter typed right after focusing, when the
+                            // tap itself never produced a separate
+                            // selection-only callback), and forcing a full
+                            // select here would instead select the letter
+                            // that was just typed.
                             pendingSelectAll = false
                             newValue.copy(selection = TextRange(0, newValue.text.length))
                         } else {
+                            pendingSelectAll = false
                             newValue
                         }
                         onTextChange(fieldValue.text)

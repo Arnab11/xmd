@@ -36,6 +36,7 @@ object Settings {
     private const val KEY_DISABLE_CATEGORIZATION = "disable_folder_categorization"
     private const val KEY_WIFI_ONLY = "wifi_only_downloads"
     private const val KEY_ADBLOCK_ENABLED = "browser_adblock_enabled"
+    private const val KEY_BACKGROUND_PLAYBACK_ENABLED = "browser_background_playback_enabled"
 
     private lateinit var prefs: SharedPreferences
 
@@ -148,6 +149,17 @@ object Settings {
     fun adblockEnabled(): Boolean = prefs.getBoolean(KEY_ADBLOCK_ENABLED, true)
     fun setAdblockEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_ADBLOCK_ENABLED, value).apply()
+    }
+
+    // ── Browser: Background playback ───────────────────────────────────
+    // Off by default -- this overrides the page's own Page Visibility API
+    // (document.hidden/visibilityState + visibilitychange), which is an
+    // opt-in behavior change to how sites see the tab, not a passive
+    // toggle like adblock.
+    fun backgroundPlaybackEnabled(): Boolean =
+        prefs.getBoolean(KEY_BACKGROUND_PLAYBACK_ENABLED, false)
+    fun setBackgroundPlaybackEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_BACKGROUND_PLAYBACK_ENABLED, value).apply()
     }
 
     // Epoch millis of the last successful AdblockListUpdater.refresh() --
