@@ -487,6 +487,10 @@ object YtDlpManager {
             }
             return DownloadProgress(lastPercent.coerceAtLeast(0), stageLabel)
         }
+        if (line.startsWith("WARNING:", ignoreCase = true) || line.startsWith("ERROR:", ignoreCase = true)) {
+            Log.w(TAG, "yt-dlp output: $line")
+            return DownloadProgress(lastPercent.coerceAtLeast(0), line)
+        }
         if (line.startsWith("[youtube]") || line.startsWith("[info]")) {
             return DownloadProgress(lastPercent.coerceAtLeast(0), "Connecting & preparing…")
         }
@@ -531,7 +535,7 @@ object YtDlpManager {
         request.addOption("--no-colors")
         request.addOption("--no-quiet")
         request.addOption("--progress")
-        request.addOption("--extractor-args", "youtube:player_client=android,web")
+        request.addOption("--extractor-args", "youtube:player_client=web,ios,android")
         request.addOption("--print", "after_move:filepath")
 
         if (option.isAudioOnly) {

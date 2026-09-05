@@ -34,12 +34,22 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.widget.Toast
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -97,6 +107,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.invictus.xmd.R
+import com.invictus.xmd.core.ErrorUtils
 import com.invictus.xmd.core.ItemStatus
 import com.invictus.xmd.core.MediaPlatform
 import com.invictus.xmd.core.QueueItem
@@ -172,6 +183,7 @@ fun DownloadsScreen(
     var selectedIds by rememberSaveable { mutableStateOf(emptySet<String>()) }
     var renameTarget by remember { mutableStateOf<QueueItem?>(null) }
     var deleteTargets by remember { mutableStateOf<List<QueueItem>?>(null) }
+    var errorDetailsTarget by remember { mutableStateOf<QueueItem?>(null) }
     var overflowMenuExpanded by remember { mutableStateOf(false) }
 
     BackHandler(enabled = selectedIds.isNotEmpty()) {
@@ -479,6 +491,7 @@ fun DownloadsScreen(
                             onRetry = onRetry,
                             onClear = { deleteTargets = listOf(it) },
                             onOpen = onOpen,
+                            onErrorDetails = { errorDetailsTarget = it },
                             onSwipeClear = onSwipeClearItem,
                             onToggleSelect = { toggled ->
                                 selectedIds = if (toggled.id in selectedIds) {
@@ -578,6 +591,18 @@ fun DownloadsScreen(
             },
         )
     }
+
+    // ── Error / Warning Details dialog ────────────────────────────────────
+    errorDetailsTarget?.let { item ->
+        ErrorDetailsDialog(
+            item = item,
+            onDismiss = { errorDetailsTarget = null },
+            onRetry = { retryItem ->
+                errorDetailsTarget = null
+                onRetry(retryItem)
+            },
+        )
+    }
 }
 
 private enum class DownloadFilter(val labelRes: Int) {
@@ -654,6 +679,7 @@ fun QueueItemRow(
     onRetry: (QueueItem) -> Unit,
     onClear: (QueueItem) -> Unit,
     onOpen: (QueueItem) -> Unit,
+    onErrorDetails: (QueueItem) -> Unit = {},
     onSwipeClear: (QueueItem) -> Unit = onClear,
     onToggleSelect: (QueueItem) -> Unit = {},
 ) {
@@ -743,7 +769,11 @@ fun QueueItemRow(
                                     onPauseResume(item)
                                 }
                                 ItemStatus.FAILED -> {
-                                    onRetry(item)
+                                    if (!item.error.isNullOrBlank()) {
+                                        onErrorDetails(item)
+                                    } else {
+                                        onRetry(item)
+                                    }
                                 }
                                 ItemStatus.DONE -> {
                                     if (item.filePath != null) {
@@ -876,6 +906,10 @@ fun QueueItemRow(
                     } else {
                         null
                     }
+                    val warningOrError = item.error?.takeIf { it.isNotBlank() }
+                        ?: item.mediaStatusText?.takeIf { it.startsWith("Warning", ignoreCase = true) }
+                    val hasErrorOrWarning = !warningOrError.isNullOrBlank() &&
+                        (item.status == ItemStatus.FAILED || item.status == ItemStatus.RETRYING || item.status == ItemStatus.DOWNLOADING)
                     Text(
                         text = statusText(item, throttledSpeedEta),
                         color = if (item.status == ItemStatus.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -883,10 +917,22 @@ fun QueueItemRow(
                         fontWeight = FontWeight.Medium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .then(
+                                if (hasErrorOrWarning && !isSelectionMode) {
+                                    Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .clickable { onErrorDetails(item) }
+                                } else Modifier
+                            ),
                     )
 
                     if (!isSelectionMode) {
+                        val clipboardManager = LocalClipboardManager.current
+                        val context = LocalContext.current
+                        val copyableWarningOrError = warningOrError
+
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -894,6 +940,17 @@ fun QueueItemRow(
                         ) {
                             when (item.status) {
                                 ItemStatus.DOWNLOADING, ItemStatus.PAUSED -> {
+                                    if (item.status == ItemStatus.DOWNLOADING && copyableWarningOrError != null) {
+                                        CompactIconButton(
+                                            icon = Icons.Copy,
+                                            contentDescription = stringResource(R.string.action_copy_error),
+                                            tint = MaterialTheme.colorScheme.error,
+                                            onClick = {
+                                                clipboardManager.setText(AnnotatedString(cleanErrorText(copyableWarningOrError)))
+                                                Toast.makeText(context, R.string.error_copied_toast, Toast.LENGTH_SHORT).show()
+                                            },
+                                        )
+                                    }
                                     CompactIconButton(
                                         icon = if (item.status == ItemStatus.PAUSED) Icons.Play else Icons.Pause,
                                         contentDescription = stringResource(
@@ -924,6 +981,17 @@ fun QueueItemRow(
                                     )
                                 }
                                 ItemStatus.RETRYING, ItemStatus.PENDING, ItemStatus.RESOLVING, ItemStatus.NEEDS_CHALLENGE -> {
+                                    if (copyableWarningOrError != null) {
+                                        CompactIconButton(
+                                            icon = Icons.Copy,
+                                            contentDescription = stringResource(R.string.action_copy_error),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            onClick = {
+                                                clipboardManager.setText(AnnotatedString(cleanErrorText(copyableWarningOrError)))
+                                                Toast.makeText(context, R.string.error_copied_toast, Toast.LENGTH_SHORT).show()
+                                            },
+                                        )
+                                    }
                                     CompactIconButton(
                                         icon = Icons.Close,
                                         contentDescription = stringResource(R.string.action_cancel),
@@ -932,6 +1000,17 @@ fun QueueItemRow(
                                     )
                                 }
                                 ItemStatus.FAILED -> {
+                                    if (copyableWarningOrError != null) {
+                                        CompactIconButton(
+                                            icon = Icons.Copy,
+                                            contentDescription = stringResource(R.string.action_copy_error),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            onClick = {
+                                                clipboardManager.setText(AnnotatedString(cleanErrorText(copyableWarningOrError)))
+                                                Toast.makeText(context, R.string.error_copied_toast, Toast.LENGTH_SHORT).show()
+                                            },
+                                        )
+                                    }
                                     CompactIconButton(
                                         icon = Icons.Refresh,
                                         contentDescription = stringResource(R.string.action_retry),
@@ -1329,6 +1408,137 @@ private fun RenameDialog(currentName: String, onConfirm: (String) -> Unit, onDis
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+        },
+    )
+}
+
+private fun cleanErrorText(error: String?): String = ErrorUtils.cleanErrorText(error)
+
+private fun isWarningText(text: String?): Boolean = ErrorUtils.isWarningText(text)
+
+@Composable
+private fun ErrorDetailsDialog(
+    item: QueueItem,
+    onDismiss: () -> Unit,
+    onRetry: (QueueItem) -> Unit,
+) {
+    val context = LocalContext.current
+    val clipboardManager = LocalClipboardManager.current
+    val errorText = item.error?.takeIf { it.isNotBlank() }
+        ?: item.mediaStatusText?.takeIf { it.startsWith("Warning", ignoreCase = true) }
+    val cleanedError = remember(errorText) { cleanErrorText(errorText) }
+    val isWarning = remember(errorText) { isWarningText(errorText) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
+        shape = RoundedCornerShape(20.dp),
+        title = {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Icon(
+                    imageVector = if (isWarning) Icons.Info else Icons.Close,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(24.dp),
+                )
+                Text(
+                    text = stringResource(
+                        if (isWarning) R.string.dialog_warning_details_title
+                        else R.string.dialog_error_details_title
+                    ),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+            ) {
+                Text(
+                    text = item.fileName ?: item.sourceUrl,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.65f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 280.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .verticalScroll(rememberScrollState())
+                            .padding(12.dp),
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                text = cleanedError,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = {
+                        clipboardManager.setText(AnnotatedString(cleanedError))
+                        Toast.makeText(context, R.string.error_copied_toast, Toast.LENGTH_SHORT).show()
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Copy,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.action_copy))
+                }
+
+                Button(
+                    onClick = {
+                        onDismiss()
+                        onRetry(item)
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(stringResource(R.string.action_retry))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text(stringResource(android.R.string.cancel))
+            }
         },
     )
 }

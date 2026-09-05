@@ -302,6 +302,11 @@
     <string name="link_menu_copy_link_address">Copy link address</string>
     <string name="link_menu_share_link">Share link</string>
     <string name="link_copied_toast">Link copied to clipboard</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_copy_error">Copy error message</string>
+    <string name="error_copied_toast">Copied to clipboard</string>
+    <string name="dialog_error_details_title">Download Error</string>
+    <string name="dialog_warning_details_title">Warning Details</string>
 
     <!-- Browser Menu -->
     <string name="browser_menu_title">Browser</string>
