@@ -32,4 +32,8 @@
         <item name="android:windowIsFloating">false</item>
     </style>
 
+    <style name="leak_canary_LeakCanary.Base" parent="Theme.AppCompat.Light.DarkActionBar">
+        <item name="android:fitsSystemWindows">true</item>
+    </style>
+
 </resources>
