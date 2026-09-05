@@ -326,6 +326,8 @@ class BrowserFragment : Fragment() {
             com.invictus.xmd.ui.theme.XmdTheme {
                 BrowserScreen(
                     speedDialVisible = speedDialVisible,
+                    addressBarFocused = addressBarFocused,
+                    onDismissAddressBar = { addressBarClearFocusSignal++ },
                     toolbar = {
                         BrowserToolbarRow(
                             addressText = addressBarText,
@@ -350,7 +352,12 @@ class BrowserFragment : Fragment() {
                                 // (see showQuickSuggestions doc). Only an
                                 // actual edit (onAddressTextChange) should
                                 // ever reach scheduleSuggest.
-                                if (focused) showQuickSuggestions() else hideSuggestions()
+                                if (focused) {
+                                    showQuickSuggestions()
+                                } else {
+                                    hideSuggestions()
+                                    addressBarText = if (speedDialVisible) "" else currentPageUrl().orEmpty()
+                                }
                             },
                             onGo = { loadUrl(addressBarText) },
                             clearFocusSignal = addressBarClearFocusSignal,
@@ -1174,6 +1181,10 @@ class BrowserFragment : Fragment() {
      * fall back to the Downloads tab instead of exiting.
      */
     fun onBackPressed(): Boolean {
+        if (addressBarFocused) {
+            addressBarClearFocusSignal++
+            return true
+        }
         // The old BottomSheetDialog consumed back presses for free (Android's
         // Dialog window intercepts them); tabsListOverlay is a plain
         // full-bleed ComposeView, not a Dialog, so that has to be replicated
@@ -1494,6 +1505,7 @@ class BrowserFragment : Fragment() {
     }
 
     private fun showSpeedDial() {
+        addressBarClearFocusSignal++
         speedDialVisible = true
         addressBarText = ""
         securityIconVisible = false
