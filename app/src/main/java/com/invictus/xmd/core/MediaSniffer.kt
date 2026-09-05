@@ -52,6 +52,39 @@ object MediaSniffer {
     }
 
     /**
+     * Extension-only classification -- no [HLS_PATH_HINT] keyword guessing.
+     *
+     * [classifyUrl]'s path-hint fallback (bare "hls"/"playlist"/"master"/
+     * "index" path segments) is a reasonable trade-off when sniffing
+     * sub-resource requests made *by a page the user is already watching a
+     * video on* (BrowserFragment.shouldInterceptRequest) -- false positives
+     * there just add a spurious chip to a "Find videos" sheet.
+     *
+     * It's the wrong trade-off for classifying a link with zero page
+     * context, e.g. one the user pasted or shared in (see
+     * [LinkParser.isHlsOrDashLink]). "master"/"index" are extremely common
+     * as a bare path segment for reasons that have nothing to do with
+     * video -- a GitHub `master`-branch codeload/raw/jsdelivr URL
+     * (".../refs/heads/master", ".../repo@master/file.js") or any plain
+     * "/index" page, for instance -- and matching them there routes an
+     * ordinary file straight into the yt-dlp quality-picker flow instead of
+     * downloading it. Restricting to real HLS/DASH file extensions avoids
+     * that false-positive class entirely.
+     */
+    fun classifyUrlStrict(url: String): Sniffed? {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        if (uri.scheme != "http" && uri.scheme != "https") return null
+
+        return when {
+            HLS_EXT.containsMatchIn(url) -> Sniffed(url, Kind.HLS)
+            DASH_EXT.containsMatchIn(url) -> Sniffed(url, Kind.DASH)
+            VIDEO_EXT.containsMatchIn(url) -> Sniffed(url, Kind.DIRECT_VIDEO)
+            AUDIO_EXT.containsMatchIn(url) -> Sniffed(url, Kind.DIRECT_AUDIO)
+            else -> null
+        }
+    }
+
+    /**
      * Refines (or produces) a classification once a response Content-Type
      * is actually known -- catches extensionless/signed CDN URLs the pure
      * URL pass above would miss. Only called from paths that already have

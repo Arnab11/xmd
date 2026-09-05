@@ -121,12 +121,18 @@ object LinkParser {
      * True for a direct HLS (.m3u8) or DASH (.mpd) manifest link -- these
      * are streams, not a single file, so (like YouTube) they need yt-dlp to
      * fetch every segment and mux them into one playable file rather than a
-     * plain byte-for-byte download. Reuses [MediaSniffer]'s own URL
-     * classifier so a link is never treated differently here than it would
-     * be by the "Find videos" sniffer sheet.
+     * plain byte-for-byte download.
+     *
+     * Deliberately uses [MediaSniffer.classifyUrlStrict] (extension-only),
+     * not [MediaSniffer.classifyUrl] -- a pasted/shared link has no page
+     * context, so the sniffer's loose "master"/"index"/"playlist"
+     * path-segment heuristic (fine for in-page WebView sniffing) would
+     * misclassify things like a GitHub `master`-branch codeload/raw URL as
+     * an HLS stream and wrongly route it into the yt-dlp flow instead of
+     * downloading it directly. See [MediaSniffer.classifyUrlStrict].
      */
     fun isHlsOrDashLink(link: String): Boolean {
-        val kind = MediaSniffer.classifyUrl(link.trim())?.kind ?: return false
+        val kind = MediaSniffer.classifyUrlStrict(link.trim())?.kind ?: return false
         return kind == MediaSniffer.Kind.HLS || kind == MediaSniffer.Kind.DASH
     }
 
