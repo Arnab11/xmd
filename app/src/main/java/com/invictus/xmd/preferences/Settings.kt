@@ -46,6 +46,7 @@ object Settings {
     private const val KEY_WIFI_ONLY = "wifi_only_downloads"
     private const val KEY_ADBLOCK_ENABLED = "browser_adblock_enabled"
     private const val KEY_BACKGROUND_PLAYBACK_ENABLED = "browser_background_playback_enabled"
+    private const val KEY_TABS_GRID_MODE = "browser_tabs_grid_mode"
 
     private lateinit var prefs: SharedPreferences
 
@@ -169,6 +170,12 @@ object Settings {
         prefs.getBoolean(KEY_BACKGROUND_PLAYBACK_ENABLED, false)
     fun setBackgroundPlaybackEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_BACKGROUND_PLAYBACK_ENABLED, value).apply()
+    }
+
+    // ── Browser: Tab switcher layout mode ──────────────────────────────
+    fun isTabsGridMode(): Boolean = prefs.getBoolean(KEY_TABS_GRID_MODE, true)
+    fun setTabsGridMode(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_TABS_GRID_MODE, enabled).apply()
     }
 
     // Epoch millis of the last successful AdblockListUpdater.refresh() --
