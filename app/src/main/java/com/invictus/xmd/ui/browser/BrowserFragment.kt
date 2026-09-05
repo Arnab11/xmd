@@ -1455,7 +1455,7 @@ class BrowserFragment : Fragment() {
         return when {
             input.startsWith("http://") || input.startsWith("https://") -> input
             looksLikeUrl -> "https://$input"
-            else -> "https://www.google.com/search?q=${android.net.Uri.encode(input)}"
+            else -> Settings.buildSearchUrl(input)
         }
     }
 

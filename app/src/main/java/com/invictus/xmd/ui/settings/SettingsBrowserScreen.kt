@@ -1,5 +1,6 @@
 package com.invictus.xmd.ui.settings
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -14,20 +16,26 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.invictus.xmd.R
+import com.invictus.xmd.preferences.Settings
 import com.invictus.xmd.ui.browser.BrowserFragment
+import com.invictus.xmd.ui.icons.Icon
+import com.invictus.xmd.ui.icons.Icons
 
 /**
- * Browser settings: the global adblock toggle and the website source-pack
- * import/export trigger. Private DNS mode lives in its own in-browser
- * dialog (BrowserFragment's overflow menu), unchanged -- not part of this
- * screen.
+ * Browser settings: default search engine, global adblock toggle, background
+ * playback, and website source-pack import/export trigger.
  */
 @Composable
 fun SettingsBrowserScreen(
+    searchEngine: Settings.SearchEngine,
+    customSearchName: String,
+    onSearchEngineClick: () -> Unit,
     adblockEnabled: Boolean,
     blockedDomainCount: Int,
     onAdblockChanged: (Boolean) -> Unit,
@@ -42,6 +50,44 @@ fun SettingsBrowserScreen(
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
     ) {
+        SettingsSectionCard {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(onClick = onSearchEngineClick)
+                    .padding(horizontal = 16.dp, vertical = 14.dp),
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = stringResource(R.string.settings_search_engine),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    val engineSubtitle = if (searchEngine == Settings.SearchEngine.CUSTOM && customSearchName.isNotBlank()) {
+                        "${stringResource(R.string.search_engine_custom)} ($customSearchName)"
+                    } else {
+                        searchEngine.displayName
+                    }
+                    Text(
+                        text = engineSubtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    imageVector = Icons.ChevronRight,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
         SettingsSectionCard {
             SwitchSettingRow(
                 title = stringResource(R.string.settings_adblock),

@@ -163,7 +163,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         return when {
             input.startsWith("http://") || input.startsWith("https://") -> input
             looksLikeUrl -> "https://$input"
-            else -> "https://www.google.com/search?q=${Uri.encode(input)}"
+            else -> Settings.buildSearchUrl(input)
         }
     }
 }
