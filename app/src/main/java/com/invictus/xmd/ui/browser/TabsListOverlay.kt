@@ -108,6 +108,41 @@ data class TabOverlayItem(
 private val PrivateTabActiveColor = Color(0xFF3A3A3A)
 private val PrivateTabInactiveColor = Color(0xFF2A2A2A)
 
+private data class TabColors(
+    val container: Color,
+    val onContainer: Color,
+    val border: Color,
+)
+
+@Composable
+private fun tabColors(item: TabOverlayItem, isActive: Boolean): TabColors {
+    val container = when {
+        item.isPrivate -> if (isActive) PrivateTabActiveColor else PrivateTabInactiveColor
+        isActive -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+    val onContainer = when {
+        item.isPrivate -> Color.White
+        isActive -> MaterialTheme.colorScheme.onSecondaryContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    val border = when {
+        isActive -> MaterialTheme.colorScheme.primary
+        item.isPrivate -> Color(0xFF4A4A4A)
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+    }
+    return TabColors(container, onContainer, border)
+}
+
+private fun maxTabsContentHeight(configuration: Configuration): Dp {
+    val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    return if (isLandscape) {
+        (configuration.screenHeightDp * 0.72f).coerceIn(200f, 340f).dp
+    } else {
+        (configuration.screenHeightDp * 0.70f).coerceIn(240f, 540f).dp
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TabsListOverlay(
@@ -277,11 +312,7 @@ private fun TabsGridView(
     val isLandscapeOrTablet = isLandscape || isTablet
     val columns = if (isLandscapeOrTablet) 4 else 2
     val cardAspectRatio = if (isLandscape) 0.95f else 0.85f
-    val maxGridHeight = if (isLandscape) {
-        (configuration.screenHeightDp * 0.72f).coerceIn(200f, 340f).dp
-    } else {
-        (configuration.screenHeightDp * 0.70f).coerceIn(240f, 540f).dp
-    }
+    val maxGridHeight = maxTabsContentHeight(configuration)
 
     Box(
         modifier = modifier.fillMaxWidth(),
@@ -322,21 +353,7 @@ private fun TabGridCard(
     onCloseClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val tonalColor = when {
-        item.isPrivate -> if (isActive) PrivateTabActiveColor else PrivateTabInactiveColor
-        isActive -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerHigh
-    }
-    val onTonalColor = when {
-        item.isPrivate -> Color.White
-        isActive -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onSurface
-    }
-    val borderColor = when {
-        isActive -> MaterialTheme.colorScheme.primary
-        item.isPrivate -> Color(0xFF4A4A4A)
-        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
-    }
+    val colors = tabColors(item, isActive)
 
     val domain = remember(item.url) {
         item.url?.let { extractDomain(it) }.orEmpty()
@@ -348,9 +365,9 @@ private fun TabGridCard(
             .aspectRatio(aspectRatio)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick),
-        color = tonalColor,
+        color = colors.container,
         shape = RoundedCornerShape(14.dp),
-        border = BorderStroke(if (isActive) 2.dp else 1.dp, borderColor),
+        border = BorderStroke(if (isActive) 2.dp else 1.dp, colors.border),
         tonalElevation = if (isActive) 4.dp else 1.dp,
     ) {
         Column(
@@ -371,7 +388,7 @@ private fun TabGridCard(
                 )
                 Text(
                     text = item.title.ifBlank { item.url ?: stringResource(R.string.action_new_tab) },
-                    color = onTonalColor,
+                    color = colors.onContainer,
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                     maxLines = 1,
@@ -387,7 +404,7 @@ private fun TabGridCard(
                     Icon(
                         imageVector = Icons.Close,
                         contentDescription = stringResource(R.string.action_dismiss),
-                        tint = onTonalColor.copy(alpha = 0.8f),
+                        tint = colors.onContainer.copy(alpha = 0.8f),
                         modifier = Modifier.size(16.dp),
                     )
                 }
@@ -418,14 +435,14 @@ private fun TabGridCard(
                     Icon(
                         imageVector = if (item.isPrivate) Icons.VisibilityOff else Icons.Globe,
                         contentDescription = null,
-                        tint = onTonalColor.copy(alpha = 0.12f),
+                        tint = colors.onContainer.copy(alpha = 0.12f),
                         modifier = Modifier.size(44.dp),
                     )
 
                     Text(
                         text = if (item.isPrivate) "Incognito" else domain.ifBlank { stringResource(R.string.action_new_tab) },
                         style = MaterialTheme.typography.bodySmall,
-                        color = onTonalColor.copy(alpha = 0.65f),
+                        color = colors.onContainer.copy(alpha = 0.65f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier
@@ -448,11 +465,7 @@ private fun TabsListView(
 ) {
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-    val maxListHeight = if (isLandscape) {
-        (configuration.screenHeightDp * 0.72f).coerceIn(200f, 340f).dp
-    } else {
-        (configuration.screenHeightDp * 0.70f).coerceIn(240f, 540f).dp
-    }
+    val maxListHeight = maxTabsContentHeight(configuration)
 
     Box(
         modifier = modifier.fillMaxWidth(),
@@ -497,16 +510,7 @@ private fun TabRow(
         alpha.animateTo(1f, tween(140))
     }
 
-    val tonalColor = when {
-        item.isPrivate -> if (isActive) PrivateTabActiveColor else PrivateTabInactiveColor
-        isActive -> MaterialTheme.colorScheme.secondaryContainer
-        else -> MaterialTheme.colorScheme.surfaceContainerHigh
-    }
-    val onTonalColor = when {
-        item.isPrivate -> Color.White
-        isActive -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onSurface
-    }
+    val colors = tabColors(item, isActive)
 
     val haptics = LocalHapticFeedback.current
     val dismissState = rememberSwipeToDismissBoxState(
@@ -561,7 +565,7 @@ private fun TabRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable(onClick = onClick),
-            color = tonalColor,
+            color = colors.container,
             shape = RoundedCornerShape(28.dp),
             border = if (isActive) BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
         ) {
@@ -572,7 +576,7 @@ private fun TabRow(
                 TabFavicon(item = item)
                 Text(
                     text = item.title.ifBlank { item.url ?: stringResource(R.string.action_new_tab) },
-                    color = onTonalColor,
+                    color = colors.onContainer,
                     style = MaterialTheme.typography.bodyMedium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -584,7 +588,7 @@ private fun TabRow(
                     Icon(
                         imageVector = Icons.Close,
                         contentDescription = stringResource(R.string.action_dismiss),
-                        tint = onTonalColor,
+                        tint = colors.onContainer,
                     )
                 }
             }

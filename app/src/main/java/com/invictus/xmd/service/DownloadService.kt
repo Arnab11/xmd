@@ -1079,14 +1079,10 @@ class DownloadService : LifecycleService() {
      * holding (e.g. a paused item, whose speed/ETA aren't live anyway).
      */
     private fun buildDetailLine(done: Long, total: Long, speedBps: Double, etaHoldKey: String? = null): String {
-        val sizePart = if (total > 0) "${formatBytes(done)} / ${formatBytes(total)}" else formatBytes(done)
+        val sizePart = if (total > 0) "${com.invictus.xmd.utils.formatBytes(done)} / ${com.invictus.xmd.utils.formatBytes(total)}" else com.invictus.xmd.utils.formatBytes(done)
         if (speedBps <= 0.0) return sizePart
 
-        val speedPart = when {
-            speedBps >= 1_048_576.0 -> "%.1f MB/s".format(speedBps / 1_048_576.0)
-            speedBps >= 1_024.0 -> "%.0f KB/s".format(speedBps / 1_024.0)
-            else -> "%.0f B/s".format(speedBps)
-        }
+        val speedPart = com.invictus.xmd.utils.formatSpeed(speedBps)
 
         val remaining = (total - done).coerceAtLeast(0)
         var etaSec = if (total > 0) (remaining / speedBps).toLong() else -1L
@@ -1095,13 +1091,4 @@ class DownloadService : LifecycleService() {
 
         return "$sizePart  •  $speedPart$etaPart"
     }
-
-    /** Bytes → human-readable string using binary prefixes (KiB, MiB, GiB). */
-    private fun formatBytes(bytes: Long): String = when {
-        bytes >= 1_073_741_824L -> "%.2f GB".format(bytes / 1_073_741_824.0)
-        bytes >= 1_048_576L -> "%.1f MB".format(bytes / 1_048_576.0)
-        bytes >= 1_024L -> "%.0f KB".format(bytes / 1_024.0)
-        else -> "$bytes B"
-    }
-
 }
