@@ -171,4 +171,6 @@ dependencies {
     // (debug builds only -- adds nothing to release APK size).
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+
+    testImplementation("junit:junit:4.13.2")
 }

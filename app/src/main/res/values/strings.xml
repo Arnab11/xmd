@@ -400,4 +400,16 @@
     <string name="download_dialog_advanced_streams_title">Available Streams</string>
     <string name="download_dialog_advanced_streams_probing">Probing available streams…</string>
     <string name="download_dialog_advanced_streams_empty">No extra streams found</string>
+
+    <!-- Duplicate download handling (ab-download-manager pattern) -->
+    <string name="download_already_exists">A download with this name already exists</string>
+    <string name="select_a_solution">Select a solution</string>
+    <string name="select_download_strategy_description">A file with this name already exists. Choose what you want to do:</string>
+    <string name="download_strategy_add_a_numbered_file">Add a numbered file</string>
+    <string name="download_strategy_add_a_numbered_file_description">Save as a new file with a numbered suffix (e.g. name_1.ext)</string>
+    <string name="download_strategy_override_existing_file">Overwrite existing file</string>
+    <string name="download_strategy_override_existing_file_description">Remove existing download and overwrite this file</string>
+    <string name="show_solutions">Show solutions</string>
+    <string name="change_solution">Change solution</string>
+    <string name="open_existing_file">Open file</string>
 </resources>
