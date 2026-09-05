@@ -138,6 +138,43 @@ object QueueRepository {
         persistNow(toPersist)
     }
 
+    /**
+     * Enqueues a new item (or updates an item if it shares the same id) without
+     * dropping or clobbering other queue items.
+     */
+    fun enqueue(item: QueueItem) {
+        synchronized(lock) {
+            val exists = master.any { it.id == item.id }
+            master = if (exists) {
+                master.map { if (it.id == item.id) item else it }
+            } else {
+                master + item
+            }
+            _items.value = master
+        }
+        persistNow(listOf(item))
+    }
+
+    /**
+     * Removes any existing queue items whose target destination file matches [targetFile],
+     * used when overriding an existing download.
+     */
+    fun removeDuplicatesOf(targetFile: java.io.File) {
+        val targetAbs = targetFile.absoluteFile
+        val removedIds: List<String>
+        synchronized(lock) {
+            val (toRemove, toKeep) = master.partition {
+                FileNameUtils.destinationFileOf(it)?.absoluteFile == targetAbs
+            }
+            master = toKeep
+            _items.value = master
+            removedIds = toRemove.map { it.id }
+        }
+        if (removedIds.isNotEmpty() && ::dao.isInitialized) {
+            scope.launch { runCatching { dao.deleteByIds(removedIds) } }
+        }
+    }
+
     fun update(id: String, mutate: (QueueItem) -> QueueItem) {
         var previous: QueueItem? = null
         var updated: QueueItem? = null

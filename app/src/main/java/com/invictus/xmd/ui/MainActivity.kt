@@ -38,16 +38,20 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.invictus.xmd.R
 import com.invictus.xmd.BuildConfig
+import com.invictus.xmd.core.CategoryDetector
 import com.invictus.xmd.core.DnsOverHttpsResolver
 import com.invictus.xmd.core.DownloadCategory
+import com.invictus.xmd.core.FileNameUtils
 import com.invictus.xmd.core.ItemStatus
 import com.invictus.xmd.core.LinkParser
 import com.invictus.xmd.core.MediaPlatform
+import com.invictus.xmd.core.OnDuplicateStrategy
 import com.invictus.xmd.core.QueueItem
 import com.invictus.xmd.core.QueueRepository
 import com.invictus.xmd.core.ResolutionError
 import com.invictus.xmd.core.Settings
 import com.invictus.xmd.core.YtDlpManager
+import java.util.UUID
 import com.invictus.xmd.service.DownloadService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -547,15 +551,15 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                             }
                             addDownloadDialogState = null
                         },
-                        onStart = { link, name, saveDir, quality, audioFormat ->
+                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy ->
                             addDownloadDialogState = null
                             when {
                                 LinkParser.isTorrentLink(link) -> showAddTorrentDialog(prefillLink = link)
                                 LinkParser.isShareLink(link) || LinkParser.isFitgirlPage(link) ->
                                     triggerPrepare(listOf(link))
                                 LinkParser.needsYtDlp(link) ->
-                                    triggerDownloadYoutubeCustom(link, name, saveDir, quality, audioFormat)
-                                else -> triggerDownloadDirectCustom(link, name, saveDir)
+                                    triggerDownloadYoutubeCustom(link, name, saveDir, quality, audioFormat, duplicateStrategy)
+                                else -> triggerDownloadDirectCustom(link, name, saveDir, duplicateStrategy)
                             }
                         },
                     )
@@ -985,19 +989,47 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         }
     }
 
-    fun triggerDownloadDirectCustom(link: String, name: String?, customSaveDirPath: String?) {
-        QueueRepository.setLinks(listOf(link))
-        val item = QueueRepository.current().firstOrNull { it.sourceUrl == link }
-        if (item != null) {
-            QueueRepository.update(item.id) {
-                it.copy(
-                    directUrl = link,
-                    status = ItemStatus.READY,
-                    fileName = name ?: it.fileName,
-                    customSaveDirPath = customSaveDirPath
-                )
+    fun triggerDownloadDirectCustom(
+        link: String,
+        name: String?,
+        customSaveDirPath: String?,
+        duplicateStrategy: OnDuplicateStrategy? = null,
+    ) {
+        val category = CategoryDetector.detect(link, hint = name)
+        val resolvedName = name?.takeUnless { it.isBlank() }
+            ?: DownloadEngine.filenameFromLink(link).ifBlank { DownloadEngine.filenameFromUrl(link) }
+        val targetFile = FileNameUtils.resolveDestinationFile(resolvedName, customSaveDirPath, category)
+
+        val finalName = when (duplicateStrategy) {
+            OnDuplicateStrategy.OverrideDownload -> {
+                QueueRepository.removeDuplicatesOf(targetFile)
+                if (targetFile.exists()) targetFile.delete()
+                resolvedName
+            }
+            OnDuplicateStrategy.AddNumbered -> {
+                val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+            }
+            null -> {
+                if (FileNameUtils.isDuplicate(targetFile, QueueRepository.current())) {
+                    val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                    FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+                } else {
+                    resolvedName
+                }
             }
         }
+
+        val newItem = QueueItem(
+            id = UUID.randomUUID().toString(),
+            sourceUrl = link,
+            directUrl = link,
+            status = ItemStatus.READY,
+            fileName = finalName,
+            customSaveDirPath = customSaveDirPath,
+            category = category,
+        )
+        QueueRepository.enqueue(newItem)
         DownloadService.start(this)
         showDownloadStartedSnackbar()
     }
@@ -1007,7 +1039,8 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         name: String?,
         customSaveDirPath: String?,
         chosenQuality: YtDlpManager.QualityOption?,
-        chosenAudioPreset: Settings.AudioFormatPreset = Settings.presetAudioFormat()
+        chosenAudioPreset: Settings.AudioFormatPreset = Settings.presetAudioFormat(),
+        duplicateStrategy: OnDuplicateStrategy? = null,
     ) {
         if (!BuildConfig.HAS_YOUTUBE_SUPPORT) {
             showMessageDialog(
@@ -1052,21 +1085,42 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             quality.label
         }
 
-        QueueRepository.setLinks(listOf(link))
-        val item = QueueRepository.current().firstOrNull { it.sourceUrl == link }
-        if (item != null) {
-            QueueRepository.update(item.id) {
-                it.copy(
-                    status = ItemStatus.READY,
-                    platform = MediaPlatform.YOUTUBE,
-                    mediaFormatSelector = quality.formatSelector,
-                    mediaFormatLabel = formatLabel,
-                    category = if (quality.isAudioOnly) DownloadCategory.MUSIC else DownloadCategory.VIDEOS,
-                    fileName = name ?: it.fileName,
-                    customSaveDirPath = customSaveDirPath
-                )
+        val category = if (quality.isAudioOnly) DownloadCategory.MUSIC else DownloadCategory.VIDEOS
+        val resolvedName = name?.takeUnless { it.isBlank() } ?: extractYoutubeFallbackName(link)
+        val targetFile = FileNameUtils.resolveDestinationFile(resolvedName, customSaveDirPath, category)
+
+        val finalName = when (duplicateStrategy) {
+            OnDuplicateStrategy.OverrideDownload -> {
+                QueueRepository.removeDuplicatesOf(targetFile)
+                if (targetFile.exists()) targetFile.delete()
+                resolvedName
+            }
+            OnDuplicateStrategy.AddNumbered -> {
+                val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+            }
+            null -> {
+                if (FileNameUtils.isDuplicate(targetFile, QueueRepository.current())) {
+                    val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                    FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+                } else {
+                    resolvedName
+                }
             }
         }
+
+        val newItem = QueueItem(
+            id = UUID.randomUUID().toString(),
+            sourceUrl = link,
+            status = ItemStatus.READY,
+            platform = MediaPlatform.YOUTUBE,
+            mediaFormatSelector = quality.formatSelector,
+            mediaFormatLabel = formatLabel,
+            category = category,
+            fileName = finalName,
+            customSaveDirPath = customSaveDirPath,
+        )
+        QueueRepository.enqueue(newItem)
         DownloadService.start(this)
         showDownloadStartedSnackbar()
     }
@@ -1102,22 +1156,45 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         uri: Uri,
         displayName: String?,
         customSaveDirPath: String?,
-        selectedFileIndices: String?
+        selectedFileIndices: String?,
+        duplicateStrategy: OnDuplicateStrategy? = null,
     ) {
         val link = uri.toString()
-        QueueRepository.setLinks(listOf(link))
-        val item = QueueRepository.current().firstOrNull { it.sourceUrl == link }
-        if (item != null) {
-            QueueRepository.update(item.id) {
-                it.copy(
-                    directUrl = link,
-                    status = ItemStatus.READY,
-                    fileName = displayName ?: it.fileName,
-                    customSaveDirPath = customSaveDirPath,
-                    selectedFileIndices = selectedFileIndices
-                )
+        val resolvedName = displayName?.takeUnless { it.isBlank() } ?: "Torrent Download"
+        val category = CategoryDetector.detect(link, hint = resolvedName)
+        val targetFile = FileNameUtils.resolveDestinationFile(resolvedName, customSaveDirPath, category)
+
+        val finalName = when (duplicateStrategy) {
+            OnDuplicateStrategy.OverrideDownload -> {
+                QueueRepository.removeDuplicatesOf(targetFile)
+                if (targetFile.exists()) targetFile.delete()
+                resolvedName
+            }
+            OnDuplicateStrategy.AddNumbered -> {
+                val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+            }
+            null -> {
+                if (FileNameUtils.isDuplicate(targetFile, QueueRepository.current())) {
+                    val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                    FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+                } else {
+                    resolvedName
+                }
             }
         }
+
+        val newItem = QueueItem(
+            id = UUID.randomUUID().toString(),
+            sourceUrl = link,
+            directUrl = link,
+            status = ItemStatus.READY,
+            fileName = finalName,
+            customSaveDirPath = customSaveDirPath,
+            selectedFileIndices = selectedFileIndices,
+            category = category,
+        )
+        QueueRepository.enqueue(newItem)
         DownloadService.start(this)
         showDownloadStartedSnackbar()
     }
@@ -1132,21 +1209,44 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         link: String,
         name: String?,
         customSaveDirPath: String?,
-        selectedFileIndices: String?
+        selectedFileIndices: String?,
+        duplicateStrategy: OnDuplicateStrategy? = null,
     ) {
-        QueueRepository.setLinks(listOf(link))
-        val item = QueueRepository.current().firstOrNull { it.sourceUrl == link }
-        if (item != null) {
-            QueueRepository.update(item.id) {
-                it.copy(
-                    directUrl = link,
-                    status = ItemStatus.READY,
-                    fileName = name ?: it.fileName,
-                    customSaveDirPath = customSaveDirPath,
-                    selectedFileIndices = selectedFileIndices
-                )
+        val resolvedName = name?.takeUnless { it.isBlank() } ?: magnetDisplayName(link) ?: "Magnet Download"
+        val category = CategoryDetector.detect(link, hint = resolvedName)
+        val targetFile = FileNameUtils.resolveDestinationFile(resolvedName, customSaveDirPath, category)
+
+        val finalName = when (duplicateStrategy) {
+            OnDuplicateStrategy.OverrideDownload -> {
+                QueueRepository.removeDuplicatesOf(targetFile)
+                if (targetFile.exists()) targetFile.delete()
+                resolvedName
+            }
+            OnDuplicateStrategy.AddNumbered -> {
+                val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+            }
+            null -> {
+                if (FileNameUtils.isDuplicate(targetFile, QueueRepository.current())) {
+                    val activeFiles = QueueRepository.current().mapNotNull { FileNameUtils.destinationFileOf(it) }.toSet()
+                    FileNameUtils.numberedNameIfExists(targetFile, activeFiles)
+                } else {
+                    resolvedName
+                }
             }
         }
+
+        val newItem = QueueItem(
+            id = UUID.randomUUID().toString(),
+            sourceUrl = link,
+            directUrl = link,
+            status = ItemStatus.READY,
+            fileName = finalName,
+            customSaveDirPath = customSaveDirPath,
+            selectedFileIndices = selectedFileIndices,
+            category = category,
+        )
+        QueueRepository.enqueue(newItem)
         DownloadService.start(this)
         showDownloadStartedSnackbar()
     }

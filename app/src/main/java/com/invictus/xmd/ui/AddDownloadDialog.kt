@@ -47,12 +47,24 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.invictus.xmd.R
+import android.content.Context
+import android.content.Intent
+import android.webkit.MimeTypeMap
+import android.widget.Toast
+import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.invictus.xmd.core.CategoryDetector
 import com.invictus.xmd.core.DownloadEngine
+import com.invictus.xmd.core.FileNameUtils
+import com.invictus.xmd.core.ItemStatus
 import com.invictus.xmd.core.LinkParser
+import com.invictus.xmd.core.OnDuplicateStrategy
+import com.invictus.xmd.core.QueueRepository
 import com.invictus.xmd.core.Settings
 import com.invictus.xmd.core.YtDlpManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.File
 
 /**
  * Phase A conversion of MainActivity.showAddDownloadDialog() -- previously
@@ -96,6 +108,7 @@ fun AddDownloadDialog(
         saveDir: String?,
         quality: YtDlpManager.QualityOption?,
         audioFormat: Settings.AudioFormatPreset,
+        duplicateStrategy: OnDuplicateStrategy?,
     ) -> Unit,
 ) {
     val context = LocalContext.current
@@ -105,6 +118,29 @@ fun AddDownloadDialog(
     var customSaveDir by remember { mutableStateOf<String?>(null) }
     var advancedExpanded by remember { mutableStateOf(false) }
     var audioFormatPreset by remember { mutableStateOf(Settings.presetAudioFormat()) }
+
+    var onDuplicateStrategy by remember { mutableStateOf<OnDuplicateStrategy?>(null) }
+    var showSolutionsDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(name, customSaveDir) {
+        onDuplicateStrategy = null
+    }
+
+    val category = remember(link, name) { CategoryDetector.detect(link, hint = name) }
+    val trimmedName = name.trim()
+    val targetFile = remember(trimmedName, customSaveDir, category) {
+        if (trimmedName.isNotBlank()) {
+            FileNameUtils.resolveDestinationFile(trimmedName, customSaveDir, category)
+        } else null
+    }
+    val queueItems by QueueRepository.items.collectAsStateWithLifecycle()
+    val conflictingItem = remember(targetFile, queueItems) {
+        targetFile?.let { FileNameUtils.findConflictingDownload(it, queueItems) }
+    }
+    val diskFileExists = remember(targetFile) {
+        targetFile?.exists() == true
+    }
+    val isDuplicate = conflictingItem != null || diskFileExists
 
     val needsYtDlp = LinkParser.needsYtDlp(link)
     val isGeneric = !LinkParser.isYoutubeLink(link)
@@ -307,7 +343,43 @@ fun AddDownloadDialog(
                     shape = RoundedCornerShape(12.dp),
                     placeholder = { Text(stringResource(R.string.download_dialog_name_placeholder)) },
                     maxLines = 2,
+                    isError = isDuplicate && onDuplicateStrategy == null,
                 )
+
+                if (isDuplicate && onDuplicateStrategy == null) {
+                    Text(
+                        text = stringResource(R.string.download_already_exists),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp),
+                    )
+                } else if (isDuplicate && onDuplicateStrategy != null) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        val strategyText = if (onDuplicateStrategy == OnDuplicateStrategy.AddNumbered) {
+                            stringResource(R.string.download_strategy_add_a_numbered_file)
+                        } else {
+                            stringResource(R.string.download_strategy_override_existing_file)
+                        }
+                        Text(
+                            text = strategyText,
+                            color = MaterialTheme.colorScheme.primary,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        TextButton(
+                            onClick = { showSolutionsDialog = true },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                        ) {
+                            Text(stringResource(R.string.change_solution), style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                }
 
                 if (needsYtDlp) {
                     Spacer(Modifier.height(14.dp))
@@ -514,21 +586,46 @@ fun AddDownloadDialog(
             }
         },
         confirmButton = {
-            StartChipButton(onClick = {
-                if (link.isNotBlank()) {
-                    onStart(link.trim(), name.trim().takeUnless { it.isBlank() }, customSaveDir, selectedQualityOption, audioFormatPreset)
+            if (isDuplicate && onDuplicateStrategy == null) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    val completedFile = targetFile?.takeIf { it.exists() }
+                        ?: conflictingItem?.filePath?.let { File(it) }?.takeIf { it.exists() }
+                    if (completedFile != null) {
+                        OutlinedButton(
+                            onClick = { openFile(context, completedFile) },
+                            shape = RoundedCornerShape(10.dp),
+                        ) {
+                            Text(stringResource(R.string.open_existing_file))
+                        }
+                    }
+                    StartChipButton(onClick = { showSolutionsDialog = true }) {
+                        Text(stringResource(R.string.show_solutions))
+                    }
                 }
-            }) {
-                if (needsPrepare) {
-                    Icon(
-                        imageVector = Icons.Sync,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(stringResource(R.string.action_prepare))
-                } else {
-                    Text(stringResource(R.string.torrent_dialog_start))
+            } else {
+                StartChipButton(onClick = {
+                    if (link.isNotBlank()) {
+                        onStart(
+                            link.trim(),
+                            name.trim().takeUnless { it.isBlank() },
+                            customSaveDir,
+                            selectedQualityOption,
+                            audioFormatPreset,
+                            onDuplicateStrategy,
+                        )
+                    }
+                }) {
+                    if (needsPrepare) {
+                        Icon(
+                            imageVector = Icons.Sync,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(stringResource(R.string.action_prepare))
+                    } else {
+                        Text(stringResource(R.string.torrent_dialog_start))
+                    }
                 }
             }
         },
@@ -536,6 +633,108 @@ fun AddDownloadDialog(
             TextButton(onClick = onDismiss) { Text(stringResource(R.string.torrent_dialog_cancel)) }
         },
     )
+
+    if (showSolutionsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSolutionsDialog = false },
+            modifier = Modifier.wideDialogWidth(),
+            properties = WideDialogProperties,
+            title = {
+                Text(
+                    stringResource(R.string.select_a_solution),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            },
+            text = {
+                Column {
+                    Text(
+                        stringResource(R.string.select_download_strategy_description),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    DuplicateSolutionCard(
+                        title = stringResource(R.string.download_strategy_add_a_numbered_file),
+                        description = stringResource(R.string.download_strategy_add_a_numbered_file_description),
+                        isSelected = onDuplicateStrategy == OnDuplicateStrategy.AddNumbered,
+                        onClick = {
+                            onDuplicateStrategy = OnDuplicateStrategy.AddNumbered
+                            showSolutionsDialog = false
+                        },
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    DuplicateSolutionCard(
+                        title = stringResource(R.string.download_strategy_override_existing_file),
+                        description = stringResource(R.string.download_strategy_override_existing_file_description),
+                        isSelected = onDuplicateStrategy == OnDuplicateStrategy.OverrideDownload,
+                        onClick = {
+                            onDuplicateStrategy = OnDuplicateStrategy.OverrideDownload
+                            showSolutionsDialog = false
+                        },
+                    )
+                }
+            },
+            confirmButton = {},
+            dismissButton = {
+                TextButton(onClick = { showSolutionsDialog = false }) {
+                    Text(stringResource(R.string.torrent_dialog_cancel))
+                }
+            }
+        )
+    }
+}
+
+@Composable
+private fun DuplicateSolutionCard(
+    title: String,
+    description: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+        else MaterialTheme.colorScheme.surfaceContainerLow,
+        border = BorderStroke(
+            width = if (isSelected) 1.5.dp else 1.dp,
+            color = if (isSelected) MaterialTheme.colorScheme.primary
+            else MaterialTheme.colorScheme.outlineVariant,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun openFile(context: Context, file: File) {
+    try {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val ext = file.extension.lowercase()
+        val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "*/*"
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, R.string.open_file_missing, Toast.LENGTH_SHORT).show()
+    }
 }
 
 private fun advancedStreamLabel(format: YtDlpManager.ProbedFormat, durationSeconds: Int?): String = buildString {
