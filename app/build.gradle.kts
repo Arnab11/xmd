@@ -43,6 +43,8 @@ android {
     productFlavors {
         create("lite") {
             dimension = "engine"
+            applicationIdSuffix = ".lite"
+            versionNameSuffix = "-lite"
             buildConfigField("boolean", "HAS_YOUTUBE_SUPPORT", "false")
         }
         create("full") {
@@ -80,6 +82,9 @@ android {
             // (or manually for local release testing), keeping build and
             // sign as separate, visible steps.
         }
+        debug {
+            applicationIdSuffix = ".debug"
+        }
     }
 
     compileOptions {
@@ -89,12 +94,30 @@ android {
     buildFeatures {
         buildConfig = true
         compose = true
+        resValues = true
     }
 
     packaging {
         jniLibs {
             useLegacyPackaging = true
         }
+    }
+}
+
+androidComponents {
+    onVariants { variant ->
+        val isLite = variant.flavorName == "lite"
+        val isDebug = variant.buildType == "debug"
+        val appName = when {
+            isLite && isDebug -> "Xmd-Lite-Debug"
+            isLite -> "Xmd-Lite"
+            isDebug -> "Xmd-Debug"
+            else -> "Xmd"
+        }
+        variant.resValues.put(
+            variant.makeResValueKey("string", "app_name"),
+            com.android.build.api.variant.ResValue(appName)
+        )
     }
 }
 
