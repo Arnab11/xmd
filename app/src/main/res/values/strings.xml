@@ -258,6 +258,7 @@
     <string name="action_new_tab">New Tab</string>
     <string name="action_home">Home</string>
     <string name="action_tabs">Tabs</string>
+    <string name="tabs_overlay_header">%1$d tabs</string>
     <string name="action_more">More Options</string>
     <string name="action_add_to_downloads">Add to Downloads</string>
     <string name="action_add_shortcut">Add Shortcut</string>

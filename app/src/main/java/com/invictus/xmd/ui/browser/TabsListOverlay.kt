@@ -23,13 +23,16 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.FloatingActionButton
 import com.invictus.xmd.ui.icons.Icon
 import com.invictus.xmd.ui.icons.Icons
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -38,9 +41,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,6 +73,14 @@ import com.invictus.xmd.utils.FaviconLoader
  * sniffedSheetStreams/suggestionItems pattern already used elsewhere in
  * this Fragment -- refreshed explicitly after every mutation (open/close)
  * rather than this composable reading BrowserViewModel directly.
+ *
+ * "New tab" used to be its own FloatingActionButton in a dedicated row
+ * below the list -- pushed well clear of the last tab row and needing an
+ * 80dp bottom-padding reservation to sit above the app's own bottom nav.
+ * It's now an IconButton in the header instead (Chrome/Firefox tab-switcher
+ * convention: title + add, top-aligned), which is what let the bottom
+ * reservation shrink to just [navigationBarsPadding] -- see the header Row
+ * and the Column's padding below.
  */
 data class TabOverlayItem(
     val id: Long,
@@ -124,16 +137,34 @@ fun TabsListOverlay(
             ) {
                 Column(
                     modifier = Modifier
-                        .padding(horizontal = 16.dp, vertical = 16.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                         .navigationBarsPadding()
-                        .padding(bottom = 80.dp),
+                        .padding(bottom = 8.dp),
                 ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 4.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.tabs_overlay_header, tabs.size),
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.weight(1f),
+                        )
+                        IconButton(onClick = onAddNew) {
+                            Icon(
+                                imageVector = Icons.Add,
+                                contentDescription = stringResource(R.string.action_new_tab),
+                            )
+                        }
+                    }
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 420.dp)
+                            .heightIn(max = 360.dp)
                             .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
                         tabs.forEachIndexed { index, tab ->
                             TabRow(
@@ -145,29 +176,13 @@ fun TabsListOverlay(
                             )
                         }
                     }
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 10.dp),
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        FloatingActionButton(
-                            onClick = onAddNew,
-                            containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                            contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Add,
-                                contentDescription = stringResource(R.string.action_new_tab),
-                            )
-                        }
-                    }
                 }
             }
         }
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TabRow(
     item: TabOverlayItem,
@@ -197,35 +212,89 @@ private fun TabRow(
         else -> MaterialTheme.colorScheme.onSurface
     }
 
-    Surface(
+    // Swipe-to-close in either direction, same haptic-on-confirm pattern
+    // DownloadsScreen's queue-item swipe-to-clear already uses -- see that
+    // file's rememberSwipeToDismissBoxState call for the twin of this one.
+    val haptics = LocalHapticFeedback.current
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            if (value == SwipeToDismissBoxValue.StartToEnd || value == SwipeToDismissBoxValue.EndToStart) {
+                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                onCloseClick()
+                true
+            } else {
+                false
+            }
+        },
+    )
+    // Tab list entries get reused/recomposed by id as tabs open and close
+    // (same reasoning as the queue-item version) -- without this, a row
+    // that reused a just-closed tab's slot could inherit a mid-swipe state.
+    LaunchedEffect(item.id) {
+        if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
+            dismissState.reset()
+        }
+    }
+
+    SwipeToDismissBox(
+        state = dismissState,
         modifier = Modifier
             .fillMaxWidth()
-            .alpha(alpha.value)
-            .clickable(onClick = onClick),
-        color = tonalColor,
-        shape = RoundedCornerShape(28.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 8.dp, top = 8.dp, bottom = 8.dp, end = 10.dp),
-        ) {
-            TabFavicon(item = item, tint = onTonalColor)
-            Text(
-                text = item.title.ifBlank { item.url ?: stringResource(R.string.action_new_tab) },
-                color = onTonalColor,
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+            .alpha(alpha.value),
+        enableDismissFromStartToEnd = true,
+        enableDismissFromEndToStart = true,
+        backgroundContent = {
+            val alignment = if (dismissState.dismissDirection == SwipeToDismissBoxValue.StartToEnd) {
+                Alignment.CenterStart
+            } else {
+                Alignment.CenterEnd
+            }
+            Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .padding(start = 12.dp),
-            )
-            IconButton(onClick = onCloseClick) {
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(horizontal = 20.dp),
+                contentAlignment = alignment,
+            ) {
                 Icon(
                     imageVector = Icons.Close,
                     contentDescription = stringResource(R.string.action_dismiss),
-                    tint = onTonalColor,
+                    tint = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.size(22.dp),
                 )
+            }
+        },
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onClick),
+            color = tonalColor,
+            shape = RoundedCornerShape(28.dp),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(start = 8.dp, top = 6.dp, bottom = 6.dp, end = 10.dp),
+            ) {
+                TabFavicon(item = item, tint = onTonalColor)
+                Text(
+                    text = item.title.ifBlank { item.url ?: stringResource(R.string.action_new_tab) },
+                    color = onTonalColor,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(start = 12.dp),
+                )
+                IconButton(onClick = onCloseClick) {
+                    Icon(
+                        imageVector = Icons.Close,
+                        contentDescription = stringResource(R.string.action_dismiss),
+                        tint = onTonalColor,
+                    )
+                }
             }
         }
     }
@@ -247,7 +316,7 @@ private fun TabFavicon(item: TabOverlayItem, tint: Color) {
 
     Box(
         modifier = Modifier
-            .size(32.dp)
+            .size(28.dp)
             .background(color = Color.White, shape = CircleShape),
         contentAlignment = Alignment.Center,
     ) {
@@ -256,7 +325,7 @@ private fun TabFavicon(item: TabOverlayItem, tint: Color) {
             Image(
                 bitmap = bitmap.asImageBitmap(),
                 contentDescription = null,
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
             )
         } else {
             Icon(
