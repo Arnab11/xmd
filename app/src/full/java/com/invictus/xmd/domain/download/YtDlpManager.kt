@@ -42,7 +42,8 @@ object YtDlpManager {
         val label: String,
         /** yt-dlp `-f` format selector. */
         val formatSelector: String,
-        val isAudioOnly: Boolean
+        val isAudioOnly: Boolean,
+        val height: Int? = null
     )
 
     /**
@@ -64,14 +65,62 @@ object YtDlpManager {
      * selector chain is left exactly as before.
      */
     fun standardQualityOptions(isGenericOrHls: Boolean = false): List<QualityOption> = listOf(
-        QualityOption("4K (2160p)", videoSelector(2160, isGenericOrHls), isAudioOnly = false),
-        QualityOption("1440p",      videoSelector(1440, isGenericOrHls), isAudioOnly = false),
-        QualityOption("1080p",      videoSelector(1080, isGenericOrHls), isAudioOnly = false),
-        QualityOption("720p",       videoSelector(720,  isGenericOrHls), isAudioOnly = false),
-        QualityOption("360p",       videoSelector(360,  isGenericOrHls), isAudioOnly = false),
-        QualityOption("144p",       videoSelector(144,  isGenericOrHls), isAudioOnly = false),
+        QualityOption("4K (2160p)", videoSelector(2160, isGenericOrHls), isAudioOnly = false, height = 2160),
+        QualityOption("1440p",      videoSelector(1440, isGenericOrHls), isAudioOnly = false, height = 1440),
+        QualityOption("1080p",      videoSelector(1080, isGenericOrHls), isAudioOnly = false, height = 1080),
+        QualityOption("720p",       videoSelector(720,  isGenericOrHls), isAudioOnly = false, height = 720),
+        QualityOption("360p",       videoSelector(360,  isGenericOrHls), isAudioOnly = false, height = 360),
+        QualityOption("144p",       videoSelector(144,  isGenericOrHls), isAudioOnly = false, height = 144),
         QualityOption("Audio only (${audioFormatShortLabel()})", AUDIO_ONLY_SELECTOR, isAudioOnly = true)
     )
+
+    /**
+     * Extracts distinct real video resolutions from [probedFormats] (e.g. 1080p, 720p, 480p, 360p, 240p, 144p)
+     * and constructs the quality ladder, appending the "Audio only" option at the end.
+     * Falls back to [standardQualityOptions] if no video heights were found in the probe.
+     */
+    fun qualityOptionsFromProbedFormats(
+        probedFormats: List<ProbedFormat>,
+        isGenericOrHls: Boolean = false
+    ): List<QualityOption> {
+        val videoHeights = probedFormats
+            .filter { !it.isAudioOnly && it.height != null && it.height > 0 }
+            .mapNotNull { it.height }
+            .distinct()
+            .sortedDescending()
+
+        if (videoHeights.isEmpty()) {
+            return standardQualityOptions(isGenericOrHls)
+        }
+
+        val videoOptions = videoHeights.map { h ->
+            val label = when (h) {
+                2160 -> "4K (2160p)"
+                1440 -> "1440p"
+                1080 -> "1080p"
+                720 -> "720p"
+                480 -> "480p"
+                360 -> "360p"
+                240 -> "240p"
+                144 -> "144p"
+                else -> "${h}p"
+            }
+            QualityOption(
+                label = label,
+                formatSelector = videoSelector(h, isGenericOrHls),
+                isAudioOnly = false,
+                height = h
+            )
+        }
+
+        val audioOpt = QualityOption(
+            label = "Audio only (${audioFormatShortLabel()})",
+            formatSelector = AUDIO_ONLY_SELECTOR,
+            isAudioOnly = true
+        )
+
+        return videoOptions + audioOpt
+    }
 
     /**
      * Short display label for the "Audio only (…)" row, reflecting the
@@ -126,7 +175,7 @@ object YtDlpManager {
             codec == Settings.CodecPreset.ANY &&
             fps == Settings.FpsPreset.ANY
         ) {
-            return "bestvideo[height$heightCmp$maxHeight]+bestaudio/best[height$heightCmp$maxHeight]$genericFallback"
+            return "bestvideo[height$heightCmp$maxHeight]+bestaudio/best[height$heightCmp$maxHeight]/bestvideo+bestaudio/best$genericFallback"
         }
 
         val videoFilters = buildList {
@@ -147,11 +196,12 @@ object YtDlpManager {
         }
         val strictAudio = audioExt?.let { "bestaudio[ext=$it]" } ?: "bestaudio"
 
-        return "bestvideo[$videoFilters]+$strictAudio/bestvideo[height$heightCmp$maxHeight]+bestaudio/best[height$heightCmp$maxHeight]$genericFallback"
+        return "bestvideo[$videoFilters]+$strictAudio/bestvideo[height$heightCmp$maxHeight]+bestaudio/best[height$heightCmp$maxHeight]/bestvideo+bestaudio/best$genericFallback"
     }
 
-    /** Result of [probeFormats]: every real stream yt-dlp reports for a URL, plus the video's duration (needed to estimate size for formats where yt-dlp doesn't report filesize directly). */
+    /** Result of [probeFormats]: every real stream yt-dlp reports for a URL, plus the video's title and duration (needed to estimate size for formats where yt-dlp doesn't report filesize directly). */
     data class ProbeResult(
+        val title: String?,
         val formats: List<ProbedFormat>,
         val durationSeconds: Int?
     )
@@ -200,12 +250,16 @@ object YtDlpManager {
      * still works regardless.
      */
     fun probeFormats(url: String, context: Context): ProbeResult {
-        if (!ensureReady(context)) return ProbeResult(emptyList(), null)
+        if (!ensureReady(context)) return ProbeResult(null, emptyList(), null)
         return try {
             val request = YoutubeDLRequest(url)
             request.addOption("--dump-json")
             request.addOption("--no-download")
             request.addOption("--no-playlist")
+            request.addOption("--no-check-certificates")
+            request.addOption("--compat-options", "manifest-filesize-approx")
+            request.addOption("-R", "1")
+            request.addOption("--socket-timeout", "10")
             val response = YoutubeDL.getInstance().execute(request, "probe-" + System.nanoTime()) { _, _, _ -> }
 
             // --dump-json prints exactly one JSON object per line (one
@@ -216,11 +270,13 @@ object YtDlpManager {
                 .lineSequence()
                 .map { it.trim() }
                 .lastOrNull { it.startsWith("{") }
-                ?: return ProbeResult(emptyList(), null)
+                ?: return ProbeResult(null, emptyList(), null)
 
             val root = org.json.JSONObject(jsonLine)
+            val title = root.optString("title").takeIf { it.isNotBlank() }
+                ?: root.optString("fulltitle").takeIf { it.isNotBlank() }
             val duration = root.optInt("duration", -1).takeIf { it > 0 }
-            val formats = root.optJSONArray("formats") ?: return ProbeResult(emptyList(), duration)
+            val formats = root.optJSONArray("formats") ?: return ProbeResult(title, emptyList(), duration)
 
             val parsed = (0 until formats.length()).mapNotNull { i ->
                 val f = formats.optJSONObject(i) ?: return@mapNotNull null
@@ -241,10 +297,10 @@ object YtDlpManager {
                     tbr = f.optDouble("tbr", -1.0).takeIf { it > 0 }
                 )
             }
-            ProbeResult(parsed, duration)
+            ProbeResult(title, parsed, duration)
         } catch (e: Throwable) {
             Log.w(TAG, "Format probe failed for $url", e)
-            ProbeResult(emptyList(), null)
+            ProbeResult(null, emptyList(), null)
         }
     }
 
@@ -257,7 +313,7 @@ object YtDlpManager {
      */
     fun advancedSelector(format: ProbedFormat): String = when {
         format.isAudioOnly -> format.formatId
-        format.isVideoOnly -> "${format.formatId}+bestaudio"
+        format.isVideoOnly -> "${format.formatId}+bestaudio/${format.formatId}+ba/${format.formatId}"
         else -> format.formatId // already muxed (progressive) stream
     }
 
@@ -520,26 +576,45 @@ object YtDlpManager {
      * video title (which can contain characters yt-dlp itself sanitizes
      * differently than our own sanitize()).
      */
+    fun sanitizeFileName(name: String): String {
+        return name.replace(Regex("""[\\/:*?"<>|]"""), "_").trim()
+    }
+
     fun download(
         url: String,
         option: QualityOption,
         outputDir: File,
         processId: String,
         context: Context,
+        customFileName: String? = null,
         onProgress: (DownloadProgress) -> Unit
     ): File {
         if (!ensureReady(context)) throw IllegalStateException("yt-dlp not installed")
         outputDir.mkdirs()
 
+        val tempDir = File(context.cacheDir, "ytdlp/$processId")
+        tempDir.deleteRecursively()
+        tempDir.mkdirs()
+
         val request = YoutubeDLRequest(url)
-        request.addOption("-o", File(outputDir, "%(title).200B [%(id)s].%(ext)s").absolutePath)
+        request.addOption("-P", tempDir.absolutePath)
+        if (!customFileName.isNullOrBlank()) {
+            val sanitized = sanitizeFileName(customFileName.removeSuffix(".%(ext)s"))
+            request.addOption("-o", "$sanitized.%(ext)s")
+        } else {
+            request.addOption("-o", "%(title)s.%(ext)s")
+        }
+        request.addOption("--windows-filenames")
         request.addOption("--no-mtime")
         request.addOption("--no-playlist")
         request.addOption("--newline")
         request.addOption("--no-colors")
         request.addOption("--no-quiet")
+        request.addOption("--no-simulate")
         request.addOption("--progress")
-        request.addOption("--extractor-args", "youtube:player_client=web,ios,android")
+        request.addOption("--no-check-certificates")
+        request.addOption("--compat-options", "manifest-filesize-approx")
+        request.addOption("-N", "4")
         request.addOption("--print", "after_move:filepath")
 
         if (option.isAudioOnly) {
@@ -587,13 +662,17 @@ object YtDlpManager {
             )
         } else {
             request.addOption("-f", option.formatSelector)
+            if (option.height != null) {
+                request.addOption("-S", "res:${option.height}")
+            }
             // Merge container for the video+audio case above.
-            request.addOption("--merge-output-format", "mp4")
+            request.addOption("--merge-output-format", "mp4/mkv")
             request.addOption("--embed-thumbnail")
             // Same reasoning as the audio branch above -- embed it into the
             // video, don't also leave a separate thumbnail image file
             // sitting next to it in the same folder.
             request.addOption("--no-write-thumbnail")
+            request.addOption("--convert-thumbnails", "jpg")
             request.addOption("--embed-metadata")
         }
 
@@ -615,7 +694,7 @@ object YtDlpManager {
             }
         }
 
-        val resolved = response.out
+        val downloadedInTemp = response.out
             .lineSequence()
             .map { it.trim().replace(ANSI_REGEX, "") }
             .firstOrNull { line ->
@@ -626,11 +705,26 @@ object YtDlpManager {
                 .map { it.trim().replace(ANSI_REGEX, "") }
                 .lastOrNull { it.isNotEmpty() && !it.startsWith("[") && File(it).isFile }
                 ?.let { File(it) }
-            ?: outputDir.listFiles()
-                ?.filter { it.isFile }
+            ?: tempDir.listFiles()
+                ?.filter { it.isFile && !it.name.endsWith(".webp") && !it.name.endsWith(".jpg") && !it.name.endsWith(".part") }
                 ?.maxByOrNull { it.lastModified() }
+            ?: throw RuntimeException("Download finished but the output file couldn't be located")
 
-        return resolved ?: throw RuntimeException("Download finished but the output file couldn't be located")
+        val safeName = sanitizeFileName(downloadedInTemp.name)
+        val finalTarget = File(outputDir, safeName)
+        if (finalTarget.exists()) {
+            finalTarget.delete()
+        }
+        val moved = downloadedInTemp.renameTo(finalTarget)
+        val finalFile = if (moved) {
+            finalTarget
+        } else {
+            downloadedInTemp.copyTo(finalTarget, overwrite = true)
+            downloadedInTemp.delete()
+            finalTarget
+        }
+        tempDir.deleteRecursively()
+        return finalFile
     }
 
     /** Force-stops an in-flight download started with the same [processId]. */
