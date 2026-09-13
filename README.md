@@ -57,7 +57,8 @@
 
 ## ✨ Features
 
-### 📥 Downloader
+<details>
+<summary><b>📥 Downloader</b></summary>
 
 | Feature | Description |
 |---|---|
@@ -82,7 +83,10 @@
 | **Background downloads for shares** | Links shared from other apps or opened externally show a floating dialog and download in the background |
 | **Completion stats** | Duration (e.g. "Took 42s"), size, and localized date/time shown on completed downloads |
 
-### 🧲 Torrents
+</details>
+
+<details>
+<summary><b>🧲 Torrents</b></summary>
 
 | Feature | Description |
 |---|---|
@@ -90,7 +94,10 @@
 | **Add Torrent dialog** | Dedicated confirmation dialog with its own magnet icon for adding torrents |
 | **External torrent import** | Add torrents discovered while browsing the in-app Browser |
 
-### ▶️ YouTube & Instagram (yt-dlp)
+</details>
+
+<details>
+<summary><b>▶️ YouTube & Instagram (yt-dlp)</b></summary>
 
 | Feature | Description |
 |---|---|
@@ -100,7 +107,10 @@
 | **Proper thumbnails** | Downloaded audio gets correct embedded thumbnail art |
 | **Clipboard detection** | YouTube links copied to the clipboard are picked up automatically |
 
-### 🌐 Browser
+</details>
+
+<details>
+<summary><b>🌐 Browser</b></summary>
 
 | Feature | Description |
 |---|---|
@@ -123,7 +133,10 @@
 | **Translate** | Translate the current page via Google's web-proxy translator, with a language picker, from the overflow menu |
 | **Media picker on YouTube** | A floating "videos found" action on YouTube watch/Shorts pages routes sniffed streams straight into the quality picker |
 
-### 🎨 Theme System
+</details>
+
+<details>
+<summary><b>🎨 Theme System</b></summary>
 
 | Feature | Description |
 |---|---|
@@ -131,6 +144,8 @@
 | **5 Built-in Themes** | Default, Aurora, Nord, Dracula, and Catppuccin — colors migrated to theme attributes for consistent dynamic theming |
 | **AMOLED dark mode** | True-black toggle for OLED screens |
 | **Polished assets** | Refreshed icons, tint work, a dedicated torrent magnet icon, and smoother celestial/placeholder styling throughout |
+
+</details>
 
 ---
 
