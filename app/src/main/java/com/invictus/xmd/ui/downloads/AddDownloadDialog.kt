@@ -160,12 +160,15 @@ fun AddDownloadDialog(
     var advancedDurationSeconds by remember { mutableStateOf<Int?>(null) }
     var selectedAdvancedFormat by remember { mutableStateOf<YtDlpManager.ProbedFormat?>(null) }
 
-    val standardOptions = remember(needsYtDlp, isGeneric) {
-        if (needsYtDlp) YtDlpManager.standardQualityOptions(isGenericOrHls = isGeneric) else emptyList()
+    var availableQualityOptions by remember(needsYtDlp, isGeneric) {
+        mutableStateOf<List<YtDlpManager.QualityOption>>(
+            if (needsYtDlp) YtDlpManager.standardQualityOptions(isGenericOrHls = isGeneric) else emptyList()
+        )
     }
-    val videoOptions = remember(standardOptions) { standardOptions.filter { !it.isAudioOnly } }
-    val audioOption = remember(standardOptions) {
-        standardOptions.firstOrNull { it.isAudioOnly }
+
+    val videoOptions = remember(availableQualityOptions) { availableQualityOptions.filter { !it.isAudioOnly } }
+    val audioOption = remember(availableQualityOptions) {
+        availableQualityOptions.firstOrNull { it.isAudioOnly }
             ?: YtDlpManager.QualityOption("Audio only", YtDlpManager.AUDIO_ONLY_SELECTOR, isAudioOnly = true)
     }
     val qualityItems = remember(videoOptions) { videoOptions.map { it.label } + "Audio only" }
@@ -179,19 +182,24 @@ fun AddDownloadDialog(
             selectedQualityOption = null
             advancedFormats = emptyList()
             selectedAdvancedFormat = null
+            availableQualityOptions = emptyList()
             return@LaunchedEffect
         }
+        val defaultStdOptions = YtDlpManager.standardQualityOptions(isGenericOrHls = isGeneric)
+        availableQualityOptions = defaultStdOptions
         val savedQuality = Settings.ytDlpDefaultQualityLabel()
+        val initialVideoOptions = defaultStdOptions.filter { !it.isAudioOnly }
+        val initialItems = initialVideoOptions.map { it.label } + "Audio only"
         val initial = when {
             savedQuality.startsWith("Audio only", ignoreCase = true) -> "Audio only"
-            savedQuality.isNotBlank() && qualityItems.contains(savedQuality) -> savedQuality
-            qualityItems.contains("1080p") -> "1080p"
-            qualityItems.contains("720p") -> "720p"
-            else -> qualityItems.firstOrNull() ?: "1080p"
+            savedQuality.isNotBlank() && initialItems.contains(savedQuality) -> savedQuality
+            initialItems.contains("1080p") -> "1080p"
+            initialItems.contains("720p") -> "720p"
+            else -> initialItems.firstOrNull() ?: "1080p"
         }
         selectedQualityLabel = initial
         selectedQualityOption = if (initial == "Audio only") audioOption
-        else videoOptions.firstOrNull { it.label == initial }
+        else initialVideoOptions.firstOrNull { it.label == initial }
         selectedAdvancedFormat = null
 
         advancedLoading = true
@@ -199,11 +207,40 @@ fun AddDownloadDialog(
         val probe = withContext(Dispatchers.IO) { YtDlpManager.probeFormats(link, context) }
         advancedLoading = false
         advancedDurationSeconds = probe.durationSeconds
-        advancedFormats = probe.formats.sortedWith(
+        if (!nameManuallyEdited && !probe.title.isNullOrBlank()) {
+            name = probe.title
+        }
+        val sorted = probe.formats.sortedWith(
             compareByDescending<YtDlpManager.ProbedFormat> { it.height ?: -1 }
                 .thenByDescending { it.fps ?: -1 }
                 .thenByDescending { it.tbr ?: -1.0 }
         )
+        advancedFormats = sorted
+
+        if (sorted.isNotEmpty()) {
+            val probedQualityOptions = YtDlpManager.qualityOptionsFromProbedFormats(sorted, isGenericOrHls = isGeneric)
+            if (probedQualityOptions.isNotEmpty()) {
+                availableQualityOptions = probedQualityOptions
+                val updatedVideoOptions = probedQualityOptions.filter { !it.isAudioOnly }
+                val updatedItems = updatedVideoOptions.map { it.label } + "Audio only"
+                val prevLabel = selectedQualityLabel
+                val newSelection = when {
+                    prevLabel?.startsWith("Audio only", ignoreCase = true) == true -> "Audio only"
+                    savedQuality.startsWith("Audio only", ignoreCase = true) -> "Audio only"
+                    savedQuality.isNotBlank() && updatedItems.contains(savedQuality) -> savedQuality
+                    prevLabel != null && updatedItems.contains(prevLabel) -> prevLabel
+                    updatedItems.contains("1080p") -> "1080p"
+                    updatedItems.contains("720p") -> "720p"
+                    else -> updatedItems.firstOrNull() ?: "1080p"
+                }
+                selectedQualityLabel = newSelection
+                selectedQualityOption = if (newSelection == "Audio only") {
+                    probedQualityOptions.firstOrNull { it.isAudioOnly } ?: audioOption
+                } else {
+                    updatedVideoOptions.firstOrNull { it.label == newSelection }
+                }
+            }
+        }
     }
 
     // Name auto-fill -- mirrors updateNameForLink(), skipped once the user

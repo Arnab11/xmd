@@ -627,13 +627,15 @@ class DownloadService : LifecycleService() {
         }
 
         try {
+            val customName = item.fileName?.takeUnless { it.isBlank() || it.startsWith("YouTube (") || it == "YouTube Video" }
             val file = withContext(Dispatchers.IO) {
                 YtDlpManager.download(
                     url = item.sourceUrl,
                     option = option,
                     outputDir = outputDir,
                     processId = itemId,
-                    context = this@DownloadService
+                    context = this@DownloadService,
+                    customFileName = customName
                 ) { progress ->
                     QueueRepository.update(itemId) {
                         it.copy(
