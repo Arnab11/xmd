@@ -107,6 +107,13 @@ fun AddDownloadDialog(
     probeRealFilename: suspend (String) -> String?,
     onDetectedTorrentLink: (String) -> Unit,
     onPickTorrentFile: () -> Unit,
+    /** False hides the "Pick .torrent file instead" button entirely --
+     *  used when this dialog was opened from the browser's own download
+     *  click (WebView's DownloadListener), where the link is already a
+     *  concrete http(s) download and offering a torrent-file picker makes
+     *  no sense. Manual "Add download" entry points (FAB, retry, share
+     *  intent) keep the default true. */
+    allowPickTorrentFile: Boolean = true,
     onCopyLink: (String) -> Unit,
     onPasteRequest: () -> String?,
     onChangeSaveDir: (onPicked: (String) -> Unit) -> Unit,
@@ -368,7 +375,7 @@ fun AddDownloadDialog(
                     maxLines = 4,
                 )
 
-                if (!needsYtDlp) {
+                if (!needsYtDlp && allowPickTorrentFile) {
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = onPickTorrentFile,

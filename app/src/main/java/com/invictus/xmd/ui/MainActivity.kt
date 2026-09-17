@@ -124,6 +124,10 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         val initialLink: String,
         val initialName: String? = null,
         val pageUrl: String? = null,
+        /** False for the browser's own download-click flow -- hides the
+         *  "Pick .torrent file instead" button, see AddDownloadDialog's
+         *  allowPickTorrentFile doc comment. */
+        val allowPickTorrentFile: Boolean = true,
     )
 
     private data class AddTorrentDialogState(
@@ -675,6 +679,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                                 arrayOf("application/x-bittorrent", "application/octet-stream")
                             )
                         },
+                        allowPickTorrentFile = state.allowPickTorrentFile,
                         onCopyLink = { text ->
                             if (text.isNotBlank()) {
                                 clipboardManager.setPrimaryClip(
@@ -1033,13 +1038,23 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         }.getOrNull()
     }
 
-    fun showAddDownloadDialog(link: String? = null, initialName: String? = null, pageUrl: String? = null) {
+    fun showAddDownloadDialog(
+        link: String? = null,
+        initialName: String? = null,
+        pageUrl: String? = null,
+        allowPickTorrentFile: Boolean = true,
+    ) {
         val trimmed = link?.trim().orEmpty()
         if (LinkParser.isTorrentLink(trimmed) && trimmed.contains("xt=", ignoreCase = true)) {
             showAddTorrentDialog(prefillLink = trimmed)
             return
         }
-        addDownloadDialogState = AddDownloadDialogState(initialLink = trimmed, initialName = initialName, pageUrl = pageUrl)
+        addDownloadDialogState = AddDownloadDialogState(
+            initialLink = trimmed,
+            initialName = initialName,
+            pageUrl = pageUrl,
+            allowPickTorrentFile = allowPickTorrentFile,
+        )
     }
 
     fun showAddTorrentDialog(
@@ -1547,7 +1562,9 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     // ── BrowserFragment.Callbacks ───────────────────────────────────────────
 
     override fun onOpenAddDownloadDialog(url: String, suggestedName: String?, pageUrl: String?) {
-        showAddDownloadDialog(link = url, initialName = suggestedName, pageUrl = pageUrl)
+        // Browser's own download click -- a concrete http(s) URL, never a
+        // reason to offer "pick a .torrent file instead" here.
+        showAddDownloadDialog(link = url, initialName = suggestedName, pageUrl = pageUrl, allowPickTorrentFile = false)
     }
 
     override fun onBrowserMenuAction(action: BrowserMenuAction) {
