@@ -759,7 +759,7 @@ object Settings {
      *  but as a last-resort guard, a stored set that would hide every page
      *  tab has that constraint dropped on read. */
     fun hiddenTabs(): Set<String> {
-        val stored = prefs.getString(KEY_HIDDEN_TABS, "")
+        val stored = prefs.getString(KEY_HIDDEN_TABS, TabId.HOME)
             ?.split(",")
             ?.filter { it.isNotBlank() && it in TabId.ALL }
             ?.toSet()
