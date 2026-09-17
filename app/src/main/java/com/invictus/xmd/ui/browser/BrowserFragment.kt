@@ -96,6 +96,19 @@ class BrowserFragment : Fragment() {
          * other Callbacks implementers don't need to do anything.
          */
         fun triggerPrepareFromPage(url: String, pageUrl: String) { triggerPrepare(listOf(url)) }
+        /**
+         * The WebView's own download intercept (see [onWebViewDownloadRequested])
+         * fired for a real file link -- opens the full Add Download editor
+         * (link, name, save folder, schedule) pre-filled with [url] and the
+         * best filename known so far ([suggestedName]), instead of queuing
+         * it straight away. [pageUrl] is threaded through the same as
+         * [triggerPrepareFromPage] so expired-link recovery still works.
+         * Default falls back to [triggerPrepareFromPage] for other
+         * Callbacks implementers.
+         */
+        fun onOpenAddDownloadDialog(url: String, suggestedName: String?, pageUrl: String?) {
+            if (pageUrl != null) triggerPrepareFromPage(url, pageUrl) else triggerPrepare(listOf(url))
+        }
         fun onBrowserMenuAction(action: BrowserMenuAction)
         /** A stream MediaSniffer picked up was tapped in the "videos found"
          *  sheet. HLS/DASH ([needsPicker] true) routes through the same
@@ -571,11 +584,7 @@ class BrowserFragment : Fragment() {
                                 onCopyLink = ::copyLinkToClipboard,
                                 onAddToDownloads = { url ->
                                     val pageUrl = tabs.getOrNull(currentTabIndex)?.url
-                                    if (pageUrl != null) {
-                                        (activity as? Callbacks)?.triggerPrepareFromPage(url, pageUrl)
-                                    } else {
-                                        (activity as? Callbacks)?.triggerPrepare(listOf(url))
-                                    }
+                                    (activity as? Callbacks)?.onOpenAddDownloadDialog(url, prompt.fileName, pageUrl)
                                 },
                             )
                         }

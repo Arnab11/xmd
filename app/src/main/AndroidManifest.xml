@@ -9,6 +9,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Download scheduler: wakes the app at a quiet-hours window
+         boundary or a one-time start time even under Doze/App Standby.
+         Android 12+ requires the user grant this from Settings (see
+         SettingsDownloadsScreen's scheduler section); without it we fall
+         back to an inexact alarm (see ScheduleAlarmManager). -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- Re-arms the scheduler's alarm after a reboot, since AlarmManager
+         alarms don't survive one on their own. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- Lets the in-app updater (About screen) launch the system package
          installer for a downloaded APK on Android 8+, where installing
          from an "unknown source" needs this explicit grant instead of the
@@ -138,6 +147,19 @@
             android:name=".service.DownloadService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Handles the scheduler's own exact-alarm wakeup and
+             BOOT_COMPLETED (re-arm after reboot); see ScheduleReceiver's
+             doc comment and ScheduleAlarmManager. Not exported: our alarm's
+             PendingIntent is same-app only, and BOOT_COMPLETED is a
+             protected system broadcast the system delivers regardless. -->
+        <receiver
+            android:name=".service.ScheduleReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Lets DownloadsFragment's "Open" button hand a completed file to
              an external app via a content:// URI instead of a raw file://

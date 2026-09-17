@@ -33,6 +33,11 @@ object Settings {
      *  outright the instant a connection drops. */
     const val NETWORK_WAIT_MARKER = "Waiting for network"
 
+    /** Same idea as [WIFI_WAIT_MARKER]/[NETWORK_WAIT_MARKER] but for a
+     *  PAUSED item held back by the download scheduler (its own window, or
+     *  the global quiet-hours default) -- see DownloadService.onScheduleCheck. */
+    const val SCHEDULE_WAIT_MARKER = "Waiting for scheduled time"
+
     private const val PREFS = "ff_settings"
     private const val KEY_CONNECTIONS = "connections_per_download"
     private const val KEY_APP_THEME = "app_theme"
@@ -63,6 +68,10 @@ object Settings {
     private const val KEY_TABS_GRID_MODE = "browser_tabs_grid_mode"
     private const val KEY_AUTO_CHECK_UPDATES = "about_auto_check_for_updates"
     private const val KEY_UPDATE_CHANNEL = "about_update_channel"
+    private const val KEY_SCHEDULER_ENABLED = "scheduler_enabled"
+    private const val KEY_SCHEDULER_WINDOW_START_MIN = "scheduler_window_start_min"
+    private const val KEY_SCHEDULER_WINDOW_END_MIN = "scheduler_window_end_min"
+    private const val KEY_SCHEDULER_DAYS_MASK = "scheduler_days_mask"
 
     private lateinit var prefs: SharedPreferences
 
@@ -163,6 +172,33 @@ object Settings {
      *  or continue on cellular -- DownloadService pauses everything live the
      *  moment Wi-Fi drops and resumes it automatically once Wi-Fi is back.
      *  Default OFF. */
+    /** Global "quiet hours" default -- consulted by any queue item whose
+     *  scheduleMode is INHERIT_GLOBAL (see DownloadScheduler). Off by
+     *  default so existing behavior (download immediately) is unchanged
+     *  until the user opts in from Settings > Downloads. */
+    fun schedulerEnabled(): Boolean = prefs.getBoolean(KEY_SCHEDULER_ENABLED, false)
+    fun setSchedulerEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SCHEDULER_ENABLED, value).apply()
+    }
+
+    /** Minutes since local midnight, e.g. 60 = 1:00 AM. Defaults to a
+     *  1:00 AM - 6:00 AM off-peak window. */
+    fun schedulerWindowStartMinute(): Int = prefs.getInt(KEY_SCHEDULER_WINDOW_START_MIN, 60)
+    fun setSchedulerWindowStartMinute(value: Int) {
+        prefs.edit().putInt(KEY_SCHEDULER_WINDOW_START_MIN, value).apply()
+    }
+
+    fun schedulerWindowEndMinute(): Int = prefs.getInt(KEY_SCHEDULER_WINDOW_END_MIN, 360)
+    fun setSchedulerWindowEndMinute(value: Int) {
+        prefs.edit().putInt(KEY_SCHEDULER_WINDOW_END_MIN, value).apply()
+    }
+
+    /** Bit 0 = Sunday .. bit 6 = Saturday. Defaults to every day. */
+    fun schedulerDaysMask(): Int = prefs.getInt(KEY_SCHEDULER_DAYS_MASK, 0x7F)
+    fun setSchedulerDaysMask(value: Int) {
+        prefs.edit().putInt(KEY_SCHEDULER_DAYS_MASK, value).apply()
+    }
+
     fun wifiOnlyDownloads(): Boolean = prefs.getBoolean(KEY_WIFI_ONLY, false)
     fun setWifiOnlyDownloads(value: Boolean) {
         prefs.edit().putBoolean(KEY_WIFI_ONLY, value).apply()

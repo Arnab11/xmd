@@ -5,6 +5,7 @@ import androidx.room.PrimaryKey
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
 import com.invictus.xmd.domain.download.DownloadCategory
+import com.invictus.xmd.domain.download.ScheduleMode
 import com.invictus.xmd.database.AppDatabase
 
 /**
@@ -43,5 +44,14 @@ data class QueueItem(
     var mediaFormatLabel: String? = null,
     var progressPercent: Int = -1,
     var mediaStatusText: String? = null,
-    var selectedFileIndices: String? = null
+    var selectedFileIndices: String? = null,
+    // ── Download scheduler (see domain/download/DownloadSchedule.kt) ────
+    var scheduleMode: ScheduleMode = ScheduleMode.NONE,
+    // ONE_TIME: epoch ms this item is allowed to start.
+    var scheduledAtMs: Long = 0L,
+    // CUSTOM_WINDOW: minutes since local midnight (0..1439). -1 = unset.
+    var windowStartMinute: Int = -1,
+    var windowEndMinute: Int = -1,
+    // CUSTOM_WINDOW: bit 0 = Sunday .. bit 6 = Saturday. Defaults to every day.
+    var windowDaysMask: Int = 0x7F
 )

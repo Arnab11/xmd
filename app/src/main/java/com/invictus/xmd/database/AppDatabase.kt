@@ -19,7 +19,7 @@ import com.invictus.xmd.database.entities.Shortcut
 import com.invictus.xmd.preferences.Settings
 import com.invictus.xmd.ui.downloads.DownloadsFragment
 
-@Database(entities = [QueueItem::class, Shortcut::class, HistoryEntry::class, Bookmark::class], version = 13, exportSchema = false)
+@Database(entities = [QueueItem::class, Shortcut::class, HistoryEntry::class, Bookmark::class], version = 14, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
 
@@ -172,6 +172,20 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        // v13 -> v14: adds the download scheduler fields to queue_items --
+        // scheduleMode (NONE/INHERIT_GLOBAL/ONE_TIME/CUSTOM_WINDOW), a
+        // one-time start timestamp, and a per-item quiet-hours window +
+        // day mask (see domain/download/DownloadSchedule.kt).
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN scheduleMode TEXT NOT NULL DEFAULT 'NONE'")
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN scheduledAtMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN windowStartMinute INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN windowEndMinute INTEGER NOT NULL DEFAULT -1")
+                db.execSQL("ALTER TABLE queue_items ADD COLUMN windowDaysMask INTEGER NOT NULL DEFAULT 127")
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
@@ -182,7 +196,7 @@ abstract class AppDatabase : RoomDatabase() {
                     .addMigrations(
                         MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                         MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12,
-                        MIGRATION_12_13
+                        MIGRATION_12_13, MIGRATION_13_14
                     )
                     // Safety net only for schema drift beyond the explicit
                     // migrations above (shouldn't trigger in practice).

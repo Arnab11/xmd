@@ -38,6 +38,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalConfiguration
@@ -627,6 +630,39 @@ private fun DownloadsRoute() {
     var dataLimitScope by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.dataLimitScope())
     }
+    var schedulerEnabled by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.schedulerEnabled())
+    }
+    var schedulerWindowStartMinute by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.schedulerWindowStartMinute())
+    }
+    var schedulerWindowEndMinute by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.schedulerWindowEndMinute())
+    }
+    var schedulerDaysMask by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.schedulerDaysMask())
+    }
+
+    fun hasExactAlarmPermission(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        val alarmManager = context.getSystemService(android.app.AlarmManager::class.java)
+        return alarmManager?.canScheduleExactAlarms() ?: true
+    }
+    var exactAlarmPermissionGranted by remember { mutableStateOf(hasExactAlarmPermission()) }
+
+    // The exact-alarm grant/deny only happens in the system Settings app, so
+    // there's no callback for it -- just re-check whenever this screen comes
+    // back into the foreground.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                exactAlarmPermissionGranted = hasExactAlarmPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Same SAF folder-picker flow as the per-download "Change" button in
     // AddDownloadDialog/AddTorrentDialog (MainActivity's pickSaveDirLauncher) --
@@ -652,6 +688,11 @@ private fun DownloadsRoute() {
         dataLimitEnabled = dataLimitEnabled,
         dataLimitBytes = dataLimitBytes,
         dataLimitScope = dataLimitScope,
+        schedulerEnabled = schedulerEnabled,
+        schedulerWindowStartMinute = schedulerWindowStartMinute,
+        schedulerWindowEndMinute = schedulerWindowEndMinute,
+        schedulerDaysMask = schedulerDaysMask,
+        exactAlarmPermissionGranted = exactAlarmPermissionGranted,
         onAutoRetryChanged = { checked ->
             autoRetry = checked
             com.invictus.xmd.preferences.Settings.setAutoRetryEnabled(checked)
@@ -686,6 +727,27 @@ private fun DownloadsRoute() {
         onDataLimitScopeChanged = { scope ->
             dataLimitScope = scope
             com.invictus.xmd.preferences.Settings.setDataLimitScope(scope)
+        },
+        onSchedulerEnabledChanged = { checked ->
+            schedulerEnabled = checked
+            com.invictus.xmd.preferences.Settings.setSchedulerEnabled(checked)
+            com.invictus.xmd.domain.download.ScheduleAlarmManager.rearm(context)
+        },
+        onSchedulerWindowChanged = { start, end, mask ->
+            schedulerWindowStartMinute = start
+            schedulerWindowEndMinute = end
+            schedulerDaysMask = mask
+            com.invictus.xmd.preferences.Settings.setSchedulerWindowStartMinute(start)
+            com.invictus.xmd.preferences.Settings.setSchedulerWindowEndMinute(end)
+            com.invictus.xmd.preferences.Settings.setSchedulerDaysMask(mask)
+            com.invictus.xmd.domain.download.ScheduleAlarmManager.rearm(context)
+        },
+        onGrantExactAlarmPermission = {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                    .setData(Uri.parse("package:${context.packageName}"))
+                context.startActivity(intent)
+            }
         },
     )
 }

@@ -111,8 +111,10 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import com.invictus.xmd.database.entities.QueueItem
+import com.invictus.xmd.domain.download.DownloadScheduler
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.domain.download.ScheduleMode
 import com.invictus.xmd.utils.formatBytes
 import com.invictus.xmd.utils.formatSpeed
 import com.invictus.xmd.utils.formatRemainingTimeChrome
@@ -1256,7 +1258,14 @@ private fun statusText(item: QueueItem, speedEta: String?): String = when (item.
     ItemStatus.PENDING -> "Queued"
     ItemStatus.RESOLVING -> "Resolving…"
     ItemStatus.NEEDS_CHALLENGE -> "Verifying — complete check in browser"
-    ItemStatus.READY -> "Ready to download"
+    ItemStatus.READY -> if (item.scheduleMode != ScheduleMode.NONE && !DownloadScheduler.isAllowedNow(item)) {
+        when (item.scheduleMode) {
+            ScheduleMode.ONE_TIME -> "Scheduled"
+            else -> "Waiting for quiet hours"
+        }
+    } else {
+        "Ready to download"
+    }
     ItemStatus.DOWNLOADING -> {
         val sizePart = when {
             item.platform == MediaPlatform.YOUTUBE && !item.mediaStatusText.isNullOrBlank() -> item.mediaStatusText
@@ -1294,6 +1303,7 @@ private fun statusText(item: QueueItem, speedEta: String?): String = when (item.
             Settings.WIFI_WAIT_MARKER -> "Waiting for Wi-Fi"
             Settings.NETWORK_WAIT_MARKER -> "Waiting for network"
             Settings.DATA_LIMIT_WAIT_MARKER -> "Daily data limit reached"
+            Settings.SCHEDULE_WAIT_MARKER -> "Waiting for scheduled time"
             else -> "Paused"
         }
         if (sizePart != null) "$sizePart • $label" else label

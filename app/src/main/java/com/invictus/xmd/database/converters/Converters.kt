@@ -4,6 +4,7 @@ import androidx.room.TypeConverter
 import com.invictus.xmd.domain.download.DownloadCategory
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.domain.download.ScheduleMode
 
 /**
  * Room can't store enums natively -- it needs an explicit mapping to a
@@ -32,4 +33,11 @@ class Converters {
     @TypeConverter
     fun toMediaPlatform(value: String): MediaPlatform =
         runCatching { MediaPlatform.valueOf(value) }.getOrDefault(MediaPlatform.DIRECT)
+
+    @TypeConverter
+    fun fromScheduleMode(value: ScheduleMode): String = value.name
+
+    @TypeConverter
+    fun toScheduleMode(value: String): ScheduleMode =
+        runCatching { ScheduleMode.valueOf(value) }.getOrDefault(ScheduleMode.NONE)
 }

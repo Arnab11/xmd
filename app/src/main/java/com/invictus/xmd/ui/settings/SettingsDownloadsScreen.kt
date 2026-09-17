@@ -72,6 +72,11 @@ fun SettingsDownloadsScreen(
     dataLimitEnabled: Boolean,
     dataLimitBytes: Long,
     dataLimitScope: Settings.DataLimitScope,
+    schedulerEnabled: Boolean,
+    schedulerWindowStartMinute: Int,
+    schedulerWindowEndMinute: Int,
+    schedulerDaysMask: Int,
+    exactAlarmPermissionGranted: Boolean,
     onAutoRetryChanged: (Boolean) -> Unit,
     onChangeDefaultLocation: () -> Unit,
     onCategorizeIntoFoldersChanged: (Boolean) -> Unit,
@@ -79,6 +84,9 @@ fun SettingsDownloadsScreen(
     onDataLimitEnabledChanged: (Boolean) -> Unit,
     onDataLimitBytesChanged: (Long) -> Unit,
     onDataLimitScopeChanged: (Settings.DataLimitScope) -> Unit,
+    onSchedulerEnabledChanged: (Boolean) -> Unit,
+    onSchedulerWindowChanged: (startMinute: Int, endMinute: Int, daysMask: Int) -> Unit,
+    onGrantExactAlarmPermission: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -134,6 +142,71 @@ fun SettingsDownloadsScreen(
                 )
             }
         }
+
+        Spacer(modifier = Modifier.size(16.dp))
+
+        SettingsSectionCard {
+            SwitchSettingRow(
+                title = "Download scheduler",
+                subtitle = "Only download automatically during a quiet-hours window",
+                checked = schedulerEnabled,
+                onCheckedChange = onSchedulerEnabledChanged,
+            )
+            if (schedulerEnabled) {
+                SettingsDivider()
+                SchedulerWindowRow(
+                    startMinute = schedulerWindowStartMinute,
+                    endMinute = schedulerWindowEndMinute,
+                    daysMask = schedulerDaysMask,
+                    onWindowChanged = onSchedulerWindowChanged,
+                )
+                if (!exactAlarmPermissionGranted) {
+                    SettingsDivider()
+                    ClickableSettingRow(
+                        title = "Allow exact alarms",
+                        subtitle = "Needed so the scheduler starts/stops right on time, even in Doze",
+                        onClick = onGrantExactAlarmPermission,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Opens [com.invictus.xmd.ui.components.TimeRangePickerDialog] on tap --
+ * same click-to-open-dialog shape as [DefaultLocationRow], just for a time
+ * window + day mask instead of a folder.
+ */
+@Composable
+private fun SchedulerWindowRow(
+    startMinute: Int,
+    endMinute: Int,
+    daysMask: Int,
+    onWindowChanged: (startMinute: Int, endMinute: Int, daysMask: Int) -> Unit,
+) {
+    var showDialog by remember { mutableStateOf(false) }
+    val subtitle = "${com.invictus.xmd.ui.components.formatMinuteOfDay(startMinute)} \u2013 " +
+        "${com.invictus.xmd.ui.components.formatMinuteOfDay(endMinute)} \u00b7 " +
+        com.invictus.xmd.ui.components.formatDaysMask(daysMask)
+
+    ClickableSettingRow(
+        title = "Quiet hours",
+        subtitle = subtitle,
+        onClick = { showDialog = true },
+    )
+
+    if (showDialog) {
+        com.invictus.xmd.ui.components.TimeRangePickerDialog(
+            initialStartMinute = startMinute,
+            initialEndMinute = endMinute,
+            initialDaysMask = daysMask,
+            onConfirm = { start, end, mask ->
+                showDialog = false
+                onWindowChanged(start, end, mask)
+            },
+            onDismiss = { showDialog = false },
+        )
     }
 }
 

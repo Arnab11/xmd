@@ -16,7 +16,10 @@ import com.invictus.xmd.database.dao.QueueItemDao
 import com.invictus.xmd.database.entities.Bookmark
 import com.invictus.xmd.database.entities.QueueItem
 import com.invictus.xmd.domain.download.CategoryDetector
+import com.invictus.xmd.domain.download.DownloadScheduler
 import com.invictus.xmd.domain.download.ItemStatus
+import com.invictus.xmd.domain.download.ScheduleAlarmManager
+import com.invictus.xmd.domain.download.ScheduleMode
 import com.invictus.xmd.service.DownloadService
 import com.invictus.xmd.ui.MainActivity
 import com.invictus.xmd.utils.storage.FileNameUtils
@@ -161,6 +164,9 @@ object QueueRepository {
             _items.value = master
         }
         persistNow(listOf(item))
+        if (item.scheduleMode != ScheduleMode.NONE) {
+            runCatching { ScheduleAlarmManager.rearm(com.invictus.xmd.preferences.Settings.appContext()) }
+        }
     }
 
     /**
@@ -201,14 +207,16 @@ object QueueRepository {
     }
 
     /**
-     * Atomically finds the first READY item and marks it DOWNLOADING in one
-     * step, so multiple concurrent download workers can't both grab the
-     * same item.
+     * Atomically finds the first READY item that the download scheduler
+     * currently allows to start (see DownloadScheduler.isAllowedNow -- a
+     * plain ScheduleMode.NONE item is always eligible, same as before this
+     * existed) and marks it DOWNLOADING in one step, so multiple concurrent
+     * download workers can't both grab the same item.
      */
     fun claimNextReady(): QueueItem? {
         var claimedItem: QueueItem? = null
         synchronized(lock) {
-            val idx = master.indexOfFirst { it.status == ItemStatus.READY }
+            val idx = master.indexOfFirst { it.status == ItemStatus.READY && DownloadScheduler.isAllowedNow(it) }
             if (idx == -1) return null
             val claimed = master[idx].copy(
                 status = ItemStatus.DOWNLOADING,

@@ -72,6 +72,7 @@ import com.invictus.xmd.domain.download.DownloadEngine
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
 import com.invictus.xmd.domain.download.ResolutionError
+import com.invictus.xmd.domain.download.ScheduleMode
 import com.invictus.xmd.domain.download.YtDlpManager
 import com.invictus.xmd.domain.torrent.TorrentSession
 import com.invictus.xmd.preferences.Settings
@@ -119,7 +120,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
 
     // Phase A: state for the 3 dialogs converted this phase, same
     // `by mutableStateOf` + null-means-closed pattern as dnsSettingsDialogOpen.
-    private data class AddDownloadDialogState(val initialLink: String)
+    private data class AddDownloadDialogState(
+        val initialLink: String,
+        val initialName: String? = null,
+        val pageUrl: String? = null,
+    )
 
     private data class AddTorrentDialogState(
         val prefillLink: String?,
@@ -143,6 +148,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         val chosenQuality: YtDlpManager.QualityOption?,
         val chosenAudioPreset: Settings.AudioFormatPreset,
         val duplicateStrategy: OnDuplicateStrategy?,
+        val scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        val scheduledAtMs: Long = 0L,
+        val windowStartMinute: Int = -1,
+        val windowEndMinute: Int = -1,
+        val windowDaysMask: Int = 0x7F,
+        val pageUrl: String? = null,
     )
 
     private var pendingYoutubeDownloadRequest: PendingYoutubeDownloadRequest? by mutableStateOf(null)
@@ -216,6 +227,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                         chosenQuality = request.chosenQuality,
                         chosenAudioPreset = request.chosenAudioPreset,
                         duplicateStrategy = request.duplicateStrategy,
+                        scheduleMode = request.scheduleMode,
+                        scheduledAtMs = request.scheduledAtMs,
+                        windowStartMinute = request.windowStartMinute,
+                        windowEndMinute = request.windowEndMinute,
+                        windowDaysMask = request.windowDaysMask,
+                        pageUrl = request.pageUrl,
                     )
                 }
             } else {
@@ -640,6 +657,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                 addDownloadDialogState?.let { state ->
                     AddDownloadDialog(
                         initialLink = state.initialLink,
+                        initialName = state.initialName.orEmpty(),
                         defaultSavePath = defaultSavePath(),
                         magnetDisplayName = { magnetDisplayName(it) },
                         extractYoutubeFallbackName = { extractYoutubeFallbackName(it) },
@@ -686,7 +704,8 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                             addDownloadDialogState?.initialLink?.let(::removeYtDlpDialogPlaceholder)
                             addDownloadDialogState = null
                         },
-                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy ->
+                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask ->
+                            val capturedPageUrl = addDownloadDialogState?.pageUrl
                             addDownloadDialogState?.initialLink?.let(::removeYtDlpDialogPlaceholder)
                             addDownloadDialogState = null
                             when {
@@ -694,9 +713,19 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                                 LinkParser.isShareLink(link) || LinkParser.isFitgirlPage(link) ->
                                     triggerPrepare(listOf(link))
                                 LinkParser.needsYtDlp(link) ->
-                                    triggerDownloadYoutubeCustom(link, name, saveDir, quality, audioFormat, duplicateStrategy)
+                                    triggerDownloadYoutubeCustom(
+                                        link = link, name = name, customSaveDirPath = saveDir, chosenQuality = quality, chosenAudioPreset = audioFormat, duplicateStrategy = duplicateStrategy,
+                                        scheduleMode = scheduleMode, scheduledAtMs = scheduledAtMs,
+                                        windowStartMinute = windowStartMinute, windowEndMinute = windowEndMinute, windowDaysMask = windowDaysMask,
+                                        pageUrl = capturedPageUrl,
+                                    )
                                 LinkParser.isGenericDownloadUrl(link) ->
-                                    triggerDownloadDirectCustom(link, name, saveDir, duplicateStrategy)
+                                    triggerDownloadDirectCustom(
+                                        link = link, name = name, customSaveDirPath = saveDir, duplicateStrategy = duplicateStrategy,
+                                        scheduleMode = scheduleMode, scheduledAtMs = scheduledAtMs,
+                                        windowStartMinute = windowStartMinute, windowEndMinute = windowEndMinute, windowDaysMask = windowDaysMask,
+                                        pageUrl = capturedPageUrl,
+                                    )
                                 else ->
                                     Toast.makeText(this, getString(R.string.download_invalid_url_error, link), Toast.LENGTH_SHORT).show()
                             }
@@ -762,7 +791,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                             torrentMetadataJob?.cancel()
                             addTorrentDialogState = null
                         },
-                        onStart = onStart@{ link, name, saveDir, totalFiles, selectedCount, selectedIndices ->
+                        onStart = onStart@{ link, name, saveDir, totalFiles, selectedCount, selectedIndices, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask ->
                             if (totalFiles > 0 && selectedCount == 0) {
                                 Toast.makeText(this, R.string.torrent_dialog_no_files_selected, Toast.LENGTH_SHORT).show()
                                 return@onStart
@@ -770,12 +799,20 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                             val uri = state.prefillTorrentUri
                             if (uri != null) {
                                 addTorrentDialogState = null
-                                triggerDownloadTorrentFile(uri, name, saveDir, selectedIndices)
+                                triggerDownloadTorrentFile(
+                                    uri = uri, displayName = name, customSaveDirPath = saveDir, selectedFileIndices = selectedIndices,
+                                    scheduleMode = scheduleMode, scheduledAtMs = scheduledAtMs,
+                                    windowStartMinute = windowStartMinute, windowEndMinute = windowEndMinute, windowDaysMask = windowDaysMask,
+                                )
                             } else if (!LinkParser.isTorrentLink(link)) {
                                 Toast.makeText(this, R.string.torrent_dialog_invalid_link, Toast.LENGTH_SHORT).show()
                             } else {
                                 addTorrentDialogState = null
-                                triggerDownloadTorrentMagnet(link, name, saveDir, selectedIndices)
+                                triggerDownloadTorrentMagnet(
+                                    link = link, name = name, customSaveDirPath = saveDir, selectedFileIndices = selectedIndices,
+                                    scheduleMode = scheduleMode, scheduledAtMs = scheduledAtMs,
+                                    windowStartMinute = windowStartMinute, windowEndMinute = windowEndMinute, windowDaysMask = windowDaysMask,
+                                )
                             }
                         },
                     )
@@ -996,13 +1033,13 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         }.getOrNull()
     }
 
-    fun showAddDownloadDialog(link: String? = null) {
+    fun showAddDownloadDialog(link: String? = null, initialName: String? = null, pageUrl: String? = null) {
         val trimmed = link?.trim().orEmpty()
         if (LinkParser.isTorrentLink(trimmed) && trimmed.contains("xt=", ignoreCase = true)) {
             showAddTorrentDialog(prefillLink = trimmed)
             return
         }
-        addDownloadDialogState = AddDownloadDialogState(initialLink = trimmed)
+        addDownloadDialogState = AddDownloadDialogState(initialLink = trimmed, initialName = initialName, pageUrl = pageUrl)
     }
 
     fun showAddTorrentDialog(
@@ -1182,6 +1219,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         name: String?,
         customSaveDirPath: String?,
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
+        pageUrl: String? = null,
     ) {
         val category = CategoryDetector.detect(link, hint = name)
         val resolvedName = name?.takeUnless { it.isBlank() }
@@ -1216,6 +1259,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             fileName = finalName,
             customSaveDirPath = customSaveDirPath,
             category = category,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
+            pageUrl = pageUrl,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)
@@ -1229,6 +1278,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         chosenQuality: YtDlpManager.QualityOption?,
         chosenAudioPreset: Settings.AudioFormatPreset = Settings.presetAudioFormat(),
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
+        pageUrl: String? = null,
     ) {
         if (!BuildConfig.HAS_YOUTUBE_SUPPORT) {
             showMessageDialog(
@@ -1248,6 +1303,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                 chosenQuality = chosenQuality,
                 chosenAudioPreset = chosenAudioPreset,
                 duplicateStrategy = duplicateStrategy,
+                scheduleMode = scheduleMode,
+                scheduledAtMs = scheduledAtMs,
+                windowStartMinute = windowStartMinute,
+                windowEndMinute = windowEndMinute,
+                windowDaysMask = windowDaysMask,
+                pageUrl = pageUrl,
             )
             showYtDlpInstallPrompt = true
             return
@@ -1307,6 +1368,12 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             category = category,
             fileName = finalName,
             customSaveDirPath = customSaveDirPath,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
+            pageUrl = pageUrl,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)
@@ -1346,6 +1413,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         customSaveDirPath: String?,
         selectedFileIndices: String?,
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
     ) {
         val link = uri.toString()
         val resolvedName = displayName?.takeUnless { it.isBlank() } ?: "Torrent Download"
@@ -1381,6 +1453,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             customSaveDirPath = customSaveDirPath,
             selectedFileIndices = selectedFileIndices,
             category = category,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)
@@ -1399,6 +1476,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         customSaveDirPath: String?,
         selectedFileIndices: String?,
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
     ) {
         val resolvedName = name?.takeUnless { it.isBlank() } ?: magnetDisplayName(link) ?: "Magnet Download"
         val category = CategoryDetector.detect(link, hint = resolvedName)
@@ -1433,6 +1515,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             customSaveDirPath = customSaveDirPath,
             selectedFileIndices = selectedFileIndices,
             category = category,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)
@@ -1458,6 +1545,10 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
     }
 
     // ── BrowserFragment.Callbacks ───────────────────────────────────────────
+
+    override fun onOpenAddDownloadDialog(url: String, suggestedName: String?, pageUrl: String?) {
+        showAddDownloadDialog(link = url, initialName = suggestedName, pageUrl = pageUrl)
+    }
 
     override fun onBrowserMenuAction(action: BrowserMenuAction) {
         when (action) {

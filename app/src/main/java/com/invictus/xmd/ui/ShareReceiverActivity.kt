@@ -39,6 +39,7 @@ import com.invictus.xmd.domain.download.DownloadCategory
 import com.invictus.xmd.domain.download.DownloadEngine
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.domain.download.ScheduleMode
 import com.invictus.xmd.domain.download.YtDlpManager
 import com.invictus.xmd.domain.torrent.TorrentSession
 import com.invictus.xmd.preferences.Settings
@@ -163,7 +164,7 @@ class ShareReceiverActivity : AppCompatActivity() {
                         onDismiss = {
                             dismissAndFinish()
                         },
-                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy ->
+                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask ->
                             currentDownloadLink = null
                             when {
                                 LinkParser.isTorrentLink(link) -> {
@@ -180,10 +181,16 @@ class ShareReceiverActivity : AppCompatActivity() {
                                     finish()
                                 }
                                 LinkParser.needsYtDlp(link) -> {
-                                    startYoutubeDownload(link, name, saveDir, quality, audioFormat, duplicateStrategy)
+                                    startYoutubeDownload(
+                                        link, name, saveDir, quality, audioFormat, duplicateStrategy,
+                                        scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask,
+                                    )
                                 }
                                 LinkParser.isGenericDownloadUrl(link) -> {
-                                    startDirectDownload(link, name, saveDir, duplicateStrategy)
+                                    startDirectDownload(
+                                        link, name, saveDir, duplicateStrategy,
+                                        scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask,
+                                    )
                                 }
                                 else -> {
                                     Toast.makeText(this, getString(R.string.download_invalid_url_error, link), Toast.LENGTH_SHORT).show()
@@ -234,7 +241,7 @@ class ShareReceiverActivity : AppCompatActivity() {
                         onDismiss = {
                             dismissAndFinish()
                         },
-                        onStart = onStart@{ link, name, saveDir, totalFiles, selectedCount, selectedIndices ->
+                        onStart = onStart@{ link, name, saveDir, totalFiles, selectedCount, selectedIndices, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask ->
                             if (totalFiles > 0 && selectedCount == 0) {
                                 Toast.makeText(this, R.string.torrent_dialog_no_files_selected, Toast.LENGTH_SHORT).show()
                                 return@onStart
@@ -242,12 +249,20 @@ class ShareReceiverActivity : AppCompatActivity() {
                             val uri = state.prefillTorrentUri
                             currentTorrentData = null
                             if (uri != null) {
-                                startTorrentFileDownload(uri, name, saveDir, selectedIndices)
+                                startTorrentFileDownload(
+                                    uri, name, saveDir, selectedIndices,
+                                    scheduleMode = scheduleMode, scheduledAtMs = scheduledAtMs,
+                                    windowStartMinute = windowStartMinute, windowEndMinute = windowEndMinute, windowDaysMask = windowDaysMask,
+                                )
                             } else if (!LinkParser.isTorrentLink(link)) {
                                 Toast.makeText(this, R.string.torrent_dialog_invalid_link, Toast.LENGTH_SHORT).show()
                                 finish()
                             } else {
-                                startTorrentMagnetDownload(link, name, saveDir, selectedIndices)
+                                startTorrentMagnetDownload(
+                                    link, name, saveDir, selectedIndices,
+                                    scheduleMode = scheduleMode, scheduledAtMs = scheduledAtMs,
+                                    windowStartMinute = windowStartMinute, windowEndMinute = windowEndMinute, windowDaysMask = windowDaysMask,
+                                )
                             }
                         },
                     )
@@ -462,6 +477,11 @@ class ShareReceiverActivity : AppCompatActivity() {
         name: String?,
         customSaveDirPath: String?,
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
     ) {
         val category = CategoryDetector.detect(link, hint = name)
         val resolvedName = name?.takeUnless { it.isBlank() }
@@ -496,6 +516,11 @@ class ShareReceiverActivity : AppCompatActivity() {
             fileName = finalName,
             customSaveDirPath = customSaveDirPath,
             category = category,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)
@@ -510,6 +535,11 @@ class ShareReceiverActivity : AppCompatActivity() {
         chosenQuality: YtDlpManager.QualityOption?,
         chosenAudioPreset: Settings.AudioFormatPreset,
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
     ) {
         if (!BuildConfig.HAS_YOUTUBE_SUPPORT) {
             Toast.makeText(this, R.string.share_full_build_required, Toast.LENGTH_LONG).show()
@@ -577,6 +607,11 @@ class ShareReceiverActivity : AppCompatActivity() {
             category = category,
             fileName = finalName,
             customSaveDirPath = customSaveDirPath,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)
@@ -590,6 +625,11 @@ class ShareReceiverActivity : AppCompatActivity() {
         customSaveDirPath: String?,
         selectedIndices: String?,
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
     ) {
         val resolvedName = name?.takeUnless { it.isBlank() } ?: magnetDisplayName(link) ?: "Magnet Download"
         val category = CategoryDetector.detect(link, hint = resolvedName)
@@ -624,6 +664,11 @@ class ShareReceiverActivity : AppCompatActivity() {
             customSaveDirPath = customSaveDirPath,
             selectedFileIndices = selectedIndices,
             category = category,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)
@@ -637,6 +682,11 @@ class ShareReceiverActivity : AppCompatActivity() {
         customSaveDirPath: String?,
         selectedIndices: String?,
         duplicateStrategy: OnDuplicateStrategy? = null,
+        scheduleMode: ScheduleMode = ScheduleMode.NONE,
+        scheduledAtMs: Long = 0L,
+        windowStartMinute: Int = -1,
+        windowEndMinute: Int = -1,
+        windowDaysMask: Int = 0x7F,
     ) {
         val link = uri.toString()
         val resolvedName = name?.takeUnless { it.isBlank() } ?: "Torrent Download"
@@ -672,6 +722,11 @@ class ShareReceiverActivity : AppCompatActivity() {
             customSaveDirPath = customSaveDirPath,
             selectedFileIndices = selectedIndices,
             category = category,
+            scheduleMode = scheduleMode,
+            scheduledAtMs = scheduledAtMs,
+            windowStartMinute = windowStartMinute,
+            windowEndMinute = windowEndMinute,
+            windowDaysMask = windowDaysMask,
         )
         QueueRepository.enqueue(newItem)
         DownloadService.start(this)

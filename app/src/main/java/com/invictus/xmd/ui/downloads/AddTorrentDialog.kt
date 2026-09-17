@@ -97,13 +97,25 @@ fun AddTorrentDialog(
     onToggleSelectAll: () -> Unit,
     onChangeSaveDir: (onPicked: (String) -> Unit) -> Unit,
     onDismiss: () -> Unit,
-    onStart: (link: String, name: String?, saveDir: String?, totalFiles: Int, selectedCount: Int, selectedIndices: String?) -> Unit,
+    onStart: (
+        link: String, name: String?, saveDir: String?, totalFiles: Int, selectedCount: Int, selectedIndices: String?,
+        scheduleMode: com.invictus.xmd.domain.download.ScheduleMode,
+        scheduledAtMs: Long,
+        windowStartMinute: Int,
+        windowEndMinute: Int,
+        windowDaysMask: Int,
+    ) -> Unit,
 ) {
     var link by remember { mutableStateOf(prefillLink.orEmpty()) }
     var name by remember { mutableStateOf(prefillDisplayName.orEmpty()) }
     var nameManuallyEdited by remember { mutableStateOf(false) }
     var customSaveDir by remember { mutableStateOf<String?>(null) }
     var advancedExpanded by remember { mutableStateOf(false) }
+    var scheduleMode by remember { mutableStateOf(com.invictus.xmd.domain.download.ScheduleMode.NONE) }
+    var scheduledAtMs by remember { mutableStateOf(0L) }
+    var windowStartMinute by remember { mutableStateOf(-1) }
+    var windowEndMinute by remember { mutableStateOf(-1) }
+    var windowDaysMask by remember { mutableStateOf(0x7F) }
     val linkLocked = prefillTorrentUri != null
 
     LaunchedEffect(filesState.magnetDetectedName) {
@@ -356,6 +368,23 @@ fun AddTorrentDialog(
                         path = customSaveDir ?: defaultSavePath,
                         onChangeClick = { onChangeSaveDir { path -> customSaveDir = path } },
                     )
+
+                    Spacer(Modifier.height(14.dp))
+                    com.invictus.xmd.ui.components.ScheduleSelectorRow(
+                        scheduleMode = scheduleMode,
+                        scheduledAtMs = scheduledAtMs,
+                        windowStartMinute = windowStartMinute,
+                        windowEndMinute = windowEndMinute,
+                        windowDaysMask = windowDaysMask,
+                        globalSchedulerEnabled = com.invictus.xmd.preferences.Settings.schedulerEnabled(),
+                        onChanged = { mode, atMs, startMin, endMin, daysMask ->
+                            scheduleMode = mode
+                            scheduledAtMs = atMs
+                            windowStartMinute = startMin
+                            windowEndMinute = endMin
+                            windowDaysMask = daysMask
+                        },
+                    )
                 }
             }
         },
@@ -364,7 +393,10 @@ fun AddTorrentDialog(
                 val selectedIndices = if (filesState.files.isNotEmpty()) {
                     if (allSelected) null else filesState.files.filter { it.isSelected }.map { it.index }.joinToString(",")
                 } else null
-                onStart(link.trim(), name.trim().takeUnless { it.isBlank() }, customSaveDir, filesState.files.size, selectedCount, selectedIndices)
+                onStart(
+                    link.trim(), name.trim().takeUnless { it.isBlank() }, customSaveDir, filesState.files.size, selectedCount, selectedIndices,
+                    scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask,
+                )
             }) { Text(stringResource(R.string.torrent_dialog_start)) }
         },
         dismissButton = {

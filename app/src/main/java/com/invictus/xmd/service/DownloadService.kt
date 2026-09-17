@@ -30,8 +30,11 @@ import com.invictus.xmd.domain.download.CategoryDetector
 import com.invictus.xmd.domain.download.DownloadCancelledException
 import com.invictus.xmd.domain.download.DownloadCategory
 import com.invictus.xmd.domain.download.DownloadEngine
+import com.invictus.xmd.domain.download.DownloadScheduler
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
+import com.invictus.xmd.domain.download.ScheduleAlarmManager
+import com.invictus.xmd.domain.download.ScheduleMode
 import com.invictus.xmd.domain.download.YtDlpManager
 import com.invictus.xmd.domain.torrent.TorrentEngine
 import com.invictus.xmd.network.NetworkMonitor
@@ -61,6 +64,9 @@ class DownloadService : LifecycleService() {
         const val ACTION_CANCEL_ITEM = "com.invictus.xmd.action.CANCEL_ITEM"
         const val ACTION_CANCEL_ALL = "com.invictus.xmd.action.CANCEL_ALL"
         const val ACTION_WIFI_ONLY_ENABLED = "com.invictus.xmd.action.WIFI_ONLY_ENABLED"
+        /** Fired by ScheduleReceiver (our own alarm, or BOOT_COMPLETED) --
+         *  see [onScheduleCheck]. */
+        const val ACTION_SCHEDULE_CHECK = "com.invictus.xmd.action.SCHEDULE_CHECK"
         const val EXTRA_ITEM_ID = "extra_item_id"
         const val EXTRA_ITEM_IDS = "extra_item_ids"
         private const val NOTIFICATION_ID = 42
@@ -416,6 +422,7 @@ class DownloadService : LifecycleService() {
             ACTION_START -> {
                 startForeground(NOTIFICATION_ID, buildNotification())
                 topUpWorkers()
+                ScheduleAlarmManager.rearm(this)
             }
             ACTION_PAUSE_ITEM -> intent.getStringExtra(EXTRA_ITEM_ID)?.let { id ->
                 pauseSingleItem(id)
@@ -468,6 +475,10 @@ class DownloadService : LifecycleService() {
                 updateNotification()
             }
             ACTION_WIFI_ONLY_ENABLED -> onWifiLost()
+            ACTION_SCHEDULE_CHECK -> {
+                startForeground(NOTIFICATION_ID, buildNotification())
+                onScheduleCheck()
+            }
             ACTION_CANCEL_ALL -> {
                 engines.values.forEach { it.cancel() }
                 torrentEngines.values.forEach { it.cancel() }
@@ -535,6 +546,50 @@ class DownloadService : LifecycleService() {
             QueueRepository.update(id) { it.copy(status = ItemStatus.PENDING, error = null) }
             false
         }
+    }
+
+    /**
+     * Re-evaluates every scheduled item against [DownloadScheduler] and
+     * re-arms the next wakeup alarm. Runs on ACTION_SCHEDULE_CHECK, i.e.
+     * whenever our own exact alarm fires (a window just opened or closed)
+     * or the device just booted.
+     *
+     * Mirrors the shape of [onWifiLost]/[onWifiRegained]: items whose
+     * window just closed are paused in place (bytes kept, so a fresh
+     * worker can Range-resume once the window reopens or the user manually
+     * overrides it); items held back by us that are now eligible go back
+     * to READY so [topUpWorkers] can claim them.
+     */
+    private fun onScheduleCheck() {
+        val toPause = QueueRepository.current().filter {
+            (it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.RETRYING) &&
+                it.scheduleMode != ScheduleMode.NONE && !DownloadScheduler.isAllowedNow(it)
+        }
+        toPause.forEach { item ->
+            if (item.platform == MediaPlatform.YOUTUBE) {
+                pausedYoutubeIds.add(item.id)
+                cancelledYoutubeIds.add(item.id)
+                YtDlpManager.cancel(item.id)
+            } else {
+                engines[item.id]?.pause()
+                torrentEngines[item.id]?.pause()
+            }
+            QueueRepository.update(item.id) { it.copy(status = ItemStatus.PAUSED, error = Settings.SCHEDULE_WAIT_MARKER) }
+        }
+
+        val toResume = QueueRepository.current().filter {
+            it.status == ItemStatus.PAUSED && it.error == Settings.SCHEDULE_WAIT_MARKER && DownloadScheduler.isAllowedNow(it)
+        }
+        toResume.forEach { item ->
+            QueueRepository.update(item.id) { it.copy(status = ItemStatus.READY, error = null) }
+        }
+
+        if (toResume.isNotEmpty()) {
+            startForeground(NOTIFICATION_ID, buildNotification())
+            topUpWorkers()
+        }
+        ScheduleAlarmManager.rearm(this)
+        updateNotification()
     }
 
     /** Launches enough fresh worker loops to bring the live count up to the configured max. */

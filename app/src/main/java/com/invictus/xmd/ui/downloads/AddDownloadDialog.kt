@@ -95,6 +95,11 @@ import com.invictus.xmd.utils.storage.OnDuplicateStrategy
 @Composable
 fun AddDownloadDialog(
     initialLink: String,
+    /** Pre-fills the Name field -- used when the browser's own download
+     *  intercept (WebView's DownloadListener) already has a guessed or
+     *  probed filename by the time this dialog opens, so the user isn't
+     *  starting from a blank field for a link they didn't type themselves. */
+    initialName: String = "",
     defaultSavePath: String,
     magnetDisplayName: (String) -> String?,
     extractYoutubeFallbackName: (String) -> String,
@@ -113,11 +118,16 @@ fun AddDownloadDialog(
         quality: YtDlpManager.QualityOption?,
         audioFormat: Settings.AudioFormatPreset,
         duplicateStrategy: OnDuplicateStrategy?,
+        scheduleMode: com.invictus.xmd.domain.download.ScheduleMode,
+        scheduledAtMs: Long,
+        windowStartMinute: Int,
+        windowEndMinute: Int,
+        windowDaysMask: Int,
     ) -> Unit,
 ) {
     val context = LocalContext.current
     var link by remember { mutableStateOf(initialLink) }
-    var name by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
     var nameManuallyEdited by remember { mutableStateOf(false) }
     var customSaveDir by remember { mutableStateOf<String?>(null) }
     var advancedExpanded by remember { mutableStateOf(false) }
@@ -125,6 +135,11 @@ fun AddDownloadDialog(
 
     var onDuplicateStrategy by remember { mutableStateOf<OnDuplicateStrategy?>(null) }
     var showSolutionsDialog by remember { mutableStateOf(false) }
+    var scheduleMode by remember { mutableStateOf(com.invictus.xmd.domain.download.ScheduleMode.NONE) }
+    var scheduledAtMs by remember { mutableStateOf(0L) }
+    var windowStartMinute by remember { mutableStateOf(-1) }
+    var windowEndMinute by remember { mutableStateOf(-1) }
+    var windowDaysMask by remember { mutableStateOf(0x7F) }
 
     LaunchedEffect(name, customSaveDir) {
         onDuplicateStrategy = null
@@ -498,6 +513,23 @@ fun AddDownloadDialog(
                         onChangeClick = { onChangeSaveDir { path -> customSaveDir = path } },
                     )
 
+                    Spacer(Modifier.height(14.dp))
+                    com.invictus.xmd.ui.components.ScheduleSelectorRow(
+                        scheduleMode = scheduleMode,
+                        scheduledAtMs = scheduledAtMs,
+                        windowStartMinute = windowStartMinute,
+                        windowEndMinute = windowEndMinute,
+                        windowDaysMask = windowDaysMask,
+                        globalSchedulerEnabled = Settings.schedulerEnabled(),
+                        onChanged = { mode, atMs, startMin, endMin, daysMask ->
+                            scheduleMode = mode
+                            scheduledAtMs = atMs
+                            windowStartMinute = startMin
+                            windowEndMinute = endMin
+                            windowDaysMask = daysMask
+                        },
+                    )
+
                     if (needsYtDlp) {
                         Spacer(Modifier.height(14.dp))
                         Text(
@@ -598,6 +630,11 @@ fun AddDownloadDialog(
                             selectedQualityOption,
                             audioFormatPreset,
                             onDuplicateStrategy,
+                            scheduleMode,
+                            scheduledAtMs,
+                            windowStartMinute,
+                            windowEndMinute,
+                            windowDaysMask,
                         )
                     }
                 }) {
