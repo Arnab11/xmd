@@ -77,6 +77,7 @@ fun SettingsDownloadsScreen(
     schedulerWindowEndMinute: Int,
     schedulerDaysMask: Int,
     exactAlarmPermissionGranted: Boolean,
+    batteryOptimizationDisabled: Boolean,
     onAutoRetryChanged: (Boolean) -> Unit,
     onChangeDefaultLocation: () -> Unit,
     onCategorizeIntoFoldersChanged: (Boolean) -> Unit,
@@ -87,6 +88,7 @@ fun SettingsDownloadsScreen(
     onSchedulerEnabledChanged: (Boolean) -> Unit,
     onSchedulerWindowChanged: (startMinute: Int, endMinute: Int, daysMask: Int) -> Unit,
     onGrantExactAlarmPermission: () -> Unit,
+    onDisableBatteryOptimization: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -120,6 +122,14 @@ fun SettingsDownloadsScreen(
                 checked = wifiOnly,
                 onCheckedChange = onWifiOnlyChanged,
             )
+            if (!batteryOptimizationDisabled) {
+                SettingsDivider()
+                ClickableSettingRow(
+                    title = stringResource(R.string.settings_battery_optimization),
+                    subtitle = stringResource(R.string.settings_battery_optimization_hint),
+                    onClick = onDisableBatteryOptimization,
+                )
+            }
         }
 
         Spacer(modifier = Modifier.size(16.dp))

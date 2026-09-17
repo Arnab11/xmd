@@ -205,6 +205,9 @@
     <string name="settings_disable_categorization_hint">Save all downloads directly into the default location instead of sorting them into Videos, Music, Documents, and other subfolders.</string>
     <string name="settings_wifi_only">Download on Wi-Fi Only</string>
     <string name="settings_wifi_only_hint">Pause all downloads on cellular data and resume automatically when Wi-Fi is back.</string>
+    <string name="settings_battery_optimization">Disable battery optimization</string>
+    <string name="settings_battery_optimization_hint">Stops the system from killing downloads that run in the background too long.</string>
+    <string name="settings_battery_optimization_settings_unavailable">Battery settings screen not found on this device</string>
     <string name="settings_data_limit">Daily Data Limit</string>
     <string name="settings_data_limit_hint">Pause all downloads once today\'s usage for the network below reaches this. Resets at midnight.</string>
     <string name="settings_data_limit_scope_label">Counts usage from</string>

@@ -18,6 +18,11 @@
     <!-- Re-arms the scheduler's alarm after a reboot, since AlarmManager
          alarms don't survive one on their own. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Downloads/scheduler need to keep running in the background; OEM
+         battery optimization otherwise kills the process after a while.
+         The settings screen offers a one-tap opt-out via this permission
+         (see SettingsDownloadsScreen's battery section). -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Lets the in-app updater (About screen) launch the system package
          installer for a downloaded APK on Android 8+, where installing
          from an "unknown source" needs this explicit grant instead of the

@@ -650,14 +650,21 @@ private fun DownloadsRoute() {
     }
     var exactAlarmPermissionGranted by remember { mutableStateOf(hasExactAlarmPermission()) }
 
-    // The exact-alarm grant/deny only happens in the system Settings app, so
-    // there's no callback for it -- just re-check whenever this screen comes
-    // back into the foreground.
+    fun hasBatteryOptimizationDisabled(): Boolean {
+        val powerManager = context.getSystemService(android.os.PowerManager::class.java)
+        return powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+    }
+    var batteryOptimizationDisabled by remember { mutableStateOf(hasBatteryOptimizationDisabled()) }
+
+    // The exact-alarm grant/deny and the battery-optimization dialog both
+    // only happen in a system screen, so there's no callback for either --
+    // just re-check whenever this screen comes back into the foreground.
     val lifecycleOwner = LocalLifecycleOwner.current
     androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 exactAlarmPermissionGranted = hasExactAlarmPermission()
+                batteryOptimizationDisabled = hasBatteryOptimizationDisabled()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -693,6 +700,7 @@ private fun DownloadsRoute() {
         schedulerWindowEndMinute = schedulerWindowEndMinute,
         schedulerDaysMask = schedulerDaysMask,
         exactAlarmPermissionGranted = exactAlarmPermissionGranted,
+        batteryOptimizationDisabled = batteryOptimizationDisabled,
         onAutoRetryChanged = { checked ->
             autoRetry = checked
             com.invictus.xmd.preferences.Settings.setAutoRetryEnabled(checked)
@@ -747,6 +755,28 @@ private fun DownloadsRoute() {
                 val intent = Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
                     .setData(Uri.parse("package:${context.packageName}"))
                 context.startActivity(intent)
+            }
+        },
+        onDisableBatteryOptimization = {
+            val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+                .setData(Uri.parse("package:${context.packageName}"))
+            try {
+                context.startActivity(intent)
+            } catch (e: android.content.ActivityNotFoundException) {
+                // Some OEMs (MIUI, ColorOS, etc.) block the direct-request
+                // dialog -- fall back to the generic list screen where the
+                // user finds the app themselves.
+                try {
+                    context.startActivity(
+                        Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    )
+                } catch (e: android.content.ActivityNotFoundException) {
+                    Toast.makeText(
+                        context,
+                        R.string.settings_battery_optimization_settings_unavailable,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         },
     )
