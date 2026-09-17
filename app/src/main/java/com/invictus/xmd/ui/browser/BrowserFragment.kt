@@ -176,7 +176,6 @@ class BrowserFragment : Fragment() {
     private var browserMenuExpanded: Boolean by mutableStateOf(false)
     private var clearBrowsingDataDialogOpen: Boolean by mutableStateOf(false)
     private var showTranslateLanguageDialog: Boolean by mutableStateOf(false)
-    private var downloadPrompt: BrowserDownloadPrompt? by mutableStateOf(null)
     // Compose State (not just a plain var) so browserDialogHost's
     // setContent lambda recomposes when this changes -- non-null shows
     // SniffedMediaSheet with this exact snapshot, same one-shot
@@ -577,17 +576,6 @@ class BrowserFragment : Fragment() {
                                 },
                             )
                         }
-                        downloadPrompt?.let { prompt ->
-                            BrowserDownloadConfirmationDialog(
-                                prompt = prompt,
-                                onDismiss = { downloadPrompt = null },
-                                onCopyLink = ::copyLinkToClipboard,
-                                onAddToDownloads = { url ->
-                                    val pageUrl = tabs.getOrNull(currentTabIndex)?.url
-                                    (activity as? Callbacks)?.onOpenAddDownloadDialog(url, prompt.fileName, pageUrl)
-                                },
-                            )
-                        }
                     },
                     tabsOverlay = {
                         TabsListOverlay(
@@ -835,7 +823,7 @@ class BrowserFragment : Fragment() {
         applyDesktopMode(webView, tab.isDesktopMode)
 
         webView.setDownloadListener { url, _, contentDisposition, mimeType, _ ->
-            if (isCurrentTab(tab)) onWebViewDownloadRequested(url, contentDisposition, mimeType)
+            if (isCurrentTab(tab)) onWebViewDownloadRequested(url, contentDisposition, mimeType, tab.url)
         }
 
 
@@ -1809,31 +1797,21 @@ class BrowserFragment : Fragment() {
      * that one watches the page's own URL for fuckingfast/fitgirl links
      * (site-specific, auto-shows a FAB); this one catches the browser's
      * native "start a download" signal for arbitrary files from any site.
-     * Always confirms before queuing since it fires on real clicks, not
-     * just heuristics.
      *
-     * The contentDisposition WebView hands us here is frequently missing
-     * or generic on sites like this (vcloud/gofile-style hosts serving a
-     * token URL with no filename in the path) -- URLUtil.guessFileName then
-     * has nothing real to work with and falls back to a mostly-made-up name
-     * (e.g. "Outer.bin"). The actual filename only reliably shows up in the
-     * *response's* Content-Disposition header, so show the dialog right
-     * away with the best guess, then probe the URL directly and swap in
-     * the real name if it resolves before the user taps a button.
+     * Opens the same Add Download editor a pasted/YouTube link gets
+     * ([Callbacks.onOpenAddDownloadDialog]) instead of a lightweight
+     * confirm-only prompt, so the user can rename, pick a folder, or
+     * schedule it before it starts. No separate pre-probe here for a
+     * better filename than URLUtil's guess -- the dialog already probes
+     * the URL itself once it's open (same
+     * DownloadEngine.probeRealFilename it's always used for a generic
+     * link) and swaps in the real name if one resolves, so doing it again
+     * here would just be duplicate work for an even earlier answer the
+     * dialog is about to overwrite anyway.
      */
-    private fun onWebViewDownloadRequested(url: String, contentDisposition: String?, mimeType: String?) {
+    private fun onWebViewDownloadRequested(url: String, contentDisposition: String?, mimeType: String?, pageUrl: String?) {
         val guessedName = android.webkit.URLUtil.guessFileName(url, contentDisposition, mimeType)
-        downloadPrompt = BrowserDownloadPrompt(url = url, fileName = guessedName)
-
-        viewLifecycleOwner.lifecycleScope.launch {
-            val probed = withContext(Dispatchers.IO) {
-                DownloadEngine.probeRealFilename(filenameClient, url)
-            }
-            val currentPrompt = downloadPrompt
-            if (probed != null && currentPrompt?.url == url && probed != currentPrompt.fileName) {
-                downloadPrompt = currentPrompt.copy(fileName = probed)
-            }
-        }
+        (activity as? Callbacks)?.onOpenAddDownloadDialog(url, guessedName, pageUrl)
     }
 
     /**

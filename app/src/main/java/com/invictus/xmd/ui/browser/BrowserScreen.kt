@@ -87,11 +87,6 @@ internal fun TranslateLanguageDialog(
     )
 }
 
-internal data class BrowserDownloadPrompt(
-    val url: String,
-    val fileName: String,
-)
-
 @Composable
 internal fun BrowserScreen(
     speedDialVisible: Boolean,
@@ -391,48 +386,4 @@ private fun ClearDataOption(
         Spacer(Modifier.width(8.dp))
         Text(label)
     }
-}
-
-@Composable
-internal fun BrowserDownloadConfirmationDialog(
-    prompt: BrowserDownloadPrompt,
-    onDismiss: () -> Unit,
-    onCopyLink: (String) -> Unit,
-    onAddToDownloads: (String) -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.wideDialogWidth(),
-        properties = WideDialogProperties,
-        title = { Text(stringResource(R.string.download_confirm_title)) },
-        text = {
-            Column {
-                Text(stringResource(R.string.download_confirm_message, prompt.fileName))
-                Spacer(Modifier.height(20.dp))
-                // Custom action row instead of the default confirm/dismiss slots --
-                // those always pack together at the trailing edge, which is what
-                // pushed Copy link over next to Cancel/Download. SpaceBetween here
-                // pins Copy link to the leading edge, Cancel+Download to the trailing.
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    TextButton(onClick = { onCopyLink(prompt.url); onDismiss() }) {
-                        Text(stringResource(R.string.action_copy_link))
-                    }
-                    Row {
-                        TextButton(onClick = onDismiss) {
-                            Text(stringResource(android.R.string.cancel))
-                        }
-                        TextButton(onClick = { onAddToDownloads(prompt.url); onDismiss() }) {
-                            Text(stringResource(R.string.action_download_direct))
-                        }
-                    }
-                }
-            }
-        },
-        confirmButton = {},
-        dismissButton = {},
-    )
 }
