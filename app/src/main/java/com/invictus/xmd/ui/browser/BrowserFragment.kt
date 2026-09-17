@@ -522,7 +522,9 @@ class BrowserFragment : Fragment() {
                                 onDismiss = { linkContextMenuState = null },
                                 onOpenNewTab = ::openUrlInNewTab,
                                 onOpenImageNewTab = ::openUrlInNewTab,
-                                onDownloadImage = { url -> onWebViewDownloadRequested(url, null, "image/*") },
+                                onDownloadImage = { url ->
+                                    onWebViewDownloadRequested(url, null, "image/*", tabs.getOrNull(currentTabIndex)?.url)
+                                },
                                 onCopyLinkAddress = ::copyLinkToClipboard,
                                 onShareLink = ::shareLink,
                             )
