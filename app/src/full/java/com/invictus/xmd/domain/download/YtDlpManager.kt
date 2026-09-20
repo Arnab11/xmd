@@ -65,7 +65,7 @@ object YtDlpManager {
      * selector chain is left exactly as before.
      */
     fun standardQualityOptions(isGenericOrHls: Boolean = false): List<QualityOption> = listOf(
-        QualityOption("4K (2160p)", videoSelector(2160, isGenericOrHls), isAudioOnly = false, height = 2160),
+        QualityOption("2160p",      videoSelector(2160, isGenericOrHls), isAudioOnly = false, height = 2160),
         QualityOption("1440p",      videoSelector(1440, isGenericOrHls), isAudioOnly = false, height = 1440),
         QualityOption("1080p",      videoSelector(1080, isGenericOrHls), isAudioOnly = false, height = 1080),
         QualityOption("720p",       videoSelector(720,  isGenericOrHls), isAudioOnly = false, height = 720),
@@ -88,14 +88,14 @@ object YtDlpManager {
             .mapNotNull { it.height }
             .distinct()
             .sortedDescending()
-
+        
         if (videoHeights.isEmpty()) {
             return standardQualityOptions(isGenericOrHls)
         }
 
         val videoOptions = videoHeights.map { h ->
             val label = when (h) {
-                2160 -> "4K (2160p)"
+                2160 -> "2160p"
                 1440 -> "1440p"
                 1080 -> "1080p"
                 720 -> "720p"
