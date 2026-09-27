@@ -625,6 +625,7 @@ object Settings {
     private const val KEY_YTDLP_INSTALLED = "ytdlp_installed"
     private const val KEY_YTDLP_LAST_UPDATE_MS = "ytdlp_last_update_ms"
     private const val KEY_YTDLP_NIGHTLY = "ytdlp_use_nightly"
+    private const val KEY_YTDLP_VERSION = "ytdlp_version"
 
     fun ytDlpInstalled(): Boolean = prefs.getBoolean(KEY_YTDLP_INSTALLED, false)
     fun setYtDlpInstalled(value: Boolean) {
@@ -635,6 +636,19 @@ object Settings {
     fun ytDlpLastUpdateMs(): Long = prefs.getLong(KEY_YTDLP_LAST_UPDATE_MS, 0L)
     fun setYtDlpLastUpdateMs(value: Long) {
         prefs.edit().putLong(KEY_YTDLP_LAST_UPDATE_MS, value).apply()
+    }
+
+    /**
+     * The installed yt-dlp release's own version string (yt-dlp uses CalVer,
+     * e.g. "2026.09.26" -- so this string doubles as its build date), as
+     * last reported by YoutubeDL.versionName(). Blank if never successfully
+     * read (install/update always failed, or ran offline). Shown next to
+     * the Stable/Nightly channel label in Settings so it's visible how
+     * fresh the installed engine actually is, not just which channel it's on.
+     */
+    fun ytDlpVersion(): String = prefs.getString(KEY_YTDLP_VERSION, "").orEmpty()
+    fun setYtDlpVersion(value: String) {
+        prefs.edit().putString(KEY_YTDLP_VERSION, value).apply()
     }
 
     /**

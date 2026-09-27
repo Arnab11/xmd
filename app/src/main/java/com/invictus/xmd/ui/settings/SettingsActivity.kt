@@ -1002,6 +1002,9 @@ private fun YoutubeRoute() {
     var ytDlpUsingNightly by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.ytDlpUseNightly())
     }
+    var ytDlpVersion by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.ytDlpVersion())
+    }
     var ytDlpOpState by remember {
         mutableStateOf<YtDlpOpState>(YtDlpOpState.Idle)
     }
@@ -1009,6 +1012,7 @@ private fun YoutubeRoute() {
     fun refreshYtDlpStatus() {
         ytDlpInstalled = com.invictus.xmd.domain.download.YtDlpManager.isInstalled(context)
         ytDlpUsingNightly = com.invictus.xmd.preferences.Settings.ytDlpUseNightly()
+        ytDlpVersion = com.invictus.xmd.preferences.Settings.ytDlpVersion()
     }
 
     SettingsYoutubeScreen(
@@ -1049,6 +1053,7 @@ private fun YoutubeRoute() {
         },
         ytDlpInstalled = ytDlpInstalled,
         ytDlpUsingNightly = ytDlpUsingNightly,
+        ytDlpVersion = ytDlpVersion,
         ytDlpOpState = ytDlpOpState,
         onInstallOrDeleteClick = {
             if (ytDlpInstalled) {

@@ -87,6 +87,8 @@ fun SettingsYoutubeScreen(
     // yt-dlp engine
     ytDlpInstalled: Boolean,
     ytDlpUsingNightly: Boolean,
+    /** yt-dlp's own version string (CalVer, e.g. "2026.09.26") for the currently installed build. Blank if unknown. */
+    ytDlpVersion: String,
     ytDlpOpState: YtDlpOpState,
     onInstallOrDeleteClick: () -> Unit,
     onUpdateClick: () -> Unit,
@@ -112,6 +114,7 @@ fun SettingsYoutubeScreen(
         YtdlpStatusCard(
             installed = ytDlpInstalled,
             usingNightly = ytDlpUsingNightly,
+            version = ytDlpVersion,
             opState = ytDlpOpState,
         )
 
@@ -274,6 +277,7 @@ fun SettingsYoutubeScreen(
 private fun YtdlpStatusCard(
     installed: Boolean,
     usingNightly: Boolean,
+    version: String,
     opState: YtDlpOpState,
     modifier: Modifier = Modifier,
 ) {
@@ -343,12 +347,36 @@ private fun YtdlpStatusCard(
                 }
             }
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = contentColor,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = contentColor,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    // yt-dlp's version IS a date (CalVer, e.g. "2026.09.26"),
+                    // so this one badge answers both "which version" and
+                    // "how fresh" -- only next to the settled Stable/Nightly
+                    // label, never mid-install/update when the title itself
+                    // is already saying that.
+                    if (installed && opState == YtDlpOpState.Idle && version.isNotBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = contentColor.copy(alpha = 0.14f),
+                        ) {
+                            Text(
+                                text = version,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = contentColor,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                }
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = details,

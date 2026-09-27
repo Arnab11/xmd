@@ -423,6 +423,25 @@ object YtDlpManager {
             FFmpeg.getInstance().init(context)
             initialized = true
             Settings.setYtDlpInstalled(true)
+
+            // init() above only unpacks the yt-dlp binary baked into the
+            // youtubedl-android library's own release (dated whenever that
+            // release was cut -- often months stale by the time someone
+            // installs), it never touches the network. Left alone, a fresh
+            // Install would sit on that stale bundled copy until the next
+            // throttled ensureReady() check, up to 24h later. Fetch the
+            // real latest release on the user's chosen channel right away
+            // instead. Best-effort: a failed fetch (no network) just means
+            // the bundled copy stays installed rather than failing the
+            // whole install, since it's already usable on its own.
+            val channel = if (Settings.ytDlpUseNightly()) YoutubeDL.UpdateChannel._NIGHTLY else YoutubeDL.UpdateChannel._STABLE
+            runCatching { YoutubeDL.getInstance().updateYoutubeDL(context, channel) }
+                .onFailure { Log.w(TAG, "Post-install yt-dlp update failed (bundled version still usable)", it) }
+            Settings.setYtDlpLastUpdateMs(System.currentTimeMillis())
+            runCatching { YoutubeDL.getInstance().versionName(context) }
+                .getOrNull()
+                ?.let { Settings.setYtDlpVersion(it) }
+
             null
         } catch (e: Throwable) {
             Log.e(TAG, "Failed to install yt-dlp/ffmpeg", e)
@@ -441,6 +460,7 @@ object YtDlpManager {
     fun delete(context: Context) {
         initialized = false
         Settings.setYtDlpInstalled(false)
+        Settings.setYtDlpVersion("")
         // youtubedl-android/ffmpeg-kit unpack under the app's internal
         // files dir; matched heuristically by name rather than a hardcoded
         // path since the exact folder name isn't a stable public API.
@@ -484,6 +504,10 @@ object YtDlpManager {
             val channel = if (Settings.ytDlpUseNightly()) YoutubeDL.UpdateChannel._NIGHTLY else YoutubeDL.UpdateChannel._STABLE
             runCatching {
                 YoutubeDL.getInstance().updateYoutubeDL(context, channel)
+            }.onSuccess {
+                runCatching { YoutubeDL.getInstance().versionName(context) }
+                    .getOrNull()
+                    ?.let { Settings.setYtDlpVersion(it) }
             }.onFailure { Log.w(TAG, "yt-dlp self-update check failed (will retry later)", it) }
             Settings.setYtDlpLastUpdateMs(System.currentTimeMillis())
         }
@@ -517,6 +541,7 @@ object YtDlpManager {
             val status = YoutubeDL.getInstance().updateYoutubeDL(context, channel)
             Settings.setYtDlpLastUpdateMs(System.currentTimeMillis())
             val version = runCatching { YoutubeDL.getInstance().versionName(context) }.getOrNull()
+            version?.let { Settings.setYtDlpVersion(it) }
             if (version != null) "$status ($version)" else status.toString()
         } catch (e: Throwable) {
             Log.e(TAG, "Manual yt-dlp update failed", e)
