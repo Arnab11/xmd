@@ -33,3 +33,13 @@
 # in a release (minified) build, even though it works fine in debug.
 -keep class com.yausername.** { *; }
 -dontwarn com.yausername.**
+
+# Transitive dependency of youtubedl-android: it unpacks the bundled
+# python/yt-dlp archives with Apache Commons Compress, whose
+# ExtraFieldUtils reflectively Class.newInstance()'s its zip extra-field
+# classes (AsiExtraField, X5455_ExtendedTimestamp, ...). Nothing calls
+# their constructors directly, so R8 strips them as "unused" -- the
+# install then crashes with NoClassDefFoundError on an obfuscated class
+# name (e.g. "V4.f") the moment Commons Compress tries to instantiate one.
+-keep class org.apache.commons.compress.archivers.zip.** { *; }
+-dontwarn org.apache.commons.compress.**
