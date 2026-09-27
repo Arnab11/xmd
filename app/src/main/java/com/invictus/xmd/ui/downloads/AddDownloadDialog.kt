@@ -1,5 +1,6 @@
 package com.invictus.xmd.ui.downloads
 
+import java.util.UUID
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
@@ -152,6 +153,16 @@ fun AddDownloadDialog(
         // into the Movies category instead of Videos (see
         // MediaDurationUtils.resolveYoutubeCategory).
         durationSeconds: Int?,
+        // Shared across every onStart call in one playlist bulk-add (a
+        // fresh UUID per Start tap) -- null for a single, non-playlist
+        // download. See QueueRepository.maybeGeneratePlaylistFile.
+        playlistBatchId: String?,
+        // yt-dlp's playlist title, for naming the .m3u8 -- null outside a
+        // playlist bulk-add.
+        playlistTitle: String?,
+        // The "Playlist file" Advanced toggle's value at Start time --
+        // always false outside a playlist bulk-add.
+        generatePlaylistFile: Boolean,
     ) -> Unit,
     /** Playlist entries for the "choose videos" picker; empty result for a non-playlist link. Full flavor only -- lite returns empty. */
     probePlaylist: suspend (String) -> YtDlpManager.PlaylistProbeResult = { YtDlpManager.PlaylistProbeResult(null, emptyList()) },
@@ -184,6 +195,10 @@ fun AddDownloadDialog(
     // inside a playlist) gets the "Just this video" vs "Choose videos"
     // choice.
     val isBarePlaylistLink = remember(link) { LinkParser.isBareYoutubePlaylistLink(link.trim()) }
+    // Advanced > "Playlist file" toggle -- off by default, only surfaced
+    // (see the Advanced section below) while a playlist is loaded. See
+    // PlaylistFileUtils.writeM3u8 for what turning it on produces.
+    var createPlaylistFile by remember { mutableStateOf(false) }
 
     var onDuplicateStrategy by remember { mutableStateOf<OnDuplicateStrategy?>(null) }
     var showSolutionsDialog by remember { mutableStateOf(false) }
@@ -285,6 +300,7 @@ fun AddDownloadDialog(
         playlistResult = null
         playlistPickerOpen = false
         selectedPlaylistIds.clear()
+        createPlaylistFile = false
         if (!needsYtDlp) {
             selectedQualityLabel = null
             selectedQualityOption = null
@@ -980,6 +996,27 @@ fun AddDownloadDialog(
                             }
                         }
                     }
+
+                    // Only meaningful during a playlist bulk-add -- see
+                    // PlaylistFileUtils.writeM3u8 for what turning it on
+                    // produces once every video in the batch finishes.
+                    if (playlistResult?.entries?.isNotEmpty() == true) {
+                        Spacer(Modifier.height(14.dp))
+                        ChipLabel(stringResource(R.string.download_dialog_playlist_file_title))
+                        ChipRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            options = listOf(
+                                stringResource(R.string.download_dialog_playlist_file_off),
+                                stringResource(R.string.download_dialog_playlist_file_on),
+                            ),
+                            selected = if (createPlaylistFile) {
+                                stringResource(R.string.download_dialog_playlist_file_on)
+                            } else {
+                                stringResource(R.string.download_dialog_playlist_file_off)
+                            },
+                            onSelected = { index -> createPlaylistFile = index == 1 },
+                        )
+                    }
                 }
             }
         },
@@ -1013,6 +1050,11 @@ fun AddDownloadDialog(
                         // exact same enqueue path as a single download, just
                         // looped, so no new plumbing was needed in the two
                         // callers (MainActivity / ShareReceiverActivity).
+                        // A fresh batch id ties all of them together so
+                        // QueueRepository can tell when the whole batch has
+                        // finished (see maybeGeneratePlaylistFile).
+                        val batchId = UUID.randomUUID().toString()
+                        val batchPlaylistTitle = playlistResult?.playlistTitle
                         playlistEntriesForStart
                             .filter { it.id in selectedPlaylistIds }
                             .forEach { entry ->
@@ -1033,6 +1075,9 @@ fun AddDownloadDialog(
                                     embedSubtitles,
                                     subtitleLanguages.toSet(),
                                     null, // playlist bulk-add: whole playlist stays in Videos, no per-entry Movies split
+                                    batchId,
+                                    batchPlaylistTitle,
+                                    createPlaylistFile,
                                 )
                             }
                     } else if (link.isNotBlank()) {
@@ -1053,6 +1098,9 @@ fun AddDownloadDialog(
                             embedSubtitles,
                             subtitleLanguages.toSet(),
                             advancedDurationSeconds,
+                            null,
+                            null,
+                            false,
                         )
                     }
                 }) {

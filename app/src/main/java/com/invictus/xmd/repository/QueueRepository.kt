@@ -222,7 +222,7 @@ object QueueRepository {
         return result
     }
 
-    private fun mutate(id: String, transform: (QueueItem) -> QueueItem) {
+    private fun mutate(id: String, transform: (QueueItem) -> QueueItem): QueueItem? {
         var previous: QueueItem? = null
         var updated: QueueItem? = null
         synchronized(lock) {
@@ -237,9 +237,10 @@ object QueueRepository {
             _items.value = master
         }
         updated?.let { persistDebounced(it, previous) }
+        return updated
     }
 
-    private fun mutateNonTerminal(id: String, transform: (QueueItem) -> QueueItem) = mutate(id) {
+    private fun mutateNonTerminal(id: String, transform: (QueueItem) -> QueueItem): QueueItem? = mutate(id) {
         if (it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED) it else transform(it)
     }
 
@@ -292,17 +293,20 @@ object QueueRepository {
         it.copy(status = ItemStatus.SAVING, error = null)
     }
 
-    fun markFailed(id: String, error: String?, resetMediaProgress: Boolean = false) = mutate(id) {
-        if (it.status == ItemStatus.DONE) {
-            it
-        } else {
-            it.copy(
-                status = ItemStatus.FAILED,
-                error = error,
-                progressPercent = if (resetMediaProgress) -1 else it.progressPercent,
-                mediaStatusText = if (resetMediaProgress) null else it.mediaStatusText,
-            )
+    fun markFailed(id: String, error: String?, resetMediaProgress: Boolean = false) {
+        val updated = mutate(id) {
+            if (it.status == ItemStatus.DONE) {
+                it
+            } else {
+                it.copy(
+                    status = ItemStatus.FAILED,
+                    error = error,
+                    progressPercent = if (resetMediaProgress) -1 else it.progressPercent,
+                    mediaStatusText = if (resetMediaProgress) null else it.mediaStatusText,
+                )
+            }
         }
+        if (updated?.status == ItemStatus.FAILED) maybeGeneratePlaylistFile(updated)
     }
 
     fun resetForRetry(id: String, needsResolve: Boolean) = mutate(id) {
@@ -361,19 +365,51 @@ object QueueRepository {
         filePath: String?,
         fileName: String? = null,
         progressPercent: Int? = null,
-    ) = mutate(id) {
-        if (it.status != ItemStatus.DOWNLOADING && it.status != ItemStatus.SAVING) {
-            it
-        } else {
-            it.copy(
-                status = ItemStatus.DONE,
-                fileName = fileName ?: it.fileName,
-                filePath = filePath,
-                progressPercent = progressPercent ?: it.progressPercent,
-                mediaStatusText = null,
-                error = null,
-                downloadFinishedAtMs = System.currentTimeMillis(),
-            )
+    ) {
+        val updated = mutate(id) {
+            if (it.status != ItemStatus.DOWNLOADING && it.status != ItemStatus.SAVING) {
+                it
+            } else {
+                it.copy(
+                    status = ItemStatus.DONE,
+                    fileName = fileName ?: it.fileName,
+                    filePath = filePath,
+                    progressPercent = progressPercent ?: it.progressPercent,
+                    mediaStatusText = null,
+                    error = null,
+                    downloadFinishedAtMs = System.currentTimeMillis(),
+                )
+            }
+        }
+        if (updated?.status == ItemStatus.DONE) maybeGeneratePlaylistFile(updated)
+    }
+
+    // Tracks which playlist batches have already had their .m3u8 written,
+    // so a late-arriving markDone/markFailed for an already-completed batch
+    // (shouldn't normally happen, but mutate() can be called from more than
+    // one thread) doesn't write the file twice.
+    private val generatedPlaylistBatches = ConcurrentHashMap.newKeySet<String>()
+
+    /**
+     * Called after any item with a [QueueItem.playlistBatchId] reaches a
+     * terminal state. Once every item sharing that batch id is DONE or
+     * FAILED, writes the batch's .m3u8 (if [QueueItem.generatePlaylistFile]
+     * was on) -- see AddDownloadDialog's "Playlist file" Advanced toggle and
+     * PlaylistFileUtils.writeM3u8.
+     */
+    private fun maybeGeneratePlaylistFile(item: QueueItem) {
+        val batchId = item.playlistBatchId ?: return
+        if (!item.generatePlaylistFile) return
+        if (batchId in generatedPlaylistBatches) return
+        val batchItems = current().filter { it.playlistBatchId == batchId }
+        val allTerminal = batchItems.isNotEmpty() &&
+            batchItems.all { it.status == ItemStatus.DONE || it.status == ItemStatus.FAILED }
+        if (!allTerminal) return
+        if (!generatedPlaylistBatches.add(batchId)) return
+        scope.launch {
+            runCatching {
+                com.invictus.xmd.utils.storage.PlaylistFileUtils.writeM3u8(batchItems, item.playlistTitle)
+            }
         }
     }
 

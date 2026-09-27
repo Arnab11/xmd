@@ -181,6 +181,9 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         val sponsorBlockCategories: Set<String> = emptySet(),
         val embedSubtitles: Boolean = false,
         val subtitleLanguages: Set<String> = emptySet(),
+        val playlistBatchId: String? = null,
+        val playlistTitle: String? = null,
+        val generatePlaylistFile: Boolean = false,
     )
 
     private var pendingYoutubeDownloadRequest: PendingYoutubeDownloadRequest? by mutableStateOf(null)
@@ -263,6 +266,9 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                         sponsorBlockCategories = request.sponsorBlockCategories,
                         embedSubtitles = request.embedSubtitles,
                         subtitleLanguages = request.subtitleLanguages,
+                        playlistBatchId = request.playlistBatchId,
+                        playlistTitle = request.playlistTitle,
+                        generatePlaylistFile = request.generatePlaylistFile,
                     )
                 }
             } else {
@@ -783,7 +789,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                             addDownloadDialogState?.initialLink?.let(::removeYtDlpDialogPlaceholder)
                             addDownloadDialogState = null
                         },
-                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask, sponsorBlockMode, sponsorBlockCategories, embedSubtitles, subtitleLanguages, durationSeconds ->
+                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask, sponsorBlockMode, sponsorBlockCategories, embedSubtitles, subtitleLanguages, durationSeconds, playlistBatchId, playlistTitle, generatePlaylistFile ->
                             val capturedPageUrl = addDownloadDialogState?.pageUrl
                             addDownloadDialogState?.initialLink?.let(::removeYtDlpDialogPlaceholder)
                             addDownloadDialogState = null
@@ -800,6 +806,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                                         sponsorBlockMode = sponsorBlockMode, sponsorBlockCategories = sponsorBlockCategories,
                                         embedSubtitles = embedSubtitles, subtitleLanguages = subtitleLanguages,
                                         durationSeconds = durationSeconds,
+                                        playlistBatchId = playlistBatchId, playlistTitle = playlistTitle, generatePlaylistFile = generatePlaylistFile,
                                     )
                                 LinkParser.isGenericDownloadUrl(link) ->
                                     triggerDownloadDirectCustom(
@@ -1384,6 +1391,9 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         embedSubtitles: Boolean = false,
         subtitleLanguages: Set<String> = emptySet(),
         durationSeconds: Int? = null,
+        playlistBatchId: String? = null,
+        playlistTitle: String? = null,
+        generatePlaylistFile: Boolean = false,
     ) {
         if (!BuildConfig.HAS_YOUTUBE_SUPPORT) {
             showMessageDialog(
@@ -1413,6 +1423,9 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                 sponsorBlockCategories = sponsorBlockCategories,
                 embedSubtitles = embedSubtitles,
                 subtitleLanguages = subtitleLanguages,
+                playlistBatchId = playlistBatchId,
+                playlistTitle = playlistTitle,
+                generatePlaylistFile = generatePlaylistFile,
             )
             showYtDlpInstallPrompt = true
             return
@@ -1461,6 +1474,9 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
             sponsorBlockCategories = sponsorBlockCategories.joinToString(","),
             embedSubtitles = embedSubtitles,
             subtitleLanguages = subtitleLanguages.joinToString(","),
+            playlistBatchId = playlistBatchId,
+            playlistTitle = playlistTitle,
+            generatePlaylistFile = generatePlaylistFile,
         )
         if (!enqueueDownload(newItem, duplicateStrategy)) return
         showDownloadStartedSnackbar()

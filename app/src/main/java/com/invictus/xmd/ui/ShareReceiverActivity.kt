@@ -168,7 +168,7 @@ class ShareReceiverActivity : AppCompatActivity() {
                         onDismiss = {
                             dismissAndFinish()
                         },
-                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask, sponsorBlockMode, sponsorBlockCategories, embedSubtitles, subtitleLanguages, durationSeconds ->
+                        onStart = { link, name, saveDir, quality, audioFormat, duplicateStrategy, scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask, sponsorBlockMode, sponsorBlockCategories, embedSubtitles, subtitleLanguages, durationSeconds, playlistBatchId, playlistTitle, generatePlaylistFile ->
                             currentDownloadLink = null
                             when {
                                 LinkParser.isTorrentLink(link) -> {
@@ -189,7 +189,7 @@ class ShareReceiverActivity : AppCompatActivity() {
                                         link, name, saveDir, quality, audioFormat, duplicateStrategy,
                                         scheduleMode, scheduledAtMs, windowStartMinute, windowEndMinute, windowDaysMask,
                                         sponsorBlockMode, sponsorBlockCategories, embedSubtitles, subtitleLanguages,
-                                        durationSeconds,
+                                        durationSeconds, playlistBatchId, playlistTitle, generatePlaylistFile,
                                     )
                                 }
                                 LinkParser.isGenericDownloadUrl(link) -> {
@@ -562,6 +562,9 @@ class ShareReceiverActivity : AppCompatActivity() {
         embedSubtitles: Boolean = false,
         subtitleLanguages: Set<String> = emptySet(),
         durationSeconds: Int? = null,
+        playlistBatchId: String? = null,
+        playlistTitle: String? = null,
+        generatePlaylistFile: Boolean = false,
     ) {
         if (!BuildConfig.HAS_YOUTUBE_SUPPORT) {
             Toast.makeText(this, R.string.share_full_build_required, Toast.LENGTH_LONG).show()
@@ -617,6 +620,9 @@ class ShareReceiverActivity : AppCompatActivity() {
             sponsorBlockCategories = sponsorBlockCategories.joinToString(","),
             embedSubtitles = embedSubtitles,
             subtitleLanguages = subtitleLanguages.joinToString(","),
+            playlistBatchId = playlistBatchId,
+            playlistTitle = playlistTitle,
+            generatePlaylistFile = generatePlaylistFile,
         )
         if (!enqueueDownload(newItem, duplicateStrategy)) return
         Toast.makeText(this, R.string.download_started_confirmation, Toast.LENGTH_SHORT).show()

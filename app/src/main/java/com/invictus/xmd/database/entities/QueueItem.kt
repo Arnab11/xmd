@@ -63,5 +63,16 @@ data class QueueItem(
     // Video only -- ignored for an audio-only item.
     var embedSubtitles: Boolean = false,
     // Comma-joined language codes (see YtDlpManager.SUBTITLE_LANGUAGES); empty = falls back to "en".
-    var subtitleLanguages: String = ""
+    var subtitleLanguages: String = "",
+    // ── Playlist .m3u8 file (see AddDownloadDialog's "Playlist file" ────
+    // Advanced toggle, off by default). All entries added together from one
+    // playlist bulk-add share the same [playlistBatchId] (a fresh UUID per
+    // Start tap) so QueueRepository can tell when every item in that batch
+    // has reached a terminal state and, if [generatePlaylistFile] was on,
+    // write Videos/<playlistTitle>.m3u8 listing the ones that finished
+    // successfully. A single (non-playlist) download leaves all three null/
+    // false. See utils/storage/PlaylistFileUtils.kt.
+    var playlistBatchId: String? = null,
+    var playlistTitle: String? = null,
+    var generatePlaylistFile: Boolean = false,
 )
