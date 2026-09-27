@@ -177,6 +177,13 @@ fun AddDownloadDialog(
     var playlistProbing by remember { mutableStateOf(false) }
     var playlistPickerOpen by remember { mutableStateOf(false) }
     val selectedPlaylistIds = remember { mutableStateListOf<String>() }
+    // A bare /playlist?list=... link has no single video to fall back to,
+    // so there's nothing for "Just this video" to mean -- the toggle is
+    // skipped entirely and the picker list is the only view for it. Only a
+    // /watch?v=...&list=... link (a specific video that happens to sit
+    // inside a playlist) gets the "Just this video" vs "Choose videos"
+    // choice.
+    val isBarePlaylistLink = remember(link) { LinkParser.isBareYoutubePlaylistLink(link.trim()) }
 
     var onDuplicateStrategy by remember { mutableStateOf<OnDuplicateStrategy?>(null) }
     var showSolutionsDialog by remember { mutableStateOf(false) }
@@ -261,6 +268,10 @@ fun AddDownloadDialog(
         // a couple is less friction than starting from an all-empty list.
         selectedPlaylistIds.clear()
         selectedPlaylistIds.addAll(result.entries.map { it.id })
+        // Bare playlist link: no "this video" to offer, so land straight on
+        // the picker list instead of the (meaningless, here) "Just this
+        // video" default.
+        playlistPickerOpen = LinkParser.isBareYoutubePlaylistLink(trimmed)
     }
 
     LaunchedEffect(link, needsYtDlp) {
@@ -556,20 +567,29 @@ fun AddDownloadDialog(
                             }
                             if (!playlistProbing && playlistEntries.isNotEmpty()) {
                                 Spacer(Modifier.height(10.dp))
-                                ChipRow(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    options = listOf(
-                                        stringResource(R.string.download_dialog_playlist_just_this),
-                                        stringResource(R.string.download_dialog_playlist_choose),
-                                    ),
-                                    selected = if (playlistPickerOpen) {
-                                        stringResource(R.string.download_dialog_playlist_choose)
-                                    } else {
-                                        stringResource(R.string.download_dialog_playlist_just_this)
-                                    },
-                                    onSelected = { index -> playlistPickerOpen = index == 1 },
-                                )
-                                AnimatedVisibility(visible = playlistPickerOpen) {
+                                // Bare /playlist?list=... link: there's no
+                                // single "this video" to fall back to, so
+                                // the toggle would just be a confusing
+                                // no-op choice -- skip straight to the
+                                // picker list. Only a /watch?v=...&list=...
+                                // link (one specific video, incidentally
+                                // inside a playlist) gets the choice.
+                                if (!isBarePlaylistLink) {
+                                    ChipRow(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        options = listOf(
+                                            stringResource(R.string.download_dialog_playlist_just_this),
+                                            stringResource(R.string.download_dialog_playlist_choose),
+                                        ),
+                                        selected = if (playlistPickerOpen) {
+                                            stringResource(R.string.download_dialog_playlist_choose)
+                                        } else {
+                                            stringResource(R.string.download_dialog_playlist_just_this)
+                                        },
+                                        onSelected = { index -> playlistPickerOpen = index == 1 },
+                                    )
+                                }
+                                AnimatedVisibility(visible = playlistPickerOpen || isBarePlaylistLink) {
                                     Column {
                                         Spacer(Modifier.height(10.dp))
                                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -633,6 +653,15 @@ fun AddDownloadDialog(
                                                         overflow = TextOverflow.Ellipsis,
                                                         modifier = Modifier.weight(1f),
                                                     )
+                                                    val durationText = formatPlaylistEntryDuration(entry.durationSeconds)
+                                                    if (durationText != null) {
+                                                        Spacer(Modifier.width(6.dp))
+                                                        Text(
+                                                            text = durationText,
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -973,7 +1002,11 @@ fun AddDownloadDialog(
                 }
             } else {
                 val playlistEntriesForStart = playlistResult?.entries.orEmpty()
-                val startingPlaylistSelection = playlistPickerOpen && playlistEntriesForStart.isNotEmpty()
+                // A bare playlist link always goes through the picker
+                // selection -- there's no "just this video" fallback for it
+                // to fall through to (see isBarePlaylistLink above).
+                val startingPlaylistSelection =
+                    (playlistPickerOpen || isBarePlaylistLink) && playlistEntriesForStart.isNotEmpty()
                 StartChipButton(onClick = {
                     if (startingPlaylistSelection) {
                         // One onStart call per selected entry -- reuses the
@@ -1163,3 +1196,16 @@ private fun advancedStreamLabel(format: YtDlpManager.ProbedFormat, durationSecon
 }
 
 private const val STREAMS_CHIP_LABEL = "Streams"
+
+/** "3:45" / "1:02:03" style label for a playlist picker row; null when yt-dlp's flat-playlist probe didn't report a duration for that entry. */
+private fun formatPlaylistEntryDuration(durationSeconds: Int?): String? {
+    if (durationSeconds == null || durationSeconds < 0) return null
+    val hours = durationSeconds / 3600
+    val minutes = (durationSeconds % 3600) / 60
+    val seconds = durationSeconds % 60
+    return if (hours > 0) {
+        "%d:%02d:%02d".format(hours, minutes, seconds)
+    } else {
+        "%d:%02d".format(minutes, seconds)
+    }
+}

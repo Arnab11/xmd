@@ -255,6 +255,22 @@ object LinkParser {
         return query.split('&').any { it.startsWith("list=") && it.length > "list=".length }
     }
 
+    /**
+     * True for a playlist link with no specific video attached -- a bare
+     * /playlist?list=... page, as opposed to a /watch?v=...&list=... link
+     * that's playing one particular video from inside a playlist. There's
+     * no "this video" to speak of on a bare playlist link, so the Add
+     * Download dialog skips the "Just this video" vs "Choose videos"
+     * toggle for it and jumps straight to the picker list -- see
+     * AddDownloadDialog's playlist-picker block.
+     */
+    fun isBareYoutubePlaylistLink(link: String): Boolean {
+        if (!isYoutubePlaylistLink(link)) return false
+        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val query = uri.rawQuery ?: return false
+        return query.split('&').none { it.startsWith("v=") && it.length > "v=".length }
+    }
+
     fun needsYtDlp(link: String): Boolean =
         isYoutubeLink(link) || isInstagramLink(link) || isFacebookLink(link) || isHlsOrDashLink(link)
 
