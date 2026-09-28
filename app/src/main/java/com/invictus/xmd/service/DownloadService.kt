@@ -28,6 +28,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import com.invictus.xmd.database.entities.QueueItem
 import com.invictus.xmd.domain.download.CategoryDetector
+import com.invictus.xmd.domain.download.ShowDetector
+import com.invictus.xmd.utils.storage.FileNameUtils
 import com.invictus.xmd.domain.download.DownloadCancelledException
 import com.invictus.xmd.domain.download.DownloadCategory
 import com.invictus.xmd.domain.download.DownloadEngine
@@ -693,12 +695,21 @@ class DownloadService : LifecycleService() {
             isAudioOnly = formatSelector == YtDlpManager.AUDIO_ONLY_SELECTOR
         )
 
-        val saveRoot = File(Settings.defaultSaveLocation())
-        val outputDir = if (Settings.categorizationDisabled()) {
-            saveRoot
+        // Episodes ("... S01E02", "... Episode 5") go to Shows/<Show Name>/. yt-dlp
+        // picks its own file name, so detection runs on the probed title here.
+        val ytTitle = item.fileName?.takeUnless { it.isBlank() || it.startsWith("YouTube (") || it == "YouTube Video" }
+        val ytCategory = if (item.category != DownloadCategory.MUSIC && ShowDetector.titleLooksLikeEpisode(ytTitle)) {
+            DownloadCategory.SHOWS
         } else {
-            File(saveRoot, item.category.folderName)
+            item.category
         }
+        val outputDir = FileNameUtils.resolveDestinationFolder(
+            customSaveDir = null,
+            category = ytCategory,
+            fileName = null,
+            sourceUrl = item.sourceUrl,
+            titleHint = ytTitle,
+        )
 
         try {
             val customName = item.fileName?.takeUnless { it.isBlank() || it.startsWith("YouTube (") || it == "YouTube Video" }
@@ -823,7 +834,7 @@ class DownloadService : LifecycleService() {
         torrentEngines[itemId] = engine
 
         try {
-            val baseDir = if (!customSaveDirPath.isNullOrBlank()) {
+            val defaultBaseDir = if (!customSaveDirPath.isNullOrBlank()) {
                 // Picked via the Editor dialog's Advanced -> Change (see
                 // HomeFragment/MainActivity) -- overrides both the settings
                 // default and the Torrents-subfolder convention below.
@@ -839,6 +850,22 @@ class DownloadService : LifecycleService() {
                     // as one folder rather than split across Videos/Music/Others.
                     File(saveRoot, "Torrents")
                 }
+            }
+
+            // A torrent that is an episode or a season pack (S01E02 / S01 /
+            // Season 2 in its name) is grouped under Shows/<Show Name>/. The
+            // torrent's own top-level folder is kept below that. Custom save
+            // dirs and "categorization off" are left untouched.
+            val torrentName = QueueRepository.current().firstOrNull { it.id == itemId }?.fileName
+            val baseDir = if (customSaveDirPath.isNullOrBlank() && !Settings.categorizationDisabled() &&
+                ShowDetector.isEpisodeOrSeasonPack(torrentName)
+            ) {
+                File(
+                    File(Settings.defaultSaveLocation(), DownloadCategory.SHOWS.folderName),
+                    ShowDetector.showFolderName(torrentName),
+                )
+            } else {
+                defaultBaseDir
             }
 
             val result = withContext(Dispatchers.IO) {
@@ -923,6 +950,8 @@ class DownloadService : LifecycleService() {
                 // so it doesn't wrongly land in Others just because the share link was opaque.
                 var category = CategoryDetector.detect(directUrl, hint = fileName)
                     .takeIf { it != DownloadCategory.default() } ?: categoryAtClaim
+                // Episode detection wins over whatever the queue-time guess was.
+                if (ShowDetector.isEpisode(fileName)) category = DownloadCategory.SHOWS
                 QueueRepository.updateDownloadMetadata(itemId, fileName, category)
 
                 // Download into the app's private cache first. Public/shared storage
@@ -978,18 +1007,7 @@ class DownloadService : LifecycleService() {
                     }
                 }
 
-                val finalDir = if (!customDir.isNullOrBlank()) {
-                    File(customDir)
-                } else {
-                    val saveRoot = File(Settings.defaultSaveLocation())
-                    if (Settings.categorizationDisabled()) {
-                        // Chrome-style: flat, straight into the default save
-                        // location, no <location>/<Category> subfolder at all.
-                        saveRoot
-                    } else {
-                        File(saveRoot, category.folderName)
-                    }
-                }
+                val finalDir = FileNameUtils.resolveDestinationFolder(customDir, category, fileName, sourceUrl)
                 val finalFile = File(finalDir, fileName)
 
                 QueueRepository.markSaving(itemId)

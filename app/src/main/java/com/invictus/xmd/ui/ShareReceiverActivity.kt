@@ -366,6 +366,17 @@ class ShareReceiverActivity : AppCompatActivity() {
                 if (LinkParser.isTorrentLink(url)) {
                     currentDownloadLink = null
                     showAddTorrentDialog(prefillLink = url)
+                } else if (LinkParser.isSharedWebpageForBrowser(url)) {
+                    // Shared normal webpage -> xmd's Browser tab, not the Add
+                    // Download sheet. MainActivity does the routing.
+                    startActivity(
+                        Intent(this, MainActivity::class.java)
+                            .setAction(Intent.ACTION_SEND)
+                            .setType("text/plain")
+                            .putExtra(Intent.EXTRA_TEXT, url)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    )
+                    finish()
                 } else {
                     currentTorrentData = null
                     currentDownloadLink = url

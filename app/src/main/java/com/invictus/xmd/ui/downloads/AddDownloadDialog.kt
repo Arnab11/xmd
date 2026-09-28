@@ -214,9 +214,9 @@ fun AddDownloadDialog(
 
     val category = remember(link, name) { CategoryDetector.detect(link, hint = name) }
     val trimmedName = name.trim()
-    val targetFile = remember(trimmedName, customSaveDir, category) {
+    val targetFile = remember(trimmedName, customSaveDir, category, link) {
         if (trimmedName.isNotBlank()) {
-            FileNameUtils.resolveDestinationFile(trimmedName, customSaveDir, category)
+            FileNameUtils.resolveDestinationFile(trimmedName, customSaveDir, category, link)
         } else null
     }
     val queueItems by QueueRepository.items.collectAsStateWithLifecycle()

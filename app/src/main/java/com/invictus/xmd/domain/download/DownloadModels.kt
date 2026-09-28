@@ -43,6 +43,10 @@ enum class DownloadCategory(val folderName: String, val label: String) {
     // DownloadService. Never assigned at queue time by CategoryDetector
     // itself (extension alone can't tell a movie from a clip).
     MOVIES("Movies", "Movies"),
+    // Episodes of a series/show (S01E02, Episode 5, [Group] Show - 05, ...).
+    // Detected by ShowDetector from the file name and saved under
+    // Shows/<Show Name>/ -- takes priority over VIDEOS/MOVIES.
+    SHOWS("Shows", "Shows"),
     MUSIC("Music", "Music"),
     DOCUMENTS("Documents", "Documents"),
     APPS("Apps", "Apps"),

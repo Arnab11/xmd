@@ -3,6 +3,7 @@ package com.invictus.xmd.utils.storage
 import java.io.File
 import com.invictus.xmd.database.entities.QueueItem
 import com.invictus.xmd.domain.download.DownloadCategory
+import com.invictus.xmd.domain.download.ShowDetector
 import com.invictus.xmd.preferences.Settings
 
 /**
@@ -29,13 +30,22 @@ object FileNameUtils {
      * Computes the target save directory for a file given an optional custom directory
      * override and category, respecting Settings default save location and categorization flag.
      */
-    fun resolveDestinationFolder(customSaveDir: String?, category: DownloadCategory): File {
+    fun resolveDestinationFolder(
+        customSaveDir: String?,
+        category: DownloadCategory,
+        fileName: String? = null,
+        sourceUrl: String? = null,
+        titleHint: String? = null,
+    ): File {
         return if (!customSaveDir.isNullOrBlank()) {
             File(customSaveDir)
         } else {
             val saveRoot = File(Settings.defaultSaveLocation())
             if (Settings.categorizationDisabled()) {
                 saveRoot
+            } else if (category == DownloadCategory.SHOWS) {
+                // Shows/<Show Name>/ -- one subfolder per series.
+                File(File(saveRoot, category.folderName), ShowDetector.showFolderName(fileName, sourceUrl, titleHint))
             } else {
                 File(saveRoot, category.folderName)
             }
@@ -45,8 +55,13 @@ object FileNameUtils {
     /**
      * Computes the absolute target [File] on disk for a download item.
      */
-    fun resolveDestinationFile(fileName: String, customSaveDir: String?, category: DownloadCategory): File {
-        return File(resolveDestinationFolder(customSaveDir, category), fileName)
+    fun resolveDestinationFile(
+        fileName: String,
+        customSaveDir: String?,
+        category: DownloadCategory,
+        sourceUrl: String? = null,
+    ): File {
+        return File(resolveDestinationFolder(customSaveDir, category, fileName, sourceUrl), fileName)
     }
 
     /**
@@ -57,7 +72,7 @@ object FileNameUtils {
             return File(item.filePath!!)
         }
         val name = item.fileName?.takeUnless { it.isBlank() } ?: return null
-        return resolveDestinationFile(name, item.customSaveDirPath, item.category)
+        return resolveDestinationFile(name, item.customSaveDirPath, item.category, item.sourceUrl)
     }
 
     /**

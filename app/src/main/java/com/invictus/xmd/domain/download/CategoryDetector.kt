@@ -14,6 +14,7 @@ object CategoryDetector {
     private val VIDEO_EXT = setOf(
         "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm", "m4v", "mpg", "mpeg", "3gp", "ts"
     )
+    private val SUBTITLE_EXT = setOf("srt", "ass", "ssa", "vtt", "sub")
     private val MUSIC_EXT = setOf(
         "mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "opus", "aiff"
     )
@@ -31,6 +32,11 @@ object CategoryDetector {
      */
     fun detect(url: String, hint: String? = null): DownloadCategory {
         val ext = extensionOf(hint) ?: extensionOf(url) ?: return DownloadCategory.default()
+        // Episodes go to Shows/<Show Name>/ -- checked on the resolved file name
+        // only (a URL slug like "/ep-5/" isn't reliable enough on its own).
+        if ((ext in VIDEO_EXT || ext in SUBTITLE_EXT) && ShowDetector.isEpisode(hint ?: url.substringBefore('?').substringAfterLast('/'))) {
+            return DownloadCategory.SHOWS
+        }
         return when (ext) {
             in VIDEO_EXT -> DownloadCategory.VIDEOS
             in MUSIC_EXT -> DownloadCategory.MUSIC

@@ -1056,6 +1056,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
         // further down to gate the "open in Browser" branch to ACTION_VIEW
         // only (a Shared link should still always go to the download flow).
         val isViewAction = intent.action == Intent.ACTION_VIEW
+        val isSendAction = intent.action == Intent.ACTION_SEND
 
         val url = when (intent.action) {
             Intent.ACTION_VIEW -> intent.data?.toString()
@@ -1086,13 +1087,14 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
 
         val needsPrepare = LinkParser.isShareLink(url) || LinkParser.isFitgirlPage(url)
 
-        // Only ACTION_VIEW (the "open with"/chooser entry point the manifest's
-        // generic http/https intent-filter exists for) reaches here for a
-        // plain webpage link. ACTION_SEND (Shared links) always keeps the old
-        // download-flow behavior regardless of extension. isPlainWebpageLink
-        // already excludes torrents/known download extensions/share pages --
-        // kept here too as a normal ACTION_SEND text share can also match it.
-        if (isViewAction && LinkParser.isPlainWebpageLink(url)) {
+        // A plain webpage link opens in the Browser tab, whether it arrives via
+        // ACTION_VIEW (the "open with"/chooser entry point) or ACTION_SEND
+        // (system Share). Shared YouTube/Instagram/Facebook/HLS links are not
+        // "plain" here (they need the yt-dlp quality picker) and keep the Add
+        // Download flow, as do torrents, share pages and direct file links.
+        if ((isViewAction && LinkParser.isPlainWebpageLink(url)) ||
+            (isSendAction && LinkParser.isSharedWebpageForBrowser(url))
+        ) {
             browserFragment()?.openInNewTab(url)
             selectMainDestination(MainDestination.Browser)
             return

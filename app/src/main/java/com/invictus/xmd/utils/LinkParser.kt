@@ -140,6 +140,15 @@ object LinkParser {
     }
 
     /**
+     * True for a link received through the system "Share" sheet that should
+     * open in xmd's Browser tab: a plain webpage that is NOT something the
+     * download flow handles itself (YouTube / Instagram / Facebook / HLS /
+     * DASH keep the Add Download sheet so yt-dlp can pick quality).
+     */
+    fun isSharedWebpageForBrowser(link: String): Boolean =
+        isPlainWebpageLink(link) && !needsYtDlp(link)
+
+    /**
      * True for any well-formed http(s) URL that isn't a FuckingFast share
      * link or a fitgirl-repacks page — i.e. something already downloadable
      * as-is (dl.fuckingfast.co, but also R2/S3/other CDN direct links a
