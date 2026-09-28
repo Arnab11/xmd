@@ -15,6 +15,10 @@ android {
         targetSdk = 34
         versionCode = 10
         versionName = "1.0.0"
+
+        // Commit count of this build: the Preview update channel compares it
+        // against the auto-built manifest's commit_count (see preview.yml).
+        buildConfigField("int", "GIT_COUNT", getCommitCount())
     }
 
     // Two flavors instead of one do-everything APK:
@@ -84,6 +88,14 @@ android {
         }
         debug {
             applicationIdSuffix = ".debug"
+        }
+        // Auto-built beta (preview.yml): a release clone with the same
+        // applicationId, so it installs over/under stable builds signed with
+        // the same key. Unsigned here for the same reason as `release`.
+        create("preview") {
+            initWith(getByName("release"))
+            matchingFallbacks += listOf("release")
+            versionNameSuffix = "-beta.r${getCommitCount()}"
         }
     }
 
@@ -198,3 +210,22 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
 }
+
+// ---------------- Git helpers ----------------
+
+// Must stay a plain integer: it is emitted as `int GIT_COUNT` into BuildConfig.
+fun getCommitCount(): String =
+    runCommand("git rev-list --count HEAD")?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) } ?: "0"
+
+fun runCommand(command: String): String? =
+    try {
+        val process = ProcessBuilder(command.split(" "))
+            .directory(rootDir)
+            .redirectErrorStream(true)
+            .start()
+        val output = process.inputStream.bufferedReader().readText().trim()
+        process.waitFor()
+        output.ifBlank { null }
+    } catch (_: Exception) {
+        null
+    }

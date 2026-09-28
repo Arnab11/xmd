@@ -73,22 +73,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Where an update the user has explicitly asked about (via the "Check for
- * updates now" button or a found auto-check) currently stands. UI-only --
- * doesn't reference [com.invictus.xmd.domain.update.UpdateChecker.Release]
- * directly so this file stays decoupled from the domain layer.
- */
-sealed class UpdateAvailability {
-    data object Idle : UpdateAvailability()
-    data object UpToDate : UpdateAvailability()
-    data object Error : UpdateAvailability()
-    data class Available(val version: String) : UpdateAvailability()
-    /** [progress] is -1f for an indeterminate/unknown-size download. */
-    data class Downloading(val version: String, val progress: Float) : UpdateAvailability()
-    data class ReadyToInstall(val version: String) : UpdateAvailability()
-}
-
-/**
  * App identity, version, GitHub link, license notice, and developer
  * credits. Rendered directly by SettingsActivity's AboutRoute (NavHost
  * route body) -- no Fragment host. The open-source libraries Xmd is built
@@ -120,9 +104,6 @@ fun AboutScreen(
     onUpdateChannelChanged: (Settings.UpdateChannel) -> Unit,
     isCheckingForUpdate: Boolean,
     onCheckForUpdateClick: () -> Unit,
-    updateAvailability: UpdateAvailability,
-    onDownloadUpdateClick: () -> Unit,
-    onInstallUpdateClick: () -> Unit,
 ) {
     Column(
         modifier = Modifier
@@ -438,12 +419,6 @@ fun AboutScreen(
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
-
-                UpdateAvailabilityCard(
-                    availability = updateAvailability,
-                    onDownloadClick = onDownloadUpdateClick,
-                    onInstallClick = onInstallUpdateClick,
-                )
             }
         }
 
@@ -491,110 +466,5 @@ fun AboutScreen(
                 .fillMaxWidth()
                 .padding(bottom = 16.dp),
         )
-    }
-}
-
-/**
- * Inline card shown below the "Check for updates now" button once
- * something's actually happened -- mirrors mpvRx's UpdateSheet states
- * (Available -> Downloading -> ReadyToInstall) but as a plain card in the
- * existing Updates section rather than a separate ModalBottomSheet, since
- * this is About's only update-related surface. Renders nothing for
- * [UpdateAvailability.Idle] and [UpdateAvailability.UpToDate]/[UpdateAvailability.Error]
- * (those are communicated via Toast from AboutRoute instead, so they don't
- * leave a stale card sitting in the settings screen).
- */
-@Composable
-private fun UpdateAvailabilityCard(
-    availability: UpdateAvailability,
-    onDownloadClick: () -> Unit,
-    onInstallClick: () -> Unit,
-) {
-    val version: String
-    val progress: Float?
-    val isReadyToInstall: Boolean
-    when (availability) {
-        is UpdateAvailability.Available -> {
-            version = availability.version
-            progress = null
-            isReadyToInstall = false
-        }
-        is UpdateAvailability.Downloading -> {
-            version = availability.version
-            progress = availability.progress
-            isReadyToInstall = false
-        }
-        is UpdateAvailability.ReadyToInstall -> {
-            version = availability.version
-            progress = null
-            isReadyToInstall = true
-        }
-        else -> return
-    }
-
-    Surface(
-        shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = if (isReadyToInstall) Icons.Check else Icons.Download,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(20.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                Text(
-                    text = stringResource(
-                        if (isReadyToInstall) R.string.about_ready_to_install else R.string.about_update_available,
-                        version,
-                    ),
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-
-            if (progress != null) {
-                if (progress >= 0f) {
-                    LinearProgressIndicator(
-                        progress = { progress / 100f },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                    Text(
-                        text = stringResource(R.string.about_update_progress_percent, progress.toInt()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f),
-                    )
-                } else {
-                    LinearProgressIndicator(
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primary,
-                        trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                    )
-                }
-            } else {
-                Button(
-                    onClick = if (isReadyToInstall) onInstallClick else onDownloadClick,
-                    modifier = Modifier.fillMaxWidth().height(44.dp),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary,
-                    ),
-                ) {
-                    Text(
-                        text = stringResource(
-                            if (isReadyToInstall) R.string.about_install_update else R.string.about_download_update,
-                        ),
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-        }
     }
 }

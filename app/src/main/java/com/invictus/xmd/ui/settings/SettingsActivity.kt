@@ -1113,134 +1113,62 @@ private fun YoutubeRoute() {
 @Composable
 private fun AboutRoute(onLibrariesClick: () -> Unit) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
-    var autoCheckForUpdates by remember { mutableStateOf(Settings.autoCheckForUpdatesEnabled()) }
-    var updateChannel by remember { mutableStateOf(Settings.updateChannel()) }
-    var isCheckingForUpdate by remember { mutableStateOf(false) }
-    var updateAvailability by remember {
-        mutableStateOf<UpdateAvailability>(
-            UpdateAvailability.Idle,
-        )
-    }
-    // The full release + the asset picked for this build's flavor/ABI,
-    // kept around so Download and Install (separate button taps) don't
-    // each need their own network round-trip to re-fetch it.
-    var pendingRelease by remember {
-        mutableStateOf<com.invictus.xmd.domain.update.UpdateChecker.Release?>(null)
-    }
-    var pendingAsset by remember {
-        mutableStateOf<com.invictus.xmd.domain.update.UpdateChecker.Asset?>(null)
-    }
+    // The startup auto-check belongs to MainActivity's controller; this one
+    // only serves the manual "Check for updates now" flow and its sheet.
+    val updateController = com.invictus.xmd.domain.update.rememberUpdateController(
+        context,
+        autoCheckOnStart = false,
+    )
+    val updateState = updateController.state
 
-    // Manual check only -- the on-launch/opt-in check runs once per
-    // process in FfApp (see checkForUpdateOnLaunch there) and only
-    // toasts; this is the explicit-tap path that also drives the in-app
-    // Download -> Install card below the button.
-    fun checkForUpdate() {
-        if (isCheckingForUpdate) return
-        isCheckingForUpdate = true
-        coroutineScope.launch {
-            val outcome: Result<com.invictus.xmd.domain.update.UpdateChecker.Release?> =
-                withContext(Dispatchers.IO) {
-                    try {
-                        Result.success(
-                            com.invictus.xmd.domain.update.UpdateChecker.checkForUpdate(
-                                com.invictus.xmd.BuildConfig.VERSION_NAME,
-                                updateChannel,
-                            ),
-                        )
-                    } catch (e: com.invictus.xmd.domain.update.UpdateChecker.CheckFailedException) {
-                        Result.failure(e)
-                    }
-                }
-            isCheckingForUpdate = false
-
-            outcome.fold(
-                onSuccess = { release ->
-                    if (release != null) {
-                        val asset = com.invictus.xmd.domain.update.UpdateChecker.selectApkAsset(release)
-                        pendingRelease = release
-                        pendingAsset = asset
-                        if (asset != null) {
-                            // In-app download/install is possible -- drive
-                            // the card instead of jumping to the browser.
-                            updateAvailability =
-                                UpdateAvailability.Available(release.tagName)
-                        } else {
-                            // No matching asset (e.g. release predates the
-                            // flavor/ABI split) -- fall back to the old
-                            // "open the release page" behavior.
-                            updateAvailability = UpdateAvailability.Idle
-                            Toast.makeText(
-                                context,
-                                context.getString(R.string.about_update_available, release.tagName),
-                                Toast.LENGTH_LONG,
-                            ).show()
-                            context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(release.htmlUrl)))
-                        }
-                    } else {
-                        pendingRelease = null
-                        pendingAsset = null
-                        updateAvailability = UpdateAvailability.Idle
-                        Toast.makeText(context, R.string.about_up_to_date, Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onFailure = { error ->
-                    updateAvailability = UpdateAvailability.Idle
-                    // Surface the real reason (HTTP code, rate-limited,
-                    // actual timeout, etc.) instead of always blaming "your
-                    // connection" -- that generic wording used to show even
-                    // when the network was fine but the check failed for
-                    // some other reason (e.g. GitHub API rate limiting),
-                    // which just misled people into checking Wi-Fi/data for
-                    // no reason.
-                    val reason = error.message?.takeIf { it.isNotBlank() }
-                    val message = if (reason != null) {
-                        context.getString(R.string.about_update_check_failed_detail, reason)
-                    } else {
-                        context.getString(R.string.about_update_check_failed)
-                    }
-                    Toast.makeText(context, message, Toast.LENGTH_LONG).show()
-                },
-            )
-        }
-    }
-
-    fun downloadUpdate() {
-        val release = pendingRelease ?: return
-        val asset = pendingAsset ?: return
-        coroutineScope.launch {
-            val destination = File(context.cacheDir, asset.name)
-            try {
-                com.invictus.xmd.domain.update.UpdateChecker.downloadApk(asset, destination).collect { progress ->
-                    updateAvailability =
-                        UpdateAvailability.Downloading(release.tagName, progress)
-                }
-                updateAvailability =
-                    UpdateAvailability.ReadyToInstall(release.tagName)
-            } catch (e: Exception) {
-                destination.delete()
-                updateAvailability = UpdateAvailability.Available(release.tagName)
-                Toast.makeText(context, R.string.about_update_download_failed, Toast.LENGTH_SHORT).show()
+    // Transient outcomes (up to date / check failed) are toasts, not sheet
+    // content, so they don't leave a stale card sitting in Settings.
+    LaunchedEffect(updateState) {
+        when (updateState) {
+            is com.invictus.xmd.domain.update.UpdateState.NoUpdate -> {
+                Toast.makeText(context, R.string.about_up_to_date, Toast.LENGTH_SHORT).show()
+                updateController.dismissStatus()
             }
+            is com.invictus.xmd.domain.update.UpdateState.Error -> {
+                // Surface the real reason (HTTP code, rate-limited, timeout...)
+                // instead of always blaming "your connection".
+                val message = if (updateState.reason != null) {
+                    context.getString(R.string.about_update_check_failed_detail, updateState.reason)
+                } else {
+                    context.getString(R.string.about_update_check_failed)
+                }
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                updateController.dismissStatus()
+            }
+            else -> Unit
         }
     }
 
-    fun installUpdate() {
-        val asset = pendingAsset ?: return
-        val file = File(context.cacheDir, asset.name)
-        if (!file.exists()) return
-        val uri = androidx.core.content.FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            file,
+    val updateRelease = when (updateState) {
+        is com.invictus.xmd.domain.update.UpdateState.Available -> updateState.release
+        is com.invictus.xmd.domain.update.UpdateState.ReadyToInstall -> updateState.release
+        else -> null
+    }
+    if (updateRelease != null) {
+        val isInstallReady = updateState is com.invictus.xmd.domain.update.UpdateState.ReadyToInstall
+        com.invictus.xmd.ui.update.UpdateSheet(
+            release = updateRelease,
+            sizeBytes = updateController.apkSize(updateRelease),
+            isDownloading = updateController.isDownloading,
+            progress = updateController.downloadProgress,
+            isInstallReady = isInstallReady,
+            currentVersion = com.invictus.xmd.BuildConfig.VERSION_NAME,
+            downloadError = updateController.downloadError,
+            onDismiss = { updateController.dismiss() },
+            onAction = {
+                if (isInstallReady) {
+                    updateController.installUpdate(updateRelease)
+                } else {
+                    updateController.downloadUpdate(updateRelease)
+                }
+            },
+            onIgnore = { updateController.ignoreVersion(updateRelease.tagName) },
         )
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "application/vnd.android.package-archive")
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
-        context.startActivity(intent)
     }
 
     AboutScreen(
@@ -1250,28 +1178,12 @@ private fun AboutRoute(onLibrariesClick: () -> Unit) {
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
         },
         onLibrariesClick = onLibrariesClick,
-        autoCheckForUpdates = autoCheckForUpdates,
-        onAutoCheckForUpdatesChanged = { enabled ->
-            autoCheckForUpdates = enabled
-            Settings.setAutoCheckForUpdatesEnabled(enabled)
-        },
-        updateChannel = updateChannel,
-        onUpdateChannelChanged = { channel ->
-            updateChannel = channel
-            Settings.setUpdateChannel(channel)
-            // Any in-progress/found update was resolved against the old
-            // channel -- clear it so a leftover "Download"/"Install" card
-            // (and its cached release+asset) can't point at the wrong
-            // channel's build after switching.
-            pendingRelease = null
-            pendingAsset = null
-            updateAvailability = UpdateAvailability.Idle
-        },
-        isCheckingForUpdate = isCheckingForUpdate,
-        onCheckForUpdateClick = { checkForUpdate() },
-        updateAvailability = updateAvailability,
-        onDownloadUpdateClick = { downloadUpdate() },
-        onInstallUpdateClick = { installUpdate() },
+        autoCheckForUpdates = updateController.autoCheckEnabled,
+        onAutoCheckForUpdatesChanged = { updateController.setAutoCheck(it) },
+        updateChannel = updateController.updateChannel,
+        onUpdateChannelChanged = { updateController.setChannel(it) },
+        isCheckingForUpdate = updateState is com.invictus.xmd.domain.update.UpdateState.Loading,
+        onCheckForUpdateClick = { updateController.checkForUpdate(manual = true) },
     )
 }
 

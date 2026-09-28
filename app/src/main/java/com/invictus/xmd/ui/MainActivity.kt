@@ -699,6 +699,38 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                     },
                 )
 
+                // Global in-app updater sheet (Bunko-style), above every
+                // destination. Also runs the deferred startup auto-check.
+                val updateController = com.invictus.xmd.domain.update.rememberUpdateController(context)
+                val updateState = updateController.state
+                val updateRelease = when (updateState) {
+                    is com.invictus.xmd.domain.update.UpdateState.Available -> updateState.release
+                    is com.invictus.xmd.domain.update.UpdateState.ReadyToInstall -> updateState.release
+                    else -> null
+                }
+                if (updateRelease != null) {
+                    val isInstallReady =
+                        updateState is com.invictus.xmd.domain.update.UpdateState.ReadyToInstall
+                    com.invictus.xmd.ui.update.UpdateSheet(
+                        release = updateRelease,
+                        sizeBytes = updateController.apkSize(updateRelease),
+                        isDownloading = updateController.isDownloading,
+                        progress = updateController.downloadProgress,
+                        isInstallReady = isInstallReady,
+                        currentVersion = BuildConfig.VERSION_NAME,
+                        downloadError = updateController.downloadError,
+                        onDismiss = { updateController.dismiss() },
+                        onAction = {
+                            if (isInstallReady) {
+                                updateController.installUpdate(updateRelease)
+                            } else {
+                                updateController.downloadUpdate(updateRelease)
+                            }
+                        },
+                        onIgnore = { updateController.ignoreVersion(updateRelease.tagName) },
+                    )
+                }
+
                 if (dnsSettingsDialogOpen) {
                     DnsSettingsDialog(
                         currentMode = Settings.dnsMode(),

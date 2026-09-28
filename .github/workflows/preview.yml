@@ -1,0 +1,204 @@
+name: Preview Build
+
+# Auto-built beta channel (Bunko/mpvRx-style): every 30 minutes, if app sources
+# changed since the last published preview, build signed preview APKs and
+# publish them plus a latest.json manifest on the rolling "preview" pre-release.
+# The app's Preview update channel reads that manifest and compares its
+# commit_count against BuildConfig.GIT_COUNT.
+#
+# Hosted on a rolling GitHub pre-release instead of GitHub Pages because
+# deploy-site.yml already owns the repo's Pages deployment -- a second Pages
+# deploy would overwrite the site (and vice versa).
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: xmd-preview-build
+  cancel-in-progress: false
+
+env:
+  PREVIEW_TAG: preview
+  # flavor-abi labels, matching selectXmdApkAsset() in the app.
+  FLAVORS: lite full
+  ABIS: arm64-v8a armeabi-v7a
+
+jobs:
+  build-preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for unpublished app activity
+        id: activity
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MANIFEST_URL: https://github.com/${{ github.repository }}/releases/download/preview/latest.json
+        run: |
+          set -euo pipefail
+          source_fingerprint="$(
+            git ls-files -s -- \
+              app \
+              build.gradle.kts \
+              settings.gradle.kts \
+              gradle.properties \
+              gradle \
+              | sha256sum | cut -d' ' -f1
+          )"
+          latest_fingerprint="$(
+            curl -fsSL --retry 3 --retry-delay 2 "$MANIFEST_URL" \
+              | python3 -c 'import json, sys; print(json.load(sys.stdin).get("source_fingerprint", ""))' \
+              2>/dev/null || true
+          )"
+          echo "source_fingerprint=$source_fingerprint" >> "$GITHUB_OUTPUT"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || -z "$latest_fingerprint" || "$source_fingerprint" != "$latest_fingerprint" ]]; then
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Collect metadata
+        id: metadata
+        if: steps.activity.outputs.should_build == 'true'
+        run: |
+          echo "commit_count=$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "published_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up JDK 17
+        if: steps.activity.outputs.should_build == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Make Gradle wrapper executable
+        if: steps.activity.outputs.should_build == 'true'
+        run: chmod +x ./gradlew
+
+      - name: Build preview APKs
+        if: steps.activity.outputs.should_build == 'true'
+        run: ./gradlew assemblePreview --stacktrace --no-daemon --max-workers=2
+
+      - name: Sign and verify preview APKs
+        if: steps.activity.outputs.should_build == 'true'
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          COMMIT_COUNT: ${{ steps.metadata.outputs.commit_count }}
+        run: |
+          set -euo pipefail
+          apksigner="$ANDROID_HOME/build-tools/34.0.0/apksigner"
+
+          if [[ -z "$KEYSTORE_BASE64" || -z "$KEY_ALIAS" || -z "$KEYSTORE_PASSWORD" || -z "$KEY_PASSWORD" ]]; then
+            echo "Required signing secrets are missing; refusing to publish unsigned preview APKs."
+            exit 1
+          fi
+          test -x "$apksigner"
+
+          echo "$KEYSTORE_BASE64" | base64 -d > release.jks
+          trap 'rm -f release.jks' EXIT
+
+          mkdir -p preview-assets
+          for flavor in $FLAVORS; do
+            for abi in $ABIS; do
+              unsigned=$(compgen -G "app/build/outputs/apk/${flavor}/preview/*${abi}*-unsigned.apk" | head -n1 || true)
+              if [[ -z "$unsigned" ]]; then
+                echo "::error::Missing expected APK for ${flavor}/${abi}"
+                find app/build/outputs/apk -type f -name '*.apk' -print || true
+                exit 1
+              fi
+              signed="preview-assets/Xmd-${flavor}-${abi}-preview-r${COMMIT_COUNT}.apk"
+              "$apksigner" sign \
+                --ks release.jks \
+                --ks-key-alias "$KEY_ALIAS" \
+                --ks-pass "pass:$KEYSTORE_PASSWORD" \
+                --key-pass "pass:$KEY_PASSWORD" \
+                --out "$signed" \
+                "$unsigned"
+              "$apksigner" verify --verbose "$signed"
+            done
+          done
+
+      - name: Write latest.json manifest
+        if: steps.activity.outputs.should_build == 'true'
+        env:
+          COMMIT_COUNT: ${{ steps.metadata.outputs.commit_count }}
+          SOURCE_SHA: ${{ steps.metadata.outputs.source_sha }}
+          PUBLISHED_AT: ${{ steps.metadata.outputs.published_at }}
+          SOURCE_FINGERPRINT: ${{ steps.activity.outputs.source_fingerprint }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          assets_dir = Path("preview-assets")
+          repo = os.environ["REPO"]
+          commit_count = int(os.environ["COMMIT_COUNT"])
+          source_sha = os.environ["SOURCE_SHA"]
+          base_url = f"https://github.com/{repo}/releases/download/preview"
+
+          assets = []
+          for apk in sorted(assets_dir.glob("*.apk")):
+              assets.append({
+                  "name": apk.name,
+                  "browser_download_url": f"{base_url}/{apk.name}",
+                  "size": apk.stat().st_size,
+                  "content_type": "application/vnd.android.package-archive",
+                  "sha256": hashlib.sha256(apk.read_bytes()).hexdigest(),
+              })
+
+          manifest = {
+              "tag_name": f"preview-r{commit_count}",
+              "name": f"Xmd Preview r{commit_count}",
+              "body": f"Automatic preview from {source_sha[:7]}.",
+              "published_at": os.environ["PUBLISHED_AT"],
+              "prerelease": True,
+              "assets": assets,
+              "channel": "preview",
+              "commit_sha": source_sha,
+              "commit_count": commit_count,
+              "source_fingerprint": os.environ["SOURCE_FINGERPRINT"],
+          }
+          (assets_dir / "latest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          PY
+          python3 -m json.tool preview-assets/latest.json >/dev/null
+          ls -l preview-assets
+
+      - name: Publish rolling preview pre-release
+        if: steps.activity.outputs.should_build == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_COUNT: ${{ steps.metadata.outputs.commit_count }}
+          SOURCE_SHA: ${{ steps.metadata.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Replace the previous rolling release (and its tag) so old builds
+          # never accumulate; latest.json is uploaded last-in-set with the APKs.
+          gh release delete "$PREVIEW_TAG" --cleanup-tag --yes || true
+          gh release create "$PREVIEW_TAG" preview-assets/* \
+            --prerelease \
+            --target "$SOURCE_SHA" \
+            --title "Xmd Preview r${COMMIT_COUNT}" \
+            --notes "Automatic preview build from ${SOURCE_SHA:0:7}. Installed by the in-app Preview update channel; may be unstable."

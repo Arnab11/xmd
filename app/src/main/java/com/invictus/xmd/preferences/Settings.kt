@@ -425,22 +425,22 @@ object Settings {
     }
 
     // ── About: Update checks ───────────────────────────────────────────
-    // Whether the About screen should silently check GitHub Releases for a
-    // newer version each time it's opened. Default OFF -- unlike mpvRx this
-    // is a purely network-initiated, opt-in check (no background WorkManager
-    // job), so the switch starts false until the user turns it on.
-    fun autoCheckForUpdatesEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_CHECK_UPDATES, false)
+    // Whether the app silently checks GitHub for a newer version shortly
+    // after MainActivity starts (result shown in the UpdateSheet). Default ON,
+    // like Bunko -- it's a single lightweight request, no background job, and
+    // users who already chose a value keep it.
+    fun autoCheckForUpdatesEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_CHECK_UPDATES, true)
     fun setAutoCheckForUpdatesEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_CHECK_UPDATES, value).apply()
     }
 
-    /** Which GitHub Releases channel the About screen's update check should
-     *  fetch from -- [STABLE] hits `/releases/latest` (GitHub's own
-     *  latest-non-prerelease pointer, built by release.yml's `vX.Y.Z`
-     *  tags), [PREVIEW] lists recent releases and takes the newest one
-     *  flagged `prerelease: true` (built by prerelease.yml's `vX.Y.Z-*`
-     *  tags) even if a newer stable exists -- switching to Preview is an
-     *  explicit opt-in to pre-release builds, not "whichever is newest". */
+    /** Which feed the updater checks -- [STABLE] hits `/releases/latest`
+     *  (GitHub's latest-non-prerelease pointer, built by release.yml's
+     *  `vX.Y.Z` tags); [PREVIEW] reads the auto-built `latest.json`
+     *  manifest published by preview.yml (compared by commit count against
+     *  BuildConfig.GIT_COUNT), falling back to the newest hand-cut
+     *  `prerelease: true` release. Switching to Preview is an explicit
+     *  opt-in to pre-release builds, not "whichever is newest". */
     enum class UpdateChannel { STABLE, PREVIEW }
 
     fun updateChannel(): UpdateChannel =
