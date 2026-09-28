@@ -259,6 +259,8 @@
     <string name="settings_default_location_hint">Where new downloads are saved unless a custom folder is picked for that download.</string>
     <string name="settings_disable_categorization">Disable Folder Categorization</string>
     <string name="settings_disable_categorization_hint">Save files directly in the default folder.</string>
+    <string name="settings_show_name_folders">Show name folders</string>
+    <string name="settings_show_name_folders_hint">Put each show\'s episodes in Shows/&lt;Show Name&gt;. Off keeps all episodes together in Shows.</string>
     <string name="settings_wifi_only">Download on Wi-Fi Only</string>
     <string name="settings_wifi_only_hint">Pause all downloads on cellular data and resume automatically when Wi-Fi is back.</string>
     <string name="settings_battery_optimization">Disable battery optimization</string>

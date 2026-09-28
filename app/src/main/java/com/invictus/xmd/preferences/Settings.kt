@@ -49,6 +49,7 @@ object Settings {
     private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
     private const val KEY_DEFAULT_SAVE_LOCATION = "default_save_location_path"
     private const val KEY_DISABLE_CATEGORIZATION = "disable_folder_categorization"
+    private const val KEY_SHOW_NAME_FOLDERS = "show_name_folders"
     private const val KEY_WIFI_ONLY = "wifi_only_downloads"
     // Legacy pre-merge keys (total + mobile were separate toggles) --
     // read-only now, only consulted by [migrateDataLimitIfNeeded] to carry
@@ -173,6 +174,14 @@ object Settings {
     fun categorizationDisabled(): Boolean = prefs.getBoolean(KEY_DISABLE_CATEGORIZATION, false)
     fun setCategorizationDisabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_DISABLE_CATEGORIZATION, value).apply()
+    }
+
+    /** When true, detected episodes/season packs get their own
+     *  Shows/<Show Name>/ subfolder (also when [categorizationDisabled] is on).
+     *  When false (default) they stay flat in Shows/ with no per-show subfolder. */
+    fun showNameFoldersEnabled(): Boolean = prefs.getBoolean(KEY_SHOW_NAME_FOLDERS, false)
+    fun setShowNameFoldersEnabled(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SHOW_NAME_FOLDERS, value).apply()
     }
 
     /** When true, no download (HTTP, torrent, or YouTube) is allowed to start

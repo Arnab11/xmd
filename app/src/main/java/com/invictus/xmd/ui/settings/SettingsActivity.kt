@@ -637,6 +637,9 @@ private fun DownloadsRoute() {
     var categorizeIntoFolders by remember {
         mutableStateOf(!com.invictus.xmd.preferences.Settings.categorizationDisabled())
     }
+    var showNameFolders by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.showNameFoldersEnabled())
+    }
     var wifiOnly by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.wifiOnlyDownloads())
     }
@@ -702,6 +705,7 @@ private fun DownloadsRoute() {
         autoRetry = autoRetry,
         defaultLocationPath = defaultLocationPath,
         categorizeIntoFolders = categorizeIntoFolders,
+        showNameFolders = showNameFolders,
         wifiOnly = wifiOnly,
         dataLimitEnabled = dataLimitEnabled,
         dataLimitBytes = dataLimitBytes,
@@ -721,6 +725,10 @@ private fun DownloadsRoute() {
         onCategorizeIntoFoldersChanged = { checked ->
             categorizeIntoFolders = checked
             com.invictus.xmd.preferences.Settings.setCategorizationDisabled(!checked)
+        },
+        onShowNameFoldersChanged = { checked ->
+            showNameFolders = checked
+            com.invictus.xmd.preferences.Settings.setShowNameFoldersEnabled(checked)
         },
         onWifiOnlyChanged = { checked ->
             val wifiOnlyJustEnabled = checked && !com.invictus.xmd.preferences.Settings.wifiOnlyDownloads()

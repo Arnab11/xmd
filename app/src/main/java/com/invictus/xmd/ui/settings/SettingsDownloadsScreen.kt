@@ -68,6 +68,7 @@ fun SettingsDownloadsScreen(
     autoRetry: Boolean,
     defaultLocationPath: String,
     categorizeIntoFolders: Boolean,
+    showNameFolders: Boolean,
     wifiOnly: Boolean,
     dataLimitEnabled: Boolean,
     dataLimitBytes: Long,
@@ -80,6 +81,7 @@ fun SettingsDownloadsScreen(
     onAutoRetryChanged: (Boolean) -> Unit,
     onChangeDefaultLocation: () -> Unit,
     onCategorizeIntoFoldersChanged: (Boolean) -> Unit,
+    onShowNameFoldersChanged: (Boolean) -> Unit,
     onWifiOnlyChanged: (Boolean) -> Unit,
     onDataLimitEnabledChanged: (Boolean) -> Unit,
     onDataLimitBytesChanged: (Long) -> Unit,
@@ -112,6 +114,13 @@ fun SettingsDownloadsScreen(
                 subtitle = stringResource(R.string.settings_disable_categorization_hint),
                 checked = !categorizeIntoFolders,
                 onCheckedChange = { disabled -> onCategorizeIntoFoldersChanged(!disabled) },
+            )
+            SettingsDivider()
+            SwitchSettingRow(
+                title = stringResource(R.string.settings_show_name_folders),
+                subtitle = stringResource(R.string.settings_show_name_folders_hint),
+                checked = showNameFolders,
+                onCheckedChange = onShowNameFoldersChanged,
             )
             SettingsDivider()
             SwitchSettingRow(

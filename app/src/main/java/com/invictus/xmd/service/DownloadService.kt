@@ -853,17 +853,19 @@ class DownloadService : LifecycleService() {
             }
 
             // A torrent that is an episode or a season pack (S01E02 / S01 /
-            // Season 2 in its name) is grouped under Shows/<Show Name>/. The
+            // Season 2 in its name) is grouped under Shows/ -- with a
+            // <Show Name>/ subfolder only when "Show name folders" is on. The
             // torrent's own top-level folder is kept below that. Custom save
-            // dirs and "categorization off" are left untouched.
+            // dirs are left untouched; "categorization off" only skips Shows/
+            // when show-name folders are off too.
             val torrentName = QueueRepository.current().firstOrNull { it.id == itemId }?.fileName
-            val baseDir = if (customSaveDirPath.isNullOrBlank() && !Settings.categorizationDisabled() &&
+            val showFolders = Settings.showNameFoldersEnabled()
+            val baseDir = if (customSaveDirPath.isNullOrBlank() &&
+                (!Settings.categorizationDisabled() || showFolders) &&
                 ShowDetector.isEpisodeOrSeasonPack(torrentName)
             ) {
-                File(
-                    File(Settings.defaultSaveLocation(), DownloadCategory.SHOWS.folderName),
-                    ShowDetector.showFolderName(torrentName),
-                )
+                val showsRoot = File(Settings.defaultSaveLocation(), DownloadCategory.SHOWS.folderName)
+                if (showFolders) File(showsRoot, ShowDetector.showFolderName(torrentName)) else showsRoot
             } else {
                 defaultBaseDir
             }

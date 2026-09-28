@@ -41,12 +41,15 @@ object FileNameUtils {
             File(customSaveDir)
         } else {
             val saveRoot = File(Settings.defaultSaveLocation())
-            if (Settings.categorizationDisabled()) {
-                saveRoot
-            } else if (category == DownloadCategory.SHOWS) {
-                // Shows/<Show Name>/ -- one subfolder per series.
+            val showFolders = Settings.showNameFoldersEnabled()
+            if (category == DownloadCategory.SHOWS && showFolders) {
+                // Opt-in: Shows/<Show Name>/ -- one subfolder per series
+                // (applies even when folder categorization is disabled).
                 File(File(saveRoot, category.folderName), ShowDetector.showFolderName(fileName, sourceUrl, titleHint))
+            } else if (Settings.categorizationDisabled()) {
+                saveRoot
             } else {
+                // Includes SHOWS with the setting off -> flat Shows/.
                 File(saveRoot, category.folderName)
             }
         }
