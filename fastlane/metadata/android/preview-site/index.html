@@ -793,7 +793,7 @@
       };
       const order = ["lite", "full", "other"];
       const grouped = {};
-      assets.forEach(a => {
+      assets.filter(a => /\.apk$/i.test(a.name)).forEach(a => {
         const flavor = buildInfoFor(a.name).flavor;
         (grouped[flavor] ||= []).push(a);
       });

@@ -10,9 +10,12 @@ name: Preview Build
 # deploy-site.yml already owns the repo's Pages deployment -- a second Pages
 # deploy would overwrite the site (and vice versa).
 
+# Automatic (scheduled) builds are switched off for now -- previews only run
+# when started manually from the Actions tab. To turn the 30-minute auto build
+# back on, re-add:
+#   schedule:
+#     - cron: "*/30 * * * *"
 on:
-  schedule:
-    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
@@ -129,11 +132,21 @@ jobs:
                 --ks-key-alias "$KEY_ALIAS" \
                 --ks-pass "pass:$KEYSTORE_PASSWORD" \
                 --key-pass "pass:$KEY_PASSWORD" \
+                --v4-signing-enabled false \
                 --out "$signed" \
                 "$unsigned"
               "$apksigner" verify --verbose "$signed"
             done
           done
+
+      - name: Drop signature side-files
+        if: steps.activity.outputs.should_build == 'true'
+        shell: bash
+        run: |
+          # Only the .apk files are published; apksigner's v4 .idsig files
+          # must never reach the release/site.
+          rm -f preview-assets/*.idsig
+          ls -l preview-assets
 
       - name: Write latest.json manifest
         if: steps.activity.outputs.should_build == 'true'
