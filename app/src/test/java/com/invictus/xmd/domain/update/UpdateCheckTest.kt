@@ -71,20 +71,37 @@ class UpdateCheckTest {
     }
 
     @Test
-    fun stableVersionComparisonIgnoresFlavorAndPreviewSuffix() {
+    fun stableVersionComparisonIgnoresFlavorSuffix() {
         assertTrue(isVersionNewer("v1.1.0", "1.0.0-lite"))
         assertTrue(isVersionNewer("v1.0.1", "1.0.0-full-beta.r55"))
         assertFalse(isVersionNewer("v1.0.0", "1.0.0-lite"))
+        assertFalse(isVersionNewer("v1.0.0", "1.0.0-full"))
         assertFalse(isVersionNewer("v0.9.9", "1.0.0"))
         assertFalse(isVersionNewer("nightly", "1.0.0"))
     }
 
     @Test
-    fun handCutPrereleaseTagsCompareByNumber() {
+    fun preReleaseIsOlderThanItsOwnStable() {
+        // The reported bug: installed stable 1.0.0 must not be offered 1.0.0-beta.6.
+        assertFalse(isPreviewNewer("v1.0.0-beta.6", "1.0.0-lite"))
+        assertFalse(isPreviewNewer("v1.0.0-beta.6", "1.0.0-full"))
+        assertFalse(isPreviewNewer("v1.0.0-beta.6", "1.0.0"))
+        assertFalse(isPreviewNewer("v1.0.0-rc.1", "1.0.0"))
+        // ...while the stable release does replace an installed beta of it.
+        assertTrue(isVersionNewer("v1.0.0", "1.0.0-lite-beta.r324"))
+        assertTrue(isVersionNewer("v1.0.0", "1.0.0-beta.6"))
+    }
+
+    @Test
+    fun handCutPrereleaseTagsCompareByStageAndNumber() {
         assertTrue(isPreviewNewer("v1.0.0-beta.5", "1.0.0-beta.4"))
         assertFalse(isPreviewNewer("v1.0.0-beta.4", "1.0.0-beta.4"))
-        assertTrue(isPreviewNewer("v1.0.0-beta.1", "1.0.0"))
-        assertTrue(isPreviewNewer("v1.1.0-beta.1", "1.0.0"))
+        assertTrue(isPreviewNewer("v1.0.0-rc.1", "1.0.0-beta.6"))
+        assertFalse(isPreviewNewer("v1.0.0-beta.6", "1.0.0-rc.1"))
+        assertTrue(isPreviewNewer("v1.0.0-beta.6", "1.0.0-lite-beta.r3"))
+        assertFalse(isPreviewNewer("v1.0.0-beta.6", "1.0.0-lite-beta.r324"))
+        // Higher base version is a real update even as a beta.
+        assertTrue(isPreviewNewer("v1.1.0-beta.1", "1.0.0-lite"))
     }
 
     @Test
@@ -99,6 +116,7 @@ class UpdateCheckTest {
     @Test
     fun handCutReleaseFallsBackToTagComparison() {
         assertNull(release("v1.0.0-beta.2").previewBuildNumber())
-        assertTrue(isPreviewReleaseNewer(release("v1.0.0-beta.2"), currentGitCount = 999, currentVersion = "1.0.0-beta.1"))
+        assertTrue(isPreviewReleaseNewer(release("v1.0.0-beta.2"), currentGitCount = 999, currentVersion = "1.0.0-lite-beta.1"))
+        assertFalse(isPreviewReleaseNewer(release("v1.0.0-beta.6"), currentGitCount = 999, currentVersion = "1.0.0-lite"))
     }
 }

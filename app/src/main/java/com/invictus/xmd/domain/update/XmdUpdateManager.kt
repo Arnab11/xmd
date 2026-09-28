@@ -527,16 +527,27 @@ internal fun selectXmdApkAsset(
 private fun String.hasAssetToken(token: String): Boolean =
     Regex("(?:^|-)${Regex.escape(token)}(?:-|\\.apk$)", RegexOption.IGNORE_CASE).containsMatchIn(this)
 
-fun isVersionNewer(candidate: String, current: String): Boolean {
-    val candidateParts = candidate.versionParts() ?: return false
-    val currentParts = current.versionParts() ?: return false
-    val size = maxOf(candidateParts.size, currentParts.size)
-    for (index in 0 until size) {
-        val c = candidateParts.getOrElse(index) { 0 }
-        val k = currentParts.getOrElse(index) { 0 }
-        if (c != k) return c > k
+/**
+ * Semver-style parse of an Xmd version string. Build-flavor suffixes
+ * ("-lite", "-full" on installed versionNames) are ignored; only a real
+ * pre-release marker (alpha / beta / rc / preview, optionally with a number,
+ * e.g. "beta.6" or the auto-preview "beta.r324") makes a version a pre-release.
+ */
+private data class ParsedVersion(val base: List<Int>, val stage: Int?, val number: Int)
+
+private val PreReleaseRegex =
+    Regex("""(?:^|[-.])(alpha|beta|rc|preview)(?:[.-]?r?)(\d+)?""", RegexOption.IGNORE_CASE)
+
+private fun String.parseVersion(): ParsedVersion? {
+    val base = versionParts() ?: return null
+    val suffix = trim().removePrefix("v").removePrefix("V").substringAfter('-', "")
+    val match = PreReleaseRegex.find(suffix) ?: return ParsedVersion(base, stage = null, number = 0)
+    val stage = when (match.groupValues[1].lowercase()) {
+        "alpha" -> 0
+        "beta", "preview" -> 1
+        else -> 2 // rc
     }
-    return false
+    return ParsedVersion(base, stage, match.groupValues[2].toIntOrNull() ?: 0)
 }
 
 private fun String.versionParts(): List<Int>? {
@@ -549,22 +560,38 @@ private fun String.versionParts(): List<Int>? {
     }
 }
 
-/**
- * Hand-cut pre-release tags look like `v1.1.0-beta.2` / `-rc.1`. Newer when
- * the base version is ahead, or equal with a higher pre-release number (an
- * installed stable build counts as number 0).
- */
-fun isPreviewNewer(candidate: String, current: String): Boolean {
-    val candidateBase = candidate.versionParts() ?: return false
-    val currentBase = current.versionParts() ?: return false
-    val size = maxOf(candidateBase.size, currentBase.size)
-    for (index in 0 until size) {
-        val c = candidateBase.getOrElse(index) { 0 }
-        val k = currentBase.getOrElse(index) { 0 }
-        if (c != k) return c > k
+private fun compareBase(a: List<Int>, b: List<Int>): Int {
+    val size = maxOf(a.size, b.size)
+    for (i in 0 until size) {
+        val x = a.getOrElse(i) { 0 }
+        val y = b.getOrElse(i) { 0 }
+        if (x != y) return x.compareTo(y)
     }
-    return candidate.previewNumber() > current.previewNumber()
+    return 0
 }
+
+/**
+ * True when [candidate] is newer than [current] by semver rules: a higher
+ * base version wins; on an equal base, a stable release beats any
+ * pre-release of it (1.0.0 > 1.0.0-beta.6) and pre-releases order by
+ * stage (alpha < beta < rc) then number.
+ */
+fun isVersionNewer(candidate: String, current: String): Boolean {
+    val c = candidate.parseVersion() ?: return false
+    val k = current.parseVersion() ?: return false
+    val base = compareBase(c.base, k.base)
+    if (base != 0) return base > 0
+    return when {
+        c.stage == null && k.stage == null -> false
+        c.stage == null -> true // stable vs installed pre-release of the same base
+        k.stage == null -> false // pre-release is never newer than the installed stable
+        c.stage != k.stage -> c.stage > k.stage
+        else -> c.number > k.number
+    }
+}
+
+/** Hand-cut pre-release tags (`v1.1.0-beta.2`, `-rc.1`): same semver rules as [isVersionNewer]. */
+fun isPreviewNewer(candidate: String, current: String): Boolean = isVersionNewer(candidate, current)
 
 /**
  * Manifest model: the preview feed carries a commit count compared against
@@ -576,15 +603,8 @@ internal fun isPreviewReleaseNewer(release: XmdRelease, currentGitCount: Int, cu
     return isPreviewNewer(release.tagName, currentVersion)
 }
 
-private val PreviewTagRegex = Regex("""(?:preview|beta|rc|alpha)\.(\d+)""", RegexOption.IGNORE_CASE)
 private val ManifestTagRegex = Regex("""preview-r(\d+)""", RegexOption.IGNORE_CASE)
 
 /** Build number of an auto-built preview (manifest `commit_count` or `preview-r123` tag); null for other releases. */
 internal fun XmdRelease.previewBuildNumber(): Int? =
     commitCount ?: ManifestTagRegex.find(tagName)?.groupValues?.getOrNull(1)?.toIntOrNull()
-
-private fun String.previewNumber(): Int {
-    val base = trim().removePrefix("v").removePrefix("V")
-    if (!base.contains('-')) return 0
-    return PreviewTagRegex.find(base)?.groupValues?.getOrNull(1)?.toIntOrNull() ?: 0
-}
