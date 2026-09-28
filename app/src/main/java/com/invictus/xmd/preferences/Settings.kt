@@ -436,9 +436,9 @@ object Settings {
 
     /** Which feed the updater checks -- [STABLE] hits `/releases/latest`
      *  (GitHub's latest-non-prerelease pointer, built by release.yml's
-     *  `vX.Y.Z` tags); [PREVIEW] reads the auto-built `latest.json`
-     *  manifest published by preview.yml (compared by commit count against
-     *  BuildConfig.GIT_COUNT), falling back to the newest hand-cut
+     *  `vX.Y.Z` tags); [PREVIEW] reads the newest successful
+     *  preview.yml workflow run (APKs hosted on GitHub Pages, compared by run
+     *  number against BuildConfig.PREVIEW_RUN), falling back to the newest hand-cut
      *  `prerelease: true` release. Switching to Preview is an explicit
      *  opt-in to pre-release builds, not "whichever is newest". */
     enum class UpdateChannel { STABLE, PREVIEW }

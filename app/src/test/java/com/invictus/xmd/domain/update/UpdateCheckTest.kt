@@ -71,6 +71,32 @@ class UpdateCheckTest {
     }
 
     @Test
+    fun previewRunReleasePointsAtPagesApks() {
+        val release = previewReleaseFromRun(
+            runNumber = 7,
+            headSha = "abcdef1234567",
+            updatedAt = "2026-09-28T10:00:00Z",
+            runUrl = "https://github.com/x/y/actions/runs/1",
+            siteBase = "https://user.github.io/xmd/",
+        )!!
+        assertEquals("preview-r7", release.tagName)
+        assertEquals(7, release.previewBuildNumber())
+        assertEquals(4, release.assets.size)
+        val picked = selectXmdApkAsset(release.assets, "full", listOf("arm64-v8a"))!!
+        assertEquals("Xmd-full-arm64-v8a-preview-r7.apk", picked.name)
+        assertEquals("https://user.github.io/xmd/previews/r7/Xmd-full-arm64-v8a-preview-r7.apk", picked.downloadUrl)
+        // Newer than an older preview build, not newer than itself; any preview beats a non-preview build (0).
+        assertTrue(isPreviewReleaseNewer(release, currentGitCount = 6, currentVersion = "1.0.0-beta.r6"))
+        assertFalse(isPreviewReleaseNewer(release, currentGitCount = 7, currentVersion = "1.0.0-beta.r7"))
+        assertTrue(isPreviewReleaseNewer(release, currentGitCount = 0, currentVersion = "1.0.0"))
+    }
+
+    @Test
+    fun previewRunWithoutNumberIsIgnored() {
+        assertNull(previewReleaseFromRun(0, "", "", "", "https://example.com"))
+    }
+
+    @Test
     fun stableVersionComparisonIgnoresFlavorSuffix() {
         assertTrue(isVersionNewer("v1.1.0", "1.0.0-lite"))
         assertTrue(isVersionNewer("v1.0.1", "1.0.0-full-beta.r55"))

@@ -27,7 +27,8 @@ import java.util.concurrent.atomic.AtomicLongArray
 
 // In-app updater in the same shape as Bunko's BunkoUpdateManager (itself an
 // mpvRx port): GitHub Releases for Stable, an auto-built preview manifest
-// (latest.json, compared by commit count) for Preview, ignore-version, and a
+// (newest successful preview.yml run on GitHub Actions, APKs hosted on GitHub
+// Pages, compared by run number) for Preview, ignore-version, and a
 // parallel + resumable APK download. Xmd-specific bits kept from the old
 // UpdateChecker: per-flavor / per-ABI asset selection (lite/full x arm64/v7a),
 // org.json instead of kotlinx.serialization (no extra dependency), and real
@@ -44,7 +45,7 @@ data class XmdRelease(
     val publishedAt: String,
     val prerelease: Boolean,
     val assets: List<UpdateAsset>,
-    /** Preview manifest only: `git rev-list --count HEAD` of the built commit. */
+    /** Auto preview only: run number of the preview.yml workflow run that built it. */
     val commitCount: Int? = null,
     val commitSha: String? = null,
 )
@@ -86,7 +87,7 @@ class XmdUpdateManager(context: Context) {
         val newer = when (channel) {
             Settings.UpdateChannel.STABLE -> isVersionNewer(release.tagName, current)
             Settings.UpdateChannel.PREVIEW ->
-                isPreviewReleaseNewer(release, BuildConfig.GIT_COUNT, current)
+                isPreviewReleaseNewer(release, BuildConfig.PREVIEW_RUN, current)
         }
         if (!newer) return@withContext null
 
@@ -160,8 +161,8 @@ class XmdUpdateManager(context: Context) {
     }
 
     private suspend fun getLatestPrerelease(): XmdRelease? = withContext(Dispatchers.IO) {
-        // Primary feed: the auto-built preview manifest (preview.yml).
-        fetchPreviewManifest()?.let { return@withContext it }
+        // Primary feed: the newest successful preview.yml workflow run (APKs on Pages).
+        fetchLatestPreviewRun()?.let { return@withContext it }
         // Fallback: the newest hand-cut GitHub prerelease (prerelease.yml).
         apiClient.newCall(releaseRequest(ReleasesListUrl)).execute().use { response ->
             if (!response.isSuccessful) throw CheckFailedException("HTTP ${response.code}")
@@ -169,19 +170,33 @@ class XmdUpdateManager(context: Context) {
             val array = JSONArray(body)
             for (i in 0 until array.length()) {
                 val release = array.optJSONObject(i)?.let(::parseRelease) ?: continue
-                // The rolling "preview" release only hosts the manifest feed.
+                // The old rolling "preview" release is not a feed any more.
                 if (release.prerelease && release.tagName != PreviewReleaseTag) return@withContext release
             }
             null
         }
     }
 
-    private suspend fun fetchPreviewManifest(): XmdRelease? = withContext(Dispatchers.IO) {
+    /**
+     * Newest successful run of preview.yml. A run only succeeds after its APKs
+     * were deployed to Pages, so the files below exist once the run is listed.
+     * Null when there is no run yet or the feed is unreachable (the caller then
+     * falls back to hand-cut prereleases).
+     */
+    private suspend fun fetchLatestPreviewRun(): XmdRelease? = withContext(Dispatchers.IO) {
         try {
-            apiClient.newCall(releaseRequest(PreviewManifestUrl)).execute().use { response ->
+            apiClient.newCall(releaseRequest(PreviewRunsUrl)).execute().use { response ->
                 if (!response.isSuccessful) return@withContext null
                 val body = response.body?.string() ?: return@withContext null
-                runCatching { parseRelease(JSONObject(body)) }.getOrNull()
+                val run = runCatching { JSONObject(body).optJSONArray("workflow_runs")?.optJSONObject(0) }
+                    .getOrNull() ?: return@withContext null
+                previewReleaseFromRun(
+                    runNumber = run.optInt("run_number", 0),
+                    headSha = run.optString("head_sha"),
+                    updatedAt = run.optString("updated_at"),
+                    runUrl = run.optString("html_url", ReleasesFallbackUrl),
+                    siteBase = PreviewSiteBase,
+                )
             }
         } catch (_: IOException) {
             null
@@ -469,11 +484,12 @@ class XmdUpdateManager(context: Context) {
         const val ReleasesListUrl = "https://api.github.com/repos/$Repo/releases?per_page=20"
         const val ReleasesFallbackUrl = "https://github.com/$Repo/releases"
 
-        /** Published by .github/workflows/preview.yml onto the rolling
-         *  "preview" pre-release (not GitHub Pages -- deploy-site.yml already
-         *  owns that deployment and a second Pages deploy would overwrite it). */
-        const val PreviewManifestUrl =
-            "https://github.com/$Repo/releases/download/$PreviewReleaseTag/latest.json"
+        /** Newest successful run of .github/workflows/preview.yml (no token needed, repo is public). */
+        const val PreviewRunsUrl =
+            "https://api.github.com/repos/$Repo/actions/workflows/preview.yml/runs?status=success&per_page=1"
+
+        /** GitHub Pages site; preview APKs live under /previews/r<run>/ (see scripts/stage_pages.py). */
+        const val PreviewSiteBase = "https://utsavrajputt.github.io/xmd"
 
         const val ParallelChunkCount = 4
         const val MinParallelBytes = 2 * 1024 * 1024L // 2MB
@@ -594,8 +610,9 @@ fun isVersionNewer(candidate: String, current: String): Boolean {
 fun isPreviewNewer(candidate: String, current: String): Boolean = isVersionNewer(candidate, current)
 
 /**
- * Manifest model: the preview feed carries a commit count compared against
- * this build's GIT_COUNT; hand-cut prereleases fall back to tag comparison.
+ * Auto previews carry the preview.yml run number, compared against this
+ * build's BuildConfig.PREVIEW_RUN (passed as [currentGitCount]; 0 for non-preview
+ * builds, which are offered any preview); hand-cut prereleases fall back to tag comparison.
  */
 internal fun isPreviewReleaseNewer(release: XmdRelease, currentGitCount: Int, currentVersion: String): Boolean {
     val remoteCount = release.previewBuildNumber()
@@ -605,6 +622,43 @@ internal fun isPreviewReleaseNewer(release: XmdRelease, currentGitCount: Int, cu
 
 private val ManifestTagRegex = Regex("""preview-r(\d+)""", RegexOption.IGNORE_CASE)
 
-/** Build number of an auto-built preview (manifest `commit_count` or `preview-r123` tag); null for other releases. */
+/** Build number of an auto-built preview (workflow run number, `preview-r123` tag); null for other releases. */
 internal fun XmdRelease.previewBuildNumber(): Int? =
     commitCount ?: ManifestTagRegex.find(tagName)?.groupValues?.getOrNull(1)?.toIntOrNull()
+
+private val PreviewFlavors = listOf("lite", "full")
+private val PreviewAbis = listOf("arm64-v8a", "armeabi-v7a")
+
+/**
+ * Builds the [XmdRelease] for a preview.yml run. The APK URLs are predictable
+ * (scripts/stage_pages.py): `<site>/previews/r<run>/Xmd-<flavor>-<abi>-preview-r<run>.apk`.
+ * Sizes are unknown here (0); the downloader asks the server via HEAD.
+ * Returns null for a run without a usable number.
+ */
+internal fun previewReleaseFromRun(
+    runNumber: Int,
+    headSha: String,
+    updatedAt: String,
+    runUrl: String,
+    siteBase: String,
+): XmdRelease? {
+    if (runNumber <= 0) return null
+    val base = siteBase.trimEnd('/')
+    val assets = PreviewFlavors.flatMap { flavor ->
+        PreviewAbis.map { abi ->
+            val name = "Xmd-$flavor-$abi-preview-r$runNumber.apk"
+            UpdateAsset(name = name, downloadUrl = "$base/previews/r$runNumber/$name", size = 0L)
+        }
+    }
+    return XmdRelease(
+        tagName = "preview-r$runNumber",
+        name = "Xmd Preview r$runNumber",
+        htmlUrl = runUrl,
+        body = if (headSha.isNotBlank()) "Automatic preview from ${headSha.take(7)}." else "",
+        publishedAt = updatedAt,
+        prerelease = true,
+        assets = assets,
+        commitCount = runNumber,
+        commitSha = headSha.ifBlank { null },
+    )
+}

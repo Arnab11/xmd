@@ -19,6 +19,11 @@ android {
         // Commit count of this build: the Preview update channel compares it
         // against the auto-built manifest's commit_count (see preview.yml).
         buildConfigField("int", "GIT_COUNT", getCommitCount())
+
+        // Run number of the preview.yml workflow run that built this APK (0 for
+        // every other build). The Preview update channel compares it with the
+        // newest successful run of that workflow.
+        buildConfigField("int", "PREVIEW_RUN", "0")
     }
 
     // Two flavors instead of one do-everything APK:
@@ -95,7 +100,8 @@ android {
         create("preview") {
             initWith(getByName("release"))
             matchingFallbacks += listOf("release")
-            versionNameSuffix = "-beta.r${getCommitCount()}"
+            versionNameSuffix = "-beta.r${getPreviewRun()}"
+            buildConfigField("int", "PREVIEW_RUN", getPreviewRun())
         }
     }
 
@@ -216,6 +222,12 @@ dependencies {
 // Must stay a plain integer: it is emitted as `int GIT_COUNT` into BuildConfig.
 fun getCommitCount(): String =
     runCommand("git rev-list --count HEAD")?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) } ?: "0"
+
+// GITHUB_RUN_NUMBER is set by preview.yml (and any other CI run); locally it is
+// missing, so 0 -- a local preview build then always offers the latest preview.
+// Must stay a plain integer: it is emitted as `int PREVIEW_RUN` into BuildConfig.
+fun getPreviewRun(): String =
+    System.getenv("GITHUB_RUN_NUMBER")?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) } ?: "0"
 
 fun runCommand(command: String): String? =
     try {

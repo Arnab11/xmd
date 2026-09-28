@@ -6,16 +6,23 @@ on:
       - main
     paths:
       - 'fastlane/metadata/android/preview-site/**'
+      - 'scripts/stage_pages.py'
   workflow_dispatch:
 
+# Shared with preview.yml: one Pages deployment at a time, never cancelled
+# half-way (cancelling a deploy could drop the preview builds from the site).
 concurrency:
-  group: xmd-preview-pages
-  cancel-in-progress: true
+  group: xmd-pages
+  cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
   pages: write
   id-token: write
+
+env:
+  KEEP_PREVIEWS: 3
 
 jobs:
   deploy-site:
@@ -30,16 +37,21 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      # Pages replaces the whole site on every deploy, so the current preview
+      # builds are pulled back from the live site and re-published with it.
       - name: Stage site
         shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          rm -rf site
-          mkdir -p site
-          cp fastlane/metadata/android/preview-site/index.html site/index.html
-          cp fastlane/metadata/android/preview-site/icon.png site/icon.png
-          cp fastlane/metadata/android/preview-site/site.webmanifest site/site.webmanifest
-          touch site/.nojekyll
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          repo_name="${GITHUB_REPOSITORY#*/}"
+          python3 scripts/stage_pages.py \
+            --out site \
+            --repo "$GITHUB_REPOSITORY" \
+            --site-url "https://${owner}.github.io/${repo_name}" \
+            --keep "$KEEP_PREVIEWS"
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6

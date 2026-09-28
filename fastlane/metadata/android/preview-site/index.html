@@ -591,7 +591,7 @@
           </div>
           <div class="ticket-actions">
             <a class="button green" id="pre-cta" href="#pre-downloads">Choose a build ↓</a>
-            <a class="button secondary" id="pre-github" href="https://github.com/utsavrajputt/xmd/releases" target="_blank" rel="noreferrer">View on GitHub ↗</a>
+            <a class="button secondary" id="pre-github" href="https://github.com/utsavrajputt/xmd/actions/workflows/preview.yml" target="_blank" rel="noreferrer">View build on GitHub ↗</a>
           </div>
         </div>
 
@@ -599,7 +599,7 @@
           <span class="flag" aria-hidden="true">!</span>
           <div>
             <strong>Preview channel</strong>
-            <p>Pre-release builds (beta/rc tags) may be unstable. Choose a stable release for everyday downloading.</p>
+            <p>Preview builds are made by hand from the latest code and may be unstable. Choose a stable release for everyday downloading.</p>
           </div>
         </div>
 
@@ -624,8 +624,8 @@
 
           <aside class="provenance">
             <span class="seal" aria-hidden="true">✓</span>
-            <div><strong>Signed & checksummed</strong><p>Each card reports the published file size and exact SHA-256 digest from the release notes.</p></div>
-            <code>checksums.txt</code>
+            <div><strong>Latest 3 previews</strong><p>Only the newest three preview builds stay online; older ones are removed automatically.</p></div>
+            <code>previews/</code>
           </aside>
         </section>
 
@@ -635,7 +635,7 @@
               <span class="section-index">🕘 History</span>
               <h2>Previous previews.</h2>
             </div>
-            <p>The five pre-releases before this one.</p>
+            <p>The two previews before this one.</p>
           </div>
           <div class="prev-list" id="pre-prev-list"></div>
         </section>
@@ -947,7 +947,6 @@
       .then(r => r.ok ? r.json() : Promise.reject())
       .then(list => {
         const stableList = list.filter(r => !r.prerelease);
-        const previewList = list.filter(r => r.prerelease);
 
         // Stable history
         document.getElementById("stat-count").textContent = formatNum(stableList.length >= 6 ? "6+" : stableList.length);
@@ -959,38 +958,97 @@
           relPrevList.replaceChildren(...relRest.map(rel => buildPrevItem(rel)));
         }
 
-        // Preview channel: latest pre-release + its history
-        if (previewList.length) {
-          const latestPreview = previewList[0];
-          previewPublished = latestPreview.published_at;
-          fillTicket("pre", latestPreview);
-          const preChecksums = parseChecksums(latestPreview.body);
-          renderFlavorGroups(document.getElementById("pre-download-flavors"), latestPreview.assets, preChecksums);
-          const preRecommended = latestPreview.assets.find(a => a.name.toLowerCase().includes("full-arm64-v8a"))
-            || latestPreview.assets.find(a => a.name.toLowerCase().includes("arm64-v8a"))
-            || latestPreview.assets[0];
-          if (preRecommended) document.getElementById("pre-cta").href = preRecommended.browser_download_url;
+      })
+      .catch(() => {
+        document.getElementById("rel-prev-list").innerHTML = '<div class="empty-note">Could not load release history.</div>';
+      });
+
+    // --- Preview channel: builds published on this site by preview.yml ---
+    // Newest successful workflow runs -> /previews/r<run>/Xmd-<flavor>-<abi>-preview-r<run>.apk
+    // (no release/manifest: a file is listed only if it really exists here).
+    const PREVIEW_KEEP = 3;
+    const PREVIEW_FLAVORS = ["lite", "full"];
+    const PREVIEW_ABIS = ["arm64-v8a", "armeabi-v7a"];
+
+    async function probePreviewBuild(run) {
+      const found = await Promise.all(PREVIEW_FLAVORS.flatMap(flavor => PREVIEW_ABIS.map(async abi => {
+        const name = `Xmd-${flavor}-${abi}-preview-r${run.run_number}.apk`;
+        const url = `previews/r${run.run_number}/${name}`;
+        try {
+          const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+          if (!res.ok) return null;
+          return { name, size: Number(res.headers.get("content-length")) || 0, browser_download_url: url };
+        } catch (_) { return null; }
+      })));
+      const assets = found.filter(Boolean);
+      if (!assets.length) return null;
+      return {
+        tag_name: `preview-r${run.run_number}`,
+        name: `Xmd Preview r${run.run_number}`,
+        published_at: run.updated_at,
+        html_url: run.html_url,
+        body: run.head_sha ? `Preview build from ${run.head_sha.slice(0, 7)}.` : "",
+        assets
+      };
+    }
+
+    function recommendedAsset(assets) {
+      return assets.find(a => a.name.toLowerCase().includes("full-arm64-v8a"))
+        || assets.find(a => a.name.toLowerCase().includes("arm64-v8a"))
+        || assets[0];
+    }
+
+    function buildPreviewPrevItem(rel) {
+      const a = document.createElement("a");
+      a.className = "prev-item";
+      const rec = recommendedAsset(rel.assets);
+      a.href = rec.browser_download_url;
+      a.innerHTML = `<span class="v">${escapeHtml(rel.tag_name)}</span><span class="body"><span class="d">${escapeHtml(rel.body || "Preview build")}</span><span class="t">${fmtDate(rel.published_at)}</span></span><span class="view">Download →</span>`;
+      return a;
+    }
+
+    async function loadPreviewBuilds() {
+      const res = await fetch(`${API}/actions/workflows/preview.yml/runs?status=success&per_page=10`);
+      if (!res.ok) throw new Error("runs");
+      const runs = (await res.json()).workflow_runs || [];
+      const builds = [];
+      for (const run of runs) {
+        if (builds.length >= PREVIEW_KEEP) break;
+        const build = await probePreviewBuild(run);
+        if (build) builds.push(build);
+      }
+      return builds;
+    }
+
+    loadPreviewBuilds()
+      .then(builds => {
+        if (builds.length) {
+          const latest = builds[0];
+          previewPublished = latest.published_at;
+          fillTicket("pre", latest);
+          renderFlavorGroups(document.getElementById("pre-download-flavors"), latest.assets, {});
+          const rec = recommendedAsset(latest.assets);
+          if (rec) document.getElementById("pre-cta").href = rec.browser_download_url;
 
           const prePrevList = document.getElementById("pre-prev-list");
-          const preRest = previewList.slice(1, 6);
-          if (!preRest.length) {
+          const rest = builds.slice(1);
+          if (!rest.length) {
             prePrevList.innerHTML = '<div class="empty-note">No earlier previews yet.</div>';
           } else {
-            prePrevList.replaceChildren(...preRest.map(rel => buildPrevItem(rel)));
+            prePrevList.replaceChildren(...rest.map(buildPreviewPrevItem));
           }
         } else {
-          fillEmptyTicket("pre", "No preview (pre-release) build available right now.");
+          fillEmptyTicket("pre", "No preview build available right now.");
           document.getElementById("pre-download-flavors").innerHTML = '<div class="empty-note">No preview build available right now.</div>';
           document.getElementById("pre-prev-list").innerHTML = '<div class="empty-note">No earlier previews yet.</div>';
         }
-
         previewSettled = true;
         decideDefaultTab();
       })
       .catch(() => {
-        document.getElementById("rel-prev-list").innerHTML = '<div class="empty-note">Could not load release history.</div>';
-        fillEmptyTicket("pre", "Could not reach the GitHub Releases API right now.");
+        fillEmptyTicket("pre", "Could not load preview builds right now.");
         document.getElementById("pre-download-flavors").innerHTML = '<div class="empty-note">Could not load preview assets.</div>';
+        document.getElementById("pre-prev-list").innerHTML = '<div class="empty-note">Could not load preview history.</div>';
         previewSettled = true;
         decideDefaultTab();
       });
