@@ -20,6 +20,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.ui.graphics.vector.ImageVector
+import com.invictus.xmd.domain.download.DownloadCategory
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
@@ -850,11 +852,24 @@ fun QueueItemRow(
                     ),
                 verticalArrangement = Arrangement.Center,
             ) {
-                // Title row: filename + file type bubble
+                // Title row: file type icon + filename + file type bubble
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth(),
                 ) {
+                    val icon = remember(item.fileName, item.mediaFormatLabel, item.category) {
+                        fileTypeIcon(item)
+                    }
+                    val iconColor = remember(item.fileName, item.platform, item.category) {
+                        fileTypeColor(item)
+                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        modifier = Modifier.size(17.dp),
+                        tint = iconColor,
+                    )
+                    Spacer(Modifier.width(7.dp))
                     Text(
                         text = item.fileName ?: item.sourceUrl,
                         color = MaterialTheme.colorScheme.onSurface,
@@ -1096,6 +1111,63 @@ private fun fileTypeLabel(item: QueueItem): String {
     return item.category.label.uppercase()
 }
 
+private fun fileTypeIcon(item: QueueItem): AppIcon {
+    if (item.sourceUrl.startsWith("magnet:", ignoreCase = true)) {
+        return Icons.Torrent
+    }
+    if (item.platform == MediaPlatform.YOUTUBE) {
+        val format = item.mediaFormatLabel?.trim()?.lowercase()
+        if (format != null && (format.contains("audio") || format.contains("mp3") || format.contains("m4a") || format.contains("opus"))) {
+            return Icons.Music
+        }
+        return Icons.Video
+    }
+    val name = item.fileName ?: item.sourceUrl
+    val cleanName = name.substringBefore('?').substringBefore('#')
+    if (cleanName.endsWith(".torrent", ignoreCase = true)) return Icons.Torrent
+
+    val ext = cleanName.substringAfterLast('.', "").trim().lowercase()
+    return when {
+        ext in listOf("apk", "xapk", "apks") || item.category == DownloadCategory.APPS -> Icons.Android
+        ext in listOf("mp4", "mkv", "webm", "avi", "mov", "flv", "ts", "wmv", "m4v") || item.category == DownloadCategory.VIDEOS || item.category == DownloadCategory.MOVIES || item.category == DownloadCategory.SHOWS -> Icons.Video
+        ext in listOf("mp3", "m4a", "flac", "opus", "wav", "ogg", "aac", "wma") || item.category == DownloadCategory.MUSIC -> Icons.Music
+        ext in listOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso", "zst", "7zip") -> Icons.Archive
+        ext == "pdf" -> Icons.Pdf
+        ext in listOf("epub", "mobi", "cbz", "cbr", "doc", "docx", "txt", "md", "xlsx", "pptx", "rtf") || item.category == DownloadCategory.DOCUMENTS -> Icons.Document
+        ext in listOf("jpg", "jpeg", "png", "webp", "gif", "svg", "bmp", "ico") -> Icons.Image
+        ext in listOf("json", "xml", "html", "css", "js", "ts", "py", "kt", "java", "cpp", "c", "sh") -> Icons.Code
+        else -> Icons.Document
+    }
+}
+
+private fun fileTypeColor(item: QueueItem): Color {
+    if (item.sourceUrl.startsWith("magnet:", ignoreCase = true)) {
+        return Color(0xFF9575CD)
+    }
+    if (item.platform == MediaPlatform.YOUTUBE) {
+        val format = item.mediaFormatLabel?.trim()?.lowercase()
+        if (format != null && (format.contains("audio") || format.contains("mp3") || format.contains("m4a") || format.contains("opus"))) {
+            return Color(0xFFBA68C8)
+        }
+        return Color(0xFFEF5350)
+    }
+    val name = item.fileName ?: item.sourceUrl
+    val cleanName = name.substringBefore('?').substringBefore('#')
+    val ext = cleanName.substringAfterLast('.', "").trim().lowercase()
+    return when {
+        ext in listOf("apk", "xapk", "apks") || item.category == DownloadCategory.APPS -> Color(0xFF66BB6A)
+        ext in listOf("mp4", "mkv", "webm", "avi", "mov", "flv", "ts", "wmv", "m4v") || item.category == DownloadCategory.VIDEOS || item.category == DownloadCategory.MOVIES || item.category == DownloadCategory.SHOWS -> Color(0xFFEF5350)
+        ext in listOf("mp3", "m4a", "flac", "opus", "wav", "ogg", "aac", "wma") || item.category == DownloadCategory.MUSIC -> Color(0xFFBA68C8)
+        ext in listOf("zip", "rar", "7z", "tar", "gz", "bz2", "xz", "iso", "zst", "7zip") -> Color(0xFFFFA726)
+        ext == "pdf" -> Color(0xFF42A5F5)
+        ext in listOf("epub", "mobi", "cbz", "cbr", "doc", "docx", "txt", "md", "xlsx", "pptx", "rtf") || item.category == DownloadCategory.DOCUMENTS -> Color(0xFF29B6F6)
+        ext in listOf("jpg", "jpeg", "png", "webp", "gif", "svg", "bmp", "ico") -> Color(0xFF26C6DA)
+        ext in listOf("json", "xml", "html", "css", "js", "ts", "py", "kt", "java", "cpp", "c", "sh") -> Color(0xFF26A69A)
+        else -> Color(0xFF78909C)
+    }
+}
+
+
 @Composable
 private fun DownloadProgressBar(
     progress: Float,
@@ -1308,11 +1380,17 @@ private fun statusText(item: QueueItem, speedEta: String?): String {
         val bytes = when {
             item.bytesTotal > 0 -> item.bytesTotal
             item.bytesDone > 0 -> item.bytesDone
-            else -> item.filePath?.let { java.io.File(it).takeIf { f -> f.exists() }?.length() } ?: 0L
+            !item.filePath.isNullOrBlank() -> {
+                runCatching { java.io.File(item.filePath!!).takeIf { f -> f.exists() }?.length() }.getOrNull() ?: 0L
+            }
+            else -> 0L
         }
         val finishedAt = when {
             item.downloadFinishedAtMs > 0 -> item.downloadFinishedAtMs
-            else -> item.filePath?.let { java.io.File(it).takeIf { f -> f.exists() }?.lastModified() } ?: 0L
+            !item.filePath.isNullOrBlank() -> {
+                runCatching { java.io.File(item.filePath!!).takeIf { f -> f.exists() }?.lastModified() }.getOrNull() ?: 0L
+            }
+            else -> 0L
         }
         val durationMs = if (item.downloadStartedAtMs > 0 && finishedAt > item.downloadStartedAtMs) {
             finishedAt - item.downloadStartedAtMs
