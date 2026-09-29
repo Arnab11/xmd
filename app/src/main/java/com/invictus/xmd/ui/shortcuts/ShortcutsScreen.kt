@@ -5,6 +5,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -44,7 +47,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
@@ -189,6 +194,12 @@ private fun ReorderableShortcutGrid(
     // Last-measured on-screen bounds of each grid slot, keyed by index --
     // used to find which neighbor the dragged tile's center has crossed.
     val itemBounds = remember { mutableStateMapOf<Int, Rect>() }
+    val haptic = LocalHapticFeedback.current
+    // Titles used by more than one tile -- those show their host under the
+    // name so near-identical tiles (mirrors, "Vegamovies ...") can be told apart.
+    val duplicateTitles = remember(shortcuts) {
+        shortcuts.groupBy { it.title.trim().lowercase() }.filterValues { it.size > 1 }.keys
+    }
 
     LazyVerticalGrid(
         columns = GridCells.Fixed(GRID_COLUMNS),
@@ -203,8 +214,11 @@ private fun ReorderableShortcutGrid(
             // one -- otherwise a mid-drag recomposition would restart (and
             // abort) the gesture the moment this tile's position changes.
             val liveIndex by androidx.compose.runtime.rememberUpdatedState(index)
+            val interaction = remember(shortcut.id) { MutableInteractionSource() }
             ShortcutTile(
                 shortcut = shortcut,
+                showHost = shortcut.title.trim().lowercase() in duplicateTitles,
+                interactionSource = interaction,
                 modifier = Modifier
                     // Smooth reflow for the tiles NOT under the finger, matching
                     // RecyclerView's default item animator; the dragged tile is
@@ -240,8 +254,13 @@ private fun ReorderableShortcutGrid(
                             )
                         } else {
                             Modifier.combinedClickable(
+                                interactionSource = interaction,
+                                indication = null,
                                 onClick = { onTap(shortcut) },
-                                onLongClick = { onLongPress(shortcut) },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    onLongPress(shortcut)
+                                },
                             )
                         }
                     ),
@@ -300,11 +319,15 @@ private fun Modifier.pointerInputDragReorder(
 private val TileShape = RoundedCornerShape(20.dp)
 
 @Composable
-private fun ShortcutTile(shortcut: Shortcut, modifier: Modifier = Modifier) {
+private fun ShortcutTile(
+    shortcut: Shortcut,
+    showHost: Boolean,
+    interactionSource: MutableInteractionSource,
+    modifier: Modifier = Modifier,
+) {
     var iconBitmap by remember(shortcut.id, shortcut.customIconPath, shortcut.url) {
         mutableStateOf<android.graphics.Bitmap?>(null)
     }
-    val context = LocalContext.current
     androidx.compose.runtime.LaunchedEffect(shortcut.id, shortcut.customIconPath, shortcut.url) {
         val customPath = shortcut.customIconPath
         iconBitmap = withContext(Dispatchers.IO) {
@@ -316,14 +339,31 @@ private fun ShortcutTile(shortcut: Shortcut, modifier: Modifier = Modifier) {
         }
     }
 
+    val host = remember(shortcut.url) {
+        (runCatching { java.net.URI(shortcut.url).host }.getOrNull() ?: shortcut.url).removePrefix("www.")
+    }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(if (pressed) 0.92f else 1f, label = "tile_press")
+    val title = shortcut.title.ifBlank { stringResource(R.string.label_bookmark_placeholder) }
+
+    // Fallback avatar colour is stable per host so a tile keeps its colour.
+    val scheme = MaterialTheme.colorScheme
+    val (avatarBg, avatarFg) = when (kotlin.math.abs(host.hashCode()) % 3) {
+        0 -> scheme.primaryContainer to scheme.onPrimaryContainer
+        1 -> scheme.secondaryContainer to scheme.onSecondaryContainer
+        else -> scheme.tertiaryContainer to scheme.onTertiaryContainer
+    }
+
     Column(
-        modifier = modifier.padding(8.dp),
+        modifier = modifier
+            .padding(horizontal = 4.dp, vertical = 8.dp)
+            .graphicsLayer { scaleX = scale; scaleY = scale },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Card(
-            modifier = Modifier.size(52.dp),
+            modifier = Modifier.size(56.dp),
             shape = TileShape,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+            colors = CardDefaults.cardColors(containerColor = avatarBg),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
             val bitmap = iconBitmap
@@ -336,25 +376,39 @@ private fun ShortcutTile(shortcut: Shortcut, modifier: Modifier = Modifier) {
                 )
             } else {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = Icons.Link,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.size(24.dp),
+                    Text(
+                        text = title.trim().firstOrNull()?.uppercase() ?: "?",
+                        color = avatarFg,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold,
                     )
                 }
             }
         }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = shortcut.title.ifBlank { stringResource(R.string.label_bookmark_placeholder) },
+            text = title,
             color = MaterialTheme.colorScheme.onSurface,
             fontSize = 11.sp,
-            maxLines = 1,
+            lineHeight = 13.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = if (showHost) 1 else 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(64.dp),
+            modifier = Modifier.width(72.dp),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
+        if (showHost) {
+            Text(
+                text = host,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 9.sp,
+                lineHeight = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.width(72.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+            )
+        }
     }
 }
 
@@ -369,7 +423,7 @@ private fun AddShortcutTile(onClick: (() -> Unit)?) {
     ) {
         Box(
             modifier = Modifier
-                .size(52.dp)
+                .size(56.dp)
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh, TileShape)
                 .border(1.dp, MaterialTheme.colorScheme.outlineVariant, TileShape),
             contentAlignment = Alignment.Center,

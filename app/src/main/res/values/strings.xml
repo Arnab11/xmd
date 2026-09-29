@@ -639,4 +639,12 @@
     <string name="fmhy_result_done">FMHY: %1$d added, %2$d updated.</string>
     <string name="fmhy_result_up_to_date">Already up to date with FMHY.</string>
     <string name="fmhy_result_failed">Couldn\'t reach FMHY. Check your connection.</string>
+    <string name="conn_hint">More connections can speed up big files. Some servers throttle or block above 8.</string>
+    <string name="conn_hint_high">High value: some servers may slow down or refuse this many connections.</string>
+    <string name="conn_speed_title">Speed limit</string>
+    <string name="conn_speed_hint">Per download. Pick a preset or type your own.</string>
+    <string name="conn_unlimited">Unlimited</string>
+    <string name="conn_custom_speed">Custom (KB/s)</string>
+    <string name="conn_concurrent_title">Simultaneous downloads</string>
+    <string name="conn_concurrent_hint">How many downloads run at the same time (1–5).</string>
 </resources>
