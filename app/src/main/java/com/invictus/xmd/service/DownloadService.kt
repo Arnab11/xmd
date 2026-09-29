@@ -763,12 +763,12 @@ class DownloadService : LifecycleService() {
             item.category
         }
         val outputDir = FileNameUtils.resolveDestinationFolder(
-            customSaveDir = null,
+            customSaveDir = item.customSaveDirPath,
             category = ytCategory,
             fileName = null,
             sourceUrl = item.sourceUrl,
             titleHint = ytTitle,
-        )
+        ).apply { mkdirs() }
 
         // Set in the catch below when a transient network failure is eligible
         // for auto-retry; acted on after the finally (a delay can't run inside

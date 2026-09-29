@@ -14,6 +14,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -228,8 +229,15 @@ class SettingsActivity : ComponentActivity() {
                 mutableStateOf(if (startRoute == Route.ROOT) Route.APPEARANCE else startRoute)
             }
 
-            Surface(color = MaterialTheme.colorScheme.background) {
-                Row(modifier = Modifier.fillMaxSize()) {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding(),
+                ) {
                     // Left Pane (Master: Category List)
                     Column(
                         modifier = Modifier
@@ -324,8 +332,15 @@ class SettingsActivity : ComponentActivity() {
             val currentRoute = backStackEntry?.destination?.route ?: startRoute
             val titleRes = routeTitles[currentRoute] ?: R.string.settings_title
 
-            Surface(color = MaterialTheme.colorScheme.background) {
-                Column {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding(),
+                ) {
                     TopAppBar(
                         title = { Text(stringResource(titleRes)) },
                         navigationIcon = {
@@ -344,7 +359,9 @@ class SettingsActivity : ComponentActivity() {
                     NavHost(
                         navController = navController,
                         startDestination = startRoute,
-                        modifier = Modifier.weight(1f, fill = true).fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f),
                     ) {
                         composable(Route.ROOT) {
                             SettingsRootScreen(

@@ -347,8 +347,8 @@ object QueueRepository {
                 progressPercent = percent,
                 mediaStatusText = statusText,
                 error = null,
-                bytesDone = if (bytesDone >= 0) bytesDone else it.bytesDone,
-                bytesTotal = if (bytesTotal >= 0) bytesTotal else it.bytesTotal,
+                bytesDone = if (bytesDone > 0) bytesDone else it.bytesDone,
+                bytesTotal = if (bytesTotal > 0) bytesTotal else it.bytesTotal,
                 speedBps = speedBps,
             )
         }
@@ -391,14 +391,24 @@ object QueueRepository {
             if (it.status != ItemStatus.DOWNLOADING && it.status != ItemStatus.SAVING) {
                 it
             } else {
+                val realFileLength = filePath?.let { path ->
+                    runCatching { java.io.File(path).takeIf { f -> f.exists() }?.length() }.getOrNull()
+                }?.takeIf { len -> len > 0L }
+
+                val size = finalBytes
+                    ?: realFileLength
+                    ?: it.bytesTotal.takeIf { b -> b > 0L }
+                    ?: it.bytesDone.takeIf { b -> b > 0L }
+                    ?: 0L
+
                 it.copy(
-                    bytesDone = finalBytes ?: it.bytesDone,
-                    bytesTotal = finalBytes ?: it.bytesTotal,
-                    speedBps = if (finalBytes != null) 0.0 else it.speedBps,
+                    bytesDone = if (size > 0L) size else it.bytesDone,
+                    bytesTotal = if (size > 0L) size else it.bytesTotal,
+                    speedBps = 0.0,
                     status = ItemStatus.DONE,
                     fileName = fileName ?: it.fileName,
-                    filePath = filePath,
-                    progressPercent = progressPercent ?: it.progressPercent,
+                    filePath = filePath ?: it.filePath,
+                    progressPercent = progressPercent ?: 100,
                     mediaStatusText = null,
                     error = null,
                     downloadFinishedAtMs = System.currentTimeMillis(),
