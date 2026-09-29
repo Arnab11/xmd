@@ -5,16 +5,19 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -46,6 +49,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -54,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.invictus.xmd.R
 import android.content.Context
 import android.content.Intent
@@ -699,7 +704,8 @@ fun AddDownloadDialog(
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { qualityExpanded = !qualityExpanded },
+                            .clickable { qualityExpanded = !qualityExpanded }
+                            .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
@@ -714,28 +720,6 @@ fun AddDownloadDialog(
                             modifier = Modifier
                                 .size(16.dp)
                                 .rotate(if (qualityExpanded) 0f else -90f),
-                        )
-                    }
-                    // Own row, right-aligned under the header: label + both
-                    // chips + chevron don't fit on one line in this dialog's
-                    // width on a phone.
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
-                    ) {
-                        AppFilterChip(
-                            label = stringResource(R.string.download_dialog_sponsorblock_title),
-                            selected = sponsorBlockOn,
-                            onClick = { sponsorBlockOn = !sponsorBlockOn },
-                        )
-                        // Video only -- an audio extraction has no video stream
-                        // to mux a subtitle track into.
-                        AppFilterChip(
-                            label = stringResource(R.string.download_dialog_subtitles_title),
-                            selected = subtitlesOn && finalQualityOption?.isAudioOnly != true,
-                            enabled = finalQualityOption?.isAudioOnly != true,
-                            onClick = { subtitlesOn = !subtitlesOn },
                         )
                     }
                     Spacer(Modifier.height(8.dp))
@@ -858,7 +842,22 @@ fun AddDownloadDialog(
                     }
                 }
 
-                Spacer(Modifier.height(16.dp))
+                if (needsYtDlp) {
+                    Spacer(Modifier.height(8.dp))
+                    DialogToggleRow(
+                        title = stringResource(R.string.download_dialog_sponsorblock_title),
+                        checked = sponsorBlockOn,
+                        onCheckedChange = { sponsorBlockOn = it },
+                    )
+                    DialogToggleRow(
+                        title = stringResource(R.string.download_dialog_subtitles_title),
+                        checked = subtitlesOn && finalQualityOption?.isAudioOnly != true,
+                        enabled = finalQualityOption?.isAudioOnly != true,
+                        onCheckedChange = { subtitlesOn = it },
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
                 Row(
                     Modifier
                         .fillMaxWidth()
@@ -932,21 +931,23 @@ fun AddDownloadDialog(
                     )
 
                     if (needsYtDlp) {
-                        // On/off lives in the header chip; this only picks what
-                        // "on" does. Categories come from Settings > YouTube.
-                        Spacer(Modifier.height(14.dp))
-                        ChipLabel(stringResource(R.string.download_dialog_sponsorblock_title))
-                        val sbMarkLabel = stringResource(R.string.download_dialog_sponsorblock_mark)
-                        val sbRemoveLabel = stringResource(R.string.download_dialog_sponsorblock_remove)
-                        ChipRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            options = listOf(sbMarkLabel, sbRemoveLabel),
-                            selected = if (sponsorBlockAction == YtDlpManager.SponsorBlockMode.REMOVE) sbRemoveLabel else sbMarkLabel,
-                            onSelected = { index ->
-                                sponsorBlockAction = if (index == 1) YtDlpManager.SponsorBlockMode.REMOVE
-                                else YtDlpManager.SponsorBlockMode.MARK
-                            },
-                        )
+                        AnimatedVisibility(visible = sponsorBlockOn) {
+                            Column {
+                                Spacer(Modifier.height(14.dp))
+                                ChipLabel(stringResource(R.string.download_dialog_sponsorblock_title))
+                                val sbMarkLabel = stringResource(R.string.download_dialog_sponsorblock_mark)
+                                val sbRemoveLabel = stringResource(R.string.download_dialog_sponsorblock_remove)
+                                ChipRow(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    options = listOf(sbMarkLabel, sbRemoveLabel),
+                                    selected = if (sponsorBlockAction == YtDlpManager.SponsorBlockMode.REMOVE) sbRemoveLabel else sbMarkLabel,
+                                    onSelected = { index ->
+                                        sponsorBlockAction = if (index == 1) YtDlpManager.SponsorBlockMode.REMOVE
+                                        else YtDlpManager.SponsorBlockMode.MARK
+                                    },
+                                )
+                            }
+                        }
                     }
 
                     // Only meaningful during a playlist bulk-add -- see
@@ -1207,5 +1208,62 @@ private fun formatPlaylistEntryDuration(durationSeconds: Int?): String? {
         "%d:%02d:%02d".format(hours, minutes, seconds)
     } else {
         "%d:%02d".format(minutes, seconds)
+    }
+}
+
+@Composable
+private fun DialogToggleRow(
+    title: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+) {
+    val dimAlpha = if (enabled) 1f else 0.38f
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = title,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = dimAlpha),
+            modifier = Modifier.weight(1f),
+        )
+        Surface(
+            onClick = { onCheckedChange(!checked) },
+            enabled = enabled,
+            shape = RoundedCornerShape(8.dp),
+            color = if (checked) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+            border = if (checked) {
+                BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f * dimAlpha))
+            } else {
+                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f * dimAlpha))
+            },
+            modifier = Modifier
+                .width(56.dp)
+                .height(32.dp),
+        ) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = if (checked) stringResource(R.string.on) else stringResource(R.string.off),
+                    fontSize = 12.sp,
+                    fontWeight = if (checked) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (checked) {
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = dimAlpha)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = dimAlpha)
+                    },
+                )
+            }
+        }
     }
 }
