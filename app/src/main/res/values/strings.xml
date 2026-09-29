@@ -630,13 +630,11 @@
     <string name="fmhy_title">FMHY Sync</string>
     <string name="fmhy_refresh">Refresh</string>
     <string name="fmhy_syncing">Syncing with FMHY…</string>
-    <string name="fmhy_never">Never synced · updates moved links, adds new sites</string>
+    <string name="fmhy_never">Never synced · updates moved links only</string>
     <string name="fmhy_last">Synced %1$s · %2$s</string>
     <string name="fmhy_auto_title">Auto-sync when FMHY updates</string>
     <string name="fmhy_auto_hint">Checks for a new FMHY version when you open the app (at most every 6 hours).</string>
-    <string name="fmhy_starred_title">Only add recommended sites</string>
-    <string name="fmhy_starred_hint">New tiles come only from FMHY’s star-rated picks. Turn off to add everything.</string>
-    <string name="fmhy_result_done">FMHY: %1$d added, %2$d updated.</string>
+    <string name="fmhy_result_done">FMHY: %1$d links updated.</string>
     <string name="fmhy_result_up_to_date">Already up to date with FMHY.</string>
     <string name="fmhy_result_failed">Couldn\'t reach FMHY. Check your connection.</string>
     <string name="conn_hint">More connections can speed up big files. Some servers throttle or block above 8.</string>

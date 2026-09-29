@@ -440,7 +440,6 @@ object Settings {
     // users who already chose a value keep it.
     // ── FMHY website sync ────────────────────────────────────────────
     private const val KEY_FMHY_AUTO = "fmhy_auto_sync"
-    private const val KEY_FMHY_STARRED_ONLY = "fmhy_starred_only"
     private const val KEY_FMHY_SHA = "fmhy_last_sha"
     private const val KEY_FMHY_LAST_SYNC = "fmhy_last_sync_ms"
     private const val KEY_FMHY_LAST_CHECK = "fmhy_last_check_ms"
@@ -449,10 +448,6 @@ object Settings {
     /** Auto-sync website sources when FMHY has a new commit (checked on app open). */
     fun fmhyAutoSync(): Boolean = prefs.getBoolean(KEY_FMHY_AUTO, true)
     fun setFmhyAutoSync(value: Boolean) { prefs.edit().putBoolean(KEY_FMHY_AUTO, value).apply() }
-
-    /** Only add community-recommended (star) FMHY sites as new shortcuts. */
-    fun fmhyStarredOnly(): Boolean = prefs.getBoolean(KEY_FMHY_STARRED_ONLY, true)
-    fun setFmhyStarredOnly(value: Boolean) { prefs.edit().putBoolean(KEY_FMHY_STARRED_ONLY, value).apply() }
 
     fun fmhyLastSha(): String? = prefs.getString(KEY_FMHY_SHA, null)
     fun fmhyLastSyncMs(): Long = prefs.getLong(KEY_FMHY_LAST_SYNC, 0L)

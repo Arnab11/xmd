@@ -63,7 +63,6 @@ fun WebsiteSourcesSection(onImport: () -> Unit, onExport: () -> Unit) {
     }
 
     var autoSync by remember { mutableStateOf(Settings.fmhyAutoSync()) }
-    var starredOnly by remember { mutableStateOf(Settings.fmhyStarredOnly()) }
 
     SettingsSectionHeader(title = stringResource(R.string.settings_import_websites))
 
@@ -128,7 +127,7 @@ fun WebsiteSourcesSection(onImport: () -> Unit, onExport: () -> Unit) {
                     FmhySync.refreshNow { result ->
                         val msg = when (result) {
                             is FmhySync.Result.Done ->
-                                context.getString(R.string.fmhy_result_done, result.added, result.updated)
+                                context.getString(R.string.fmhy_result_done, result.updated)
                             FmhySync.Result.UpToDate -> context.getString(R.string.fmhy_result_up_to_date)
                             FmhySync.Result.Failed -> context.getString(R.string.fmhy_result_failed)
                         }
@@ -145,12 +144,6 @@ fun WebsiteSourcesSection(onImport: () -> Unit, onExport: () -> Unit) {
             subtitle = stringResource(R.string.fmhy_auto_hint),
             checked = autoSync,
             onCheckedChange = { autoSync = it; Settings.setFmhyAutoSync(it) },
-        )
-        SwitchSettingRow(
-            title = stringResource(R.string.fmhy_starred_title),
-            subtitle = stringResource(R.string.fmhy_starred_hint),
-            checked = starredOnly,
-            onCheckedChange = { starredOnly = it; Settings.setFmhyStarredOnly(it) },
         )
     }
 }

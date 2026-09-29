@@ -208,26 +208,6 @@ object ShortcutRepository {
         updated.forEach { s -> runCatching { dao.upsert(s) } }
     }
 
-    /** Appends new (title, url) tiles at the end; returns how many were saved. */
-    suspend fun addAll(sites: List<Pair<String, String>>): Int = withContext(Dispatchers.IO) {
-        var order = (runCatching { dao.getAll() }.getOrDefault(emptyList())
-            .maxOfOrNull { it.sortOrder } ?: -1) + 1
-        var added = 0
-        sites.forEach { (title, url) ->
-            runCatching {
-                dao.upsert(
-                    Shortcut(
-                        id = UUID.randomUUID().toString(),
-                        title = title.ifBlank { hostOf(url) },
-                        url = url,
-                        sortOrder = order
-                    )
-                )
-            }.onSuccess { order++; added++ }
-        }
-        added
-    }
-
     suspend fun count(): Int = withContext(Dispatchers.IO) {
         runCatching { dao.getAll() }.getOrDefault(emptyList()).size
     }
