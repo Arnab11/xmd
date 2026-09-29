@@ -62,7 +62,7 @@ data class QueueItem(
     // ── Subtitles (YouTube items, per-download -- not a saved preset) ───
     // Video only -- ignored for an audio-only item.
     var embedSubtitles: Boolean = false,
-    // Comma-joined language codes (see YtDlpManager.SUBTITLE_LANGUAGES); empty = falls back to "en".
+    // Comma-joined language codes; empty = every available language (the dialog always leaves it empty).
     var subtitleLanguages: String = "",
     // ── Playlist .m3u8 file (see AddDownloadDialog's "Playlist file" ────
     // Advanced toggle, off by default). All entries added together from one

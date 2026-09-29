@@ -744,6 +744,62 @@ object Settings {
         prefs.edit().putString(KEY_PRESET_AUDIO_FORMAT, value.name).apply()
     }
 
+    // ── SponsorBlock + Subtitles defaults (YouTube downloads) ──────────────
+    // Only *defaults*: the Add Download dialog prefills its two header chips
+    // from these and the user can flip either per download. Off by default so
+    // existing behavior (no SponsorBlock, no subtitle muxing) is unchanged.
+    private const val KEY_SB_DEFAULT_ON = "yt_sponsorblock_default_on"
+    private const val KEY_SB_MODE = "yt_sponsorblock_mode"
+    private const val KEY_SB_CATEGORIES = "yt_sponsorblock_categories"
+    private const val KEY_SUBS_DEFAULT_ON = "yt_subtitles_default_on"
+    private const val KEY_SUBS_AUTO = "yt_subtitles_auto_captions"
+
+    fun sponsorBlockDefaultOn(): Boolean = prefs.getBoolean(KEY_SB_DEFAULT_ON, false)
+    fun setSponsorBlockDefaultOn(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SB_DEFAULT_ON, value).apply()
+    }
+
+    /** What the dialog's SponsorBlock chip does when on: MARK (chapters only,
+     *  the default) or REMOVE (cuts segments out). Never OFF -- "off" is the
+     *  chip itself. */
+    fun sponsorBlockMode(): com.invictus.xmd.domain.download.YtDlpManager.SponsorBlockMode =
+        if (prefs.getString(KEY_SB_MODE, null) == com.invictus.xmd.domain.download.YtDlpManager.SponsorBlockMode.REMOVE.name) {
+            com.invictus.xmd.domain.download.YtDlpManager.SponsorBlockMode.REMOVE
+        } else {
+            com.invictus.xmd.domain.download.YtDlpManager.SponsorBlockMode.MARK
+        }
+    fun setSponsorBlockMode(value: com.invictus.xmd.domain.download.YtDlpManager.SponsorBlockMode) {
+        prefs.edit().putString(KEY_SB_MODE, value.name).apply()
+    }
+
+    /** Segment categories to mark/remove. Every category by default; stored
+     *  ids that yt-dlp no longer lists are dropped on read, and an empty
+     *  result heals back to "all" so the chip never silently does nothing. */
+    fun sponsorBlockCategories(): Set<String> {
+        val all = com.invictus.xmd.domain.download.YtDlpManager.SPONSORBLOCK_CATEGORIES
+        val stored = prefs.getString(KEY_SB_CATEGORIES, null)
+            ?.split(",")
+            ?.filter { it in all }
+            ?.toSet()
+            .orEmpty()
+        return stored.ifEmpty { all.toSet() }
+    }
+    fun setSponsorBlockCategories(value: Set<String>) {
+        prefs.edit().putString(KEY_SB_CATEGORIES, value.joinToString(",")).apply()
+    }
+
+    fun subtitlesDefaultOn(): Boolean = prefs.getBoolean(KEY_SUBS_DEFAULT_ON, false)
+    fun setSubtitlesDefaultOn(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SUBS_DEFAULT_ON, value).apply()
+    }
+
+    /** Also fetch YouTube's auto-generated captions (original language only --
+     *  see YtDlpManager.download). Off by default. */
+    fun subtitlesAutoCaptions(): Boolean = prefs.getBoolean(KEY_SUBS_AUTO, false)
+    fun setSubtitlesAutoCaptions(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SUBS_AUTO, value).apply()
+    }
+
     // ── Bottom nav: tab order / hidden tabs / default tab ──────────────────
     // Four slots total: three real page tabs (home/downloads/browser) plus
     // "add" (the center FAB -- not a page, just an action, so it's never a

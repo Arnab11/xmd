@@ -175,13 +175,17 @@ fun AddDownloadDialog(
     var advancedExpanded by remember { mutableStateOf(false) }
     var audioFormatPreset by remember { mutableStateOf(Settings.presetAudioFormat()) }
 
-    // ── SponsorBlock (Advanced) ──────────────────────────────────────────
-    var sponsorBlockMode by remember { mutableStateOf(YtDlpManager.SponsorBlockMode.OFF) }
-    val sponsorBlockCategories = remember { mutableStateListOf("sponsor") }
-
-    // ── Subtitles (Advanced) ─────────────────────────────────────────────
-    var embedSubtitles by remember { mutableStateOf(false) }
-    val subtitleLanguages = remember { mutableStateListOf("en") }
+    // ── SponsorBlock + Subtitles (header chips) ──────────────────────────
+    // Both chips start from their Settings > YouTube defaults and can be
+    // flipped per download. The chip is the on/off switch; the Advanced
+    // section only picks Mark vs Remove, and the categories always come from
+    // Settings. Subtitles embed every available language.
+    var sponsorBlockOn by remember { mutableStateOf(Settings.sponsorBlockDefaultOn()) }
+    var sponsorBlockAction by remember { mutableStateOf(Settings.sponsorBlockMode()) }
+    val sponsorBlockCategories = remember { Settings.sponsorBlockCategories() }
+    var subtitlesOn by remember { mutableStateOf(Settings.subtitlesDefaultOn()) }
+    // Resolution & Format section collapse (chevron in its header).
+    var qualityExpanded by remember { mutableStateOf(true) }
 
     // ── Playlist picker ──────────────────────────────────────────────────
     var playlistResult by remember { mutableStateOf<YtDlpManager.PlaylistProbeResult?>(null) }
@@ -265,6 +269,11 @@ fun AddDownloadDialog(
     val qualityItems = remember(videoOptions, streamsLabel) { videoOptions.map { it.label } + "Audio" + streamsLabel }
 
     val finalQualityOption = selectedQualityOption
+    // What actually goes to onStart: the chip is the on/off switch, Advanced
+    // supplies Mark vs Remove. Subtitles can't apply to an audio-only pick.
+    val effectiveSponsorBlockMode =
+        if (sponsorBlockOn) sponsorBlockAction else YtDlpManager.SponsorBlockMode.OFF
+    val effectiveEmbedSubtitles = subtitlesOn && finalQualityOption?.isAudioOnly != true
 
     // Reset quality selection + kick off the advanced probe whenever the
     // effective link changes -- mirrors updateQualitySection()'s
@@ -291,12 +300,9 @@ fun AddDownloadDialog(
 
     LaunchedEffect(link, needsYtDlp) {
         streamsExpanded = false
-        sponsorBlockMode = YtDlpManager.SponsorBlockMode.OFF
-        sponsorBlockCategories.clear()
-        sponsorBlockCategories.add("sponsor")
-        embedSubtitles = false
-        subtitleLanguages.clear()
-        subtitleLanguages.add("en")
+        sponsorBlockOn = Settings.sponsorBlockDefaultOn()
+        sponsorBlockAction = Settings.sponsorBlockMode()
+        subtitlesOn = Settings.subtitlesDefaultOn()
         playlistResult = null
         playlistPickerOpen = false
         selectedPlaylistIds.clear()
@@ -690,12 +696,51 @@ fun AddDownloadDialog(
 
                 if (needsYtDlp) {
                     Spacer(Modifier.height(14.dp))
-                    Text(
-                        stringResource(R.string.download_dialog_quality_label),
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { qualityExpanded = !qualityExpanded },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.download_dialog_quality_label),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Icon(
+                            imageVector = Icons.ArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .rotate(if (qualityExpanded) 0f else -90f),
+                        )
+                    }
+                    // Own row, right-aligned under the header: label + both
+                    // chips + chevron don't fit on one line in this dialog's
+                    // width on a phone.
                     Spacer(Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                    ) {
+                        AppFilterChip(
+                            label = stringResource(R.string.download_dialog_sponsorblock_title),
+                            selected = sponsorBlockOn,
+                            onClick = { sponsorBlockOn = !sponsorBlockOn },
+                        )
+                        // Video only -- an audio extraction has no video stream
+                        // to mux a subtitle track into.
+                        AppFilterChip(
+                            label = stringResource(R.string.download_dialog_subtitles_title),
+                            selected = subtitlesOn && finalQualityOption?.isAudioOnly != true,
+                            enabled = finalQualityOption?.isAudioOnly != true,
+                            onClick = { subtitlesOn = !subtitlesOn },
+                        )
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    AnimatedVisibility(visible = qualityExpanded) {
+                    Column {
                     // Chip grid instead of a dropdown -- every quality rung
                     // is a single tap, same pattern as the yt-dlp settings
                     // screen's quality/audio pickers. "Streams" is the last
@@ -809,6 +854,8 @@ fun AddDownloadDialog(
                             }
                         }
                     }
+                    }
+                    }
                 }
 
                 Spacer(Modifier.height(16.dp))
@@ -885,116 +932,21 @@ fun AddDownloadDialog(
                     )
 
                     if (needsYtDlp) {
+                        // On/off lives in the header chip; this only picks what
+                        // "on" does. Categories come from Settings > YouTube.
                         Spacer(Modifier.height(14.dp))
                         ChipLabel(stringResource(R.string.download_dialog_sponsorblock_title))
+                        val sbMarkLabel = stringResource(R.string.download_dialog_sponsorblock_mark)
+                        val sbRemoveLabel = stringResource(R.string.download_dialog_sponsorblock_remove)
                         ChipRow(
                             modifier = Modifier.fillMaxWidth(),
-                            options = listOf(
-                                stringResource(R.string.download_dialog_sponsorblock_off),
-                                stringResource(R.string.download_dialog_sponsorblock_mark),
-                                stringResource(R.string.download_dialog_sponsorblock_remove),
-                            ),
-                            selected = when (sponsorBlockMode) {
-                                YtDlpManager.SponsorBlockMode.OFF -> stringResource(R.string.download_dialog_sponsorblock_off)
-                                YtDlpManager.SponsorBlockMode.MARK -> stringResource(R.string.download_dialog_sponsorblock_mark)
-                                YtDlpManager.SponsorBlockMode.REMOVE -> stringResource(R.string.download_dialog_sponsorblock_remove)
-                            },
+                            options = listOf(sbMarkLabel, sbRemoveLabel),
+                            selected = if (sponsorBlockAction == YtDlpManager.SponsorBlockMode.REMOVE) sbRemoveLabel else sbMarkLabel,
                             onSelected = { index ->
-                                sponsorBlockMode = YtDlpManager.SponsorBlockMode.entries[index]
+                                sponsorBlockAction = if (index == 1) YtDlpManager.SponsorBlockMode.REMOVE
+                                else YtDlpManager.SponsorBlockMode.MARK
                             },
                         )
-                        AnimatedVisibility(visible = sponsorBlockMode != YtDlpManager.SponsorBlockMode.OFF) {
-                            Column {
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    text = stringResource(R.string.download_dialog_sponsorblock_categories_label),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(bottom = 6.dp),
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    YtDlpManager.SPONSORBLOCK_CATEGORIES.forEach { category ->
-                                        val checked = category in sponsorBlockCategories
-                                        AppFilterChip(
-                                            label = category.replace('_', ' ').replaceFirstChar { it.uppercase() },
-                                            selected = checked,
-                                            onClick = {
-                                                if (checked) {
-                                                    // Keep at least one category selected -- an
-                                                    // empty set falls back to yt-dlp's own
-                                                    // "sponsor"-only default, silently diverging
-                                                    // from what the chips show as picked.
-                                                    if (sponsorBlockCategories.size > 1) sponsorBlockCategories.remove(category)
-                                                } else {
-                                                    sponsorBlockCategories.add(category)
-                                                }
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Video only -- an audio extraction has no video stream
-                    // to mux a subtitle track into.
-                    if (needsYtDlp && finalQualityOption?.isAudioOnly != true) {
-                        Spacer(Modifier.height(14.dp))
-                        ChipLabel(stringResource(R.string.download_dialog_subtitles_title))
-                        ChipRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            options = listOf(
-                                stringResource(R.string.download_dialog_subtitles_off),
-                                stringResource(R.string.download_dialog_subtitles_embed),
-                            ),
-                            selected = if (embedSubtitles) {
-                                stringResource(R.string.download_dialog_subtitles_embed)
-                            } else {
-                                stringResource(R.string.download_dialog_subtitles_off)
-                            },
-                            onSelected = { index -> embedSubtitles = index == 1 },
-                        )
-                        AnimatedVisibility(visible = embedSubtitles) {
-                            Column {
-                                Spacer(Modifier.height(10.dp))
-                                Text(
-                                    text = stringResource(R.string.download_dialog_subtitles_languages_label),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(bottom = 6.dp),
-                                )
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                ) {
-                                    YtDlpManager.SUBTITLE_LANGUAGES.forEach { (code, label) ->
-                                        val checked = code in subtitleLanguages
-                                        AppFilterChip(
-                                            label = label,
-                                            selected = checked,
-                                            onClick = {
-                                                if (checked) {
-                                                    // Keep at least one language selected -- an
-                                                    // empty set falls back to "en" anyway (see
-                                                    // YtDlpManager.download), silently diverging
-                                                    // from what the chips show as picked.
-                                                    if (subtitleLanguages.size > 1) subtitleLanguages.remove(code)
-                                                } else {
-                                                    subtitleLanguages.add(code)
-                                                }
-                                            },
-                                        )
-                                    }
-                                }
-                            }
-                        }
                     }
 
                     // Only meaningful during a playlist bulk-add -- see
@@ -1070,10 +1022,10 @@ fun AddDownloadDialog(
                                     windowStartMinute,
                                     windowEndMinute,
                                     windowDaysMask,
-                                    sponsorBlockMode,
-                                    sponsorBlockCategories.toSet(),
-                                    embedSubtitles,
-                                    subtitleLanguages.toSet(),
+                                    effectiveSponsorBlockMode,
+                                    sponsorBlockCategories,
+                                    effectiveEmbedSubtitles,
+                                    emptySet(),
                                     null, // playlist bulk-add: whole playlist stays in Videos, no per-entry Movies split
                                     batchId,
                                     batchPlaylistTitle,
@@ -1093,10 +1045,10 @@ fun AddDownloadDialog(
                             windowStartMinute,
                             windowEndMinute,
                             windowDaysMask,
-                            sponsorBlockMode,
-                            sponsorBlockCategories.toSet(),
-                            embedSubtitles,
-                            subtitleLanguages.toSet(),
+                            effectiveSponsorBlockMode,
+                            sponsorBlockCategories,
+                            effectiveEmbedSubtitles,
+                            emptySet(),
                             advancedDurationSeconds,
                             null,
                             null,

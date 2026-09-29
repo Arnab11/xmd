@@ -27,19 +27,6 @@ object YtDlpManager {
 
     enum class SponsorBlockMode { OFF, MARK, REMOVE }
     val SPONSORBLOCK_CATEGORIES = listOf("sponsor", "selfpromo", "interaction", "intro", "outro", "preview", "filler", "music_offtopic")
-    val SUBTITLE_LANGUAGES = listOf(
-        "en" to "English",
-        "hi" to "Hindi",
-        "es" to "Spanish",
-        "fr" to "French",
-        "ar" to "Arabic",
-        "pt" to "Portuguese",
-        "ja" to "Japanese",
-        "ko" to "Korean",
-        "de" to "German",
-        "ru" to "Russian",
-        "all" to "All",
-    )
     data class PlaylistEntry(val id: String, val title: String, val url: String, val durationSeconds: Int?)
     data class PlaylistProbeResult(val playlistTitle: String?, val entries: List<PlaylistEntry>)
 
@@ -114,7 +101,7 @@ object YtDlpManager {
         sponsorBlockMode: SponsorBlockMode = SponsorBlockMode.OFF,
         sponsorBlockCategories: Set<String> = emptySet(),
         embedSubtitles: Boolean = false,
-        subtitleLanguages: Set<String> = setOf("en"),
+        subtitleLanguages: Set<String> = emptySet(),
         onProgress: (DownloadProgress) -> Unit
     ): File = throw IllegalStateException("This build doesn't include YouTube support")
 

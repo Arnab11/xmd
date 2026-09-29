@@ -44,6 +44,8 @@ import com.invictus.xmd.R
 import com.invictus.xmd.ui.icons.Icon
 import com.invictus.xmd.ui.icons.Icons
 import com.invictus.xmd.domain.download.YtDlpManager
+import com.invictus.xmd.ui.components.AppFilterChip
+import com.invictus.xmd.ui.components.ChipRow
 
 /**
  * Async state for the yt-dlp engine row (install/delete/update/nightly
@@ -84,6 +86,18 @@ fun SettingsYoutubeScreen(
     audioFormatOptions: List<String>,
     selectedAudioFormat: String,
     onAudioFormatChanged: (Int) -> Unit,
+    // SponsorBlock defaults
+    sponsorBlockDefaultOn: Boolean,
+    onSponsorBlockDefaultChanged: (Boolean) -> Unit,
+    sponsorBlockMode: YtDlpManager.SponsorBlockMode,
+    onSponsorBlockModeChanged: (YtDlpManager.SponsorBlockMode) -> Unit,
+    sponsorBlockCategories: Set<String>,
+    onSponsorBlockCategoryToggled: (String) -> Unit,
+    // Subtitle defaults
+    subtitlesDefaultOn: Boolean,
+    onSubtitlesDefaultChanged: (Boolean) -> Unit,
+    subtitlesAutoCaptions: Boolean,
+    onSubtitlesAutoCaptionsChanged: (Boolean) -> Unit,
     // yt-dlp engine
     ytDlpInstalled: Boolean,
     ytDlpUsingNightly: Boolean,
@@ -264,6 +278,89 @@ fun SettingsYoutubeScreen(
                     options = audioFormatOptions,
                     selected = selectedAudioFormat,
                     onSelected = onAudioFormatChanged,
+                )
+            }
+        }
+
+        // ===== 6. SponsorBlock =====
+        Column {
+            SettingsSectionHeader(title = stringResource(R.string.settings_sponsorblock_title))
+            SettingsSectionCard {
+                SwitchSettingRow(
+                    title = stringResource(R.string.settings_sponsorblock_default),
+                    subtitle = stringResource(R.string.settings_sponsorblock_default_hint),
+                    checked = sponsorBlockDefaultOn,
+                    onCheckedChange = onSponsorBlockDefaultChanged,
+                )
+                SettingsDivider()
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_sponsorblock_mode_label),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = stringResource(R.string.settings_sponsorblock_mode_hint),
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+                    )
+                    val markLabel = stringResource(R.string.settings_sponsorblock_mode_mark)
+                    val removeLabel = stringResource(R.string.settings_sponsorblock_mode_remove)
+                    ChipRow(
+                        options = listOf(markLabel, removeLabel),
+                        selected = if (sponsorBlockMode == YtDlpManager.SponsorBlockMode.REMOVE) removeLabel else markLabel,
+                        onSelected = { index ->
+                            onSponsorBlockModeChanged(
+                                if (index == 1) YtDlpManager.SponsorBlockMode.REMOVE
+                                else YtDlpManager.SponsorBlockMode.MARK
+                            )
+                        },
+                    )
+                }
+                SettingsDivider()
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = stringResource(R.string.settings_sponsorblock_categories_label),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Column(
+                        modifier = Modifier.padding(top = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        YtDlpManager.SPONSORBLOCK_CATEGORIES.chunked(3).forEach { rowCategories ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                rowCategories.forEach { category ->
+                                    AppFilterChip(
+                                        label = category.replace('_', ' ').replaceFirstChar { it.uppercase() },
+                                        selected = category in sponsorBlockCategories,
+                                        onClick = { onSponsorBlockCategoryToggled(category) },
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ===== 7. Subtitles =====
+        Column {
+            SettingsSectionHeader(title = stringResource(R.string.settings_subtitles_title))
+            SettingsSectionCard {
+                SwitchSettingRow(
+                    title = stringResource(R.string.settings_subtitles_default),
+                    subtitle = stringResource(R.string.settings_subtitles_default_hint),
+                    checked = subtitlesDefaultOn,
+                    onCheckedChange = onSubtitlesDefaultChanged,
+                )
+                SettingsDivider()
+                SwitchSettingRow(
+                    title = stringResource(R.string.settings_subtitles_auto),
+                    subtitle = stringResource(R.string.settings_subtitles_auto_hint),
+                    checked = subtitlesAutoCaptions,
+                    onCheckedChange = onSubtitlesAutoCaptionsChanged,
                 )
             }
         }

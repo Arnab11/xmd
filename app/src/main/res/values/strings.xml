@@ -157,17 +157,12 @@
         <item quantity="other">%d commits</item>
     </plurals>
     <string name="download_dialog_sponsorblock_title">SponsorBlock</string>
-    <string name="download_dialog_sponsorblock_off">Off</string>
     <string name="download_dialog_sponsorblock_mark">Mark</string>
     <string name="download_dialog_sponsorblock_remove">Remove</string>
-    <string name="download_dialog_sponsorblock_categories_label">Categories</string>
     <string name="download_dialog_subtitles_title">Subtitles</string>
-    <string name="download_dialog_subtitles_off">Off</string>
-    <string name="download_dialog_subtitles_embed">Embed</string>
     <string name="download_dialog_playlist_file_title">Playlist file</string>
     <string name="download_dialog_playlist_file_off">Off</string>
     <string name="download_dialog_playlist_file_on">Create .m3u8</string>
-    <string name="download_dialog_subtitles_languages_label">Languages</string>
     <string name="download_dialog_playlist_loading">Checking playlist\u2026</string>
     <string name="download_dialog_playlist_detected">Playlist detected \u00b7 %d video(s)</string>
     <string name="download_dialog_playlist_just_this">Just this video</string>
@@ -352,6 +347,19 @@
     <string name="preset_fps_60">Up to 60 fps</string>
     <string name="settings_audio_format_title">Audio format</string>
     <string name="settings_audio_format_hint">Format used for "Audio only" downloads.</string>
+    <string name="settings_sponsorblock_title">SponsorBlock</string>
+    <string name="settings_sponsorblock_default">Enable by default</string>
+    <string name="settings_sponsorblock_default_hint">Starts the SponsorBlock chip switched on in the Add Download dialog for YouTube links. You can still flip it per download.</string>
+    <string name="settings_sponsorblock_mode_label">Action</string>
+    <string name="settings_sponsorblock_mode_mark">Mark</string>
+    <string name="settings_sponsorblock_mode_remove">Remove</string>
+    <string name="settings_sponsorblock_mode_hint">Mark adds chapters for the segments. Remove cuts them out of the file.</string>
+    <string name="settings_sponsorblock_categories_label">Segment categories</string>
+    <string name="settings_subtitles_title">Subtitles</string>
+    <string name="settings_subtitles_default">Embed by default</string>
+    <string name="settings_subtitles_default_hint">Starts the Subtitles chip switched on in the Add Download dialog. Every available language is embedded in the video; audio-only downloads are skipped.</string>
+    <string name="settings_subtitles_auto">Include auto-generated captions</string>
+    <string name="settings_subtitles_auto_hint">Also embeds YouTube\'s automatic captions in the video\'s original language. Off by default.</string>
     <string name="audio_format_mp3">MP3</string>
     <string name="audio_format_m4a">M4A (AAC)</string>
     <string name="audio_format_opus">Opus</string>

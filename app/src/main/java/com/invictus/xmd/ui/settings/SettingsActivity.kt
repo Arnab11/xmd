@@ -1004,6 +1004,22 @@ private fun YoutubeRoute() {
         mutableStateOf(audioFormatOptions.first { it.second == com.invictus.xmd.preferences.Settings.presetAudioFormat() }.first)
     }
 
+    var sponsorBlockDefaultOn by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.sponsorBlockDefaultOn())
+    }
+    var sponsorBlockMode by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.sponsorBlockMode())
+    }
+    var sponsorBlockCategories by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.sponsorBlockCategories())
+    }
+    var subtitlesDefaultOn by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.subtitlesDefaultOn())
+    }
+    var subtitlesAutoCaptions by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.subtitlesAutoCaptions())
+    }
+
     var ytDlpInstalled by remember {
         mutableStateOf(com.invictus.xmd.domain.download.YtDlpManager.isInstalled(context))
     }
@@ -1058,6 +1074,39 @@ private fun YoutubeRoute() {
         onAudioFormatChanged = { index ->
             selectedAudioFormatLabel = audioFormatOptions[index].first
             com.invictus.xmd.preferences.Settings.setPresetAudioFormat(audioFormatOptions[index].second)
+        },
+        sponsorBlockDefaultOn = sponsorBlockDefaultOn,
+        onSponsorBlockDefaultChanged = { value ->
+            sponsorBlockDefaultOn = value
+            com.invictus.xmd.preferences.Settings.setSponsorBlockDefaultOn(value)
+        },
+        sponsorBlockMode = sponsorBlockMode,
+        onSponsorBlockModeChanged = { value ->
+            sponsorBlockMode = value
+            com.invictus.xmd.preferences.Settings.setSponsorBlockMode(value)
+        },
+        sponsorBlockCategories = sponsorBlockCategories,
+        onSponsorBlockCategoryToggled = { category ->
+            // Keep at least one category on -- an empty set would read back
+            // as "all" (see Settings.sponsorBlockCategories), silently
+            // diverging from what the chips show as picked.
+            val updated = if (category in sponsorBlockCategories) {
+                if (sponsorBlockCategories.size > 1) sponsorBlockCategories - category else sponsorBlockCategories
+            } else {
+                sponsorBlockCategories + category
+            }
+            sponsorBlockCategories = updated
+            com.invictus.xmd.preferences.Settings.setSponsorBlockCategories(updated)
+        },
+        subtitlesDefaultOn = subtitlesDefaultOn,
+        onSubtitlesDefaultChanged = { value ->
+            subtitlesDefaultOn = value
+            com.invictus.xmd.preferences.Settings.setSubtitlesDefaultOn(value)
+        },
+        subtitlesAutoCaptions = subtitlesAutoCaptions,
+        onSubtitlesAutoCaptionsChanged = { value ->
+            subtitlesAutoCaptions = value
+            com.invictus.xmd.preferences.Settings.setSubtitlesAutoCaptions(value)
         },
         ytDlpInstalled = ytDlpInstalled,
         ytDlpUsingNightly = ytDlpUsingNightly,
