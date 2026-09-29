@@ -28,7 +28,12 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import com.invictus.xmd.ui.icons.Icon
 import com.invictus.xmd.ui.icons.Icons
@@ -37,12 +42,14 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
@@ -55,6 +62,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -211,6 +219,7 @@ fun AddDownloadDialog(
 
     var onDuplicateStrategy by remember { mutableStateOf<OnDuplicateStrategy?>(null) }
     var showSolutionsDialog by remember { mutableStateOf(false) }
+    var showHttpSettingsDialog by remember { mutableStateOf(false) }
     var scheduleMode by remember { mutableStateOf(com.invictus.xmd.domain.download.ScheduleMode.NONE) }
     var scheduledAtMs by remember { mutableStateOf(0L) }
     var windowStartMinute by remember { mutableStateOf(-1) }
@@ -409,7 +418,10 @@ fun AddDownloadDialog(
         modifier = Modifier.wideDialogWidth(),
         properties = WideDialogProperties,
         title = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
                 Icon(
                     imageVector = when {
                         needsPrepare -> Icons.Sync
@@ -422,9 +434,22 @@ fun AddDownloadDialog(
                 )
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    if (needsPrepare) stringResource(R.string.action_prepare) + " " + stringResource(R.string.download_dialog_title)
-                    else stringResource(R.string.download_dialog_title)
+                    text = if (needsPrepare) stringResource(R.string.action_prepare) + " " + stringResource(R.string.download_dialog_title)
+                    else stringResource(R.string.download_dialog_title),
+                    modifier = Modifier.weight(1f),
                 )
+                if (!needsYtDlp && !LinkParser.isMagnetLink(link)) {
+                    IconButton(
+                        onClick = { showHttpSettingsDialog = true },
+                        modifier = Modifier.size(32.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.More,
+                            contentDescription = stringResource(R.string.download_settings_title),
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
             }
         },
         text = {
@@ -1132,6 +1157,21 @@ fun AddDownloadDialog(
             }
         )
     }
+
+    if (showHttpSettingsDialog) {
+        HttpDownloadSettingsDialog(
+            initialConnections = Settings.connectionsPerDownload(),
+            initialMaxConcurrent = Settings.maxConcurrentDownloads(),
+            initialSpeedLimitKBps = Settings.speedLimitKBps(),
+            onDismiss = { showHttpSettingsDialog = false },
+            onApply = { newConnections, newMaxConcurrent, newSpeedLimit ->
+                Settings.setConnectionsPerDownload(newConnections)
+                Settings.setMaxConcurrentDownloads(newMaxConcurrent)
+                Settings.setSpeedLimitKBps(newSpeedLimit)
+                showHttpSettingsDialog = false
+            },
+        )
+    }
 }
 
 @Composable
@@ -1267,3 +1307,214 @@ private fun DialogToggleRow(
         }
     }
 }
+
+@Composable
+private fun HttpDownloadSettingsDialog(
+    initialConnections: Int,
+    initialMaxConcurrent: Int,
+    initialSpeedLimitKBps: Int,
+    onDismiss: () -> Unit,
+    onApply: (connections: Int, maxConcurrent: Int, speedLimitKBps: Int) -> Unit,
+) {
+    var connections by remember { mutableIntStateOf(initialConnections.coerceIn(1, 24)) }
+    var maxConcurrent by remember { mutableIntStateOf(initialMaxConcurrent.coerceIn(1, 5)) }
+    var speedLimitKBps by remember { mutableIntStateOf(initialSpeedLimitKBps.coerceAtLeast(0)) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.wideDialogWidth(),
+        properties = WideDialogProperties,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Settings,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(Modifier.width(12.dp))
+                Text(
+                    text = stringResource(R.string.download_settings_title),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // 1. Simultaneous downloads
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.conn_concurrent_title),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            FilledTonalIconButton(
+                                onClick = { if (maxConcurrent > 1) maxConcurrent-- },
+                                enabled = maxConcurrent > 1,
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Text("−", style = MaterialTheme.typography.titleMedium)
+                            }
+                            Text(
+                                text = maxConcurrent.toString(),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.width(36.dp),
+                            )
+                            FilledTonalIconButton(
+                                onClick = { if (maxConcurrent < 5) maxConcurrent++ },
+                                enabled = maxConcurrent < 5,
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Text("+", style = MaterialTheme.typography.titleMedium)
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // 2. Threads per download
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.threads_per_download),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ) {
+                            Text(
+                                text = connections.toString(),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    Slider(
+                        value = connections.toFloat(),
+                        onValueChange = { connections = it.toInt().coerceIn(1, 24) },
+                        valueRange = 1f..24f,
+                        steps = 22,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("1", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("24", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+
+                // 3. Max download speed
+                Column {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            text = stringResource(R.string.max_download_speed),
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
+                            contentColor = MaterialTheme.colorScheme.primary,
+                        ) {
+                            Text(
+                                text = formatSpeedLimit(speedLimitKBps),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                            )
+                        }
+                    }
+                    val sliderIndex = remember(speedLimitKBps) {
+                        val exact = SPEED_SLIDER_STEPS.indexOf(speedLimitKBps)
+                        if (exact >= 0) exact.toFloat()
+                        else if (speedLimitKBps <= 0) (SPEED_SLIDER_STEPS.size - 1).toFloat()
+                        else {
+                            val closest = SPEED_SLIDER_STEPS.filter { it > 0 }
+                                .minByOrNull { kotlin.math.abs(it - speedLimitKBps) }
+                            if (closest != null) SPEED_SLIDER_STEPS.indexOf(closest).toFloat()
+                            else (SPEED_SLIDER_STEPS.size - 1).toFloat()
+                        }
+                    }
+                    Slider(
+                        value = sliderIndex,
+                        onValueChange = {
+                            val idx = kotlin.math.round(it).toInt().coerceIn(0, SPEED_SLIDER_STEPS.lastIndex)
+                            speedLimitKBps = SPEED_SLIDER_STEPS[idx]
+                        },
+                        valueRange = 0f..(SPEED_SLIDER_STEPS.size - 1).toFloat(),
+                        steps = SPEED_SLIDER_STEPS.size - 2,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("16 KB/s", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Max", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onApply(connections, maxConcurrent, speedLimitKBps) },
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text(stringResource(R.string.settings_save))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(10.dp),
+            ) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
+private val SPEED_SLIDER_STEPS = listOf(
+    16, 32, 64, 128, 256, 512, 768, 1024, 1536, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216, 0
+)
+
+private fun formatSpeedLimit(kbps: Int): String {
+    return when {
+        kbps <= 0 -> "Max"
+        kbps < 1024 -> "$kbps KB/s"
+        kbps % 1024 == 0 -> "${kbps / 1024} MB/s"
+        else -> String.format(java.util.Locale.US, "%.1f MB/s", kbps / 1024f)
+    }
+}
+
