@@ -159,6 +159,8 @@
     <string name="download_dialog_sponsorblock_title">SponsorBlock</string>
     <string name="download_dialog_sponsorblock_mark">Mark</string>
     <string name="download_dialog_sponsorblock_remove">Remove</string>
+    <string name="on">On</string>
+    <string name="off">Off</string>
     <string name="download_dialog_subtitles_title">Subtitles</string>
     <string name="download_dialog_playlist_file_title">Playlist file</string>
     <string name="download_dialog_playlist_file_off">Off</string>
