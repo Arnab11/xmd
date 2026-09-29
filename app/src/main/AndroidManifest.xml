@@ -6,6 +6,10 @@
     <!-- libtorrent4j (magnet/torrent downloads) reads the Wi-Fi state to pick
          a network interface for its peer/DHT sockets. -->
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <!-- Keeps the CPU (and Wi-Fi radio) awake only while a download is actually
+         running, so it doesn't stall and time out once the screen turns off or
+         the app is in the background. See DownloadService.acquireDownloadLocks. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
