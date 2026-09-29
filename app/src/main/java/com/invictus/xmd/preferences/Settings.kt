@@ -121,9 +121,9 @@ object Settings {
         _amoledModeFlow.value = enabled
     }
 
-    fun connectionsPerDownload(): Int = prefs.getInt(KEY_CONNECTIONS, 8)
+    fun connectionsPerDownload(): Int = prefs.getInt(KEY_CONNECTIONS, 6).coerceIn(1, 24)
     fun setConnectionsPerDownload(value: Int) {
-        prefs.edit().putInt(KEY_CONNECTIONS, value).apply()
+        prefs.edit().putInt(KEY_CONNECTIONS, value.coerceIn(1, 24)).apply()
     }
 
     /** KB/s per individual download; 0 means unlimited. */
@@ -439,7 +439,7 @@ object Settings {
     // after MainActivity starts (result shown in the UpdateSheet). Default ON,
     // like Bunko -- it's a single lightweight request, no background job, and
     // users who already chose a value keep it.
-    fun autoCheckForUpdatesEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_CHECK_UPDATES, true)
+    fun autoCheckForUpdatesEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_CHECK_UPDATES, false)
     fun setAutoCheckForUpdatesEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_CHECK_UPDATES, value).apply()
     }

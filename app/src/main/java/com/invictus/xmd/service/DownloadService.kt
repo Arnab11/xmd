@@ -261,6 +261,38 @@ class DownloadService : LifecycleService() {
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private var internetCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
+    // Keep CPU awake (works on Wi-Fi *and* mobile data) + Wi-Fi radio at full
+    // performance (no-op on mobile data) while downloads are running.
+    private var wakeLock: android.os.PowerManager.WakeLock? = null
+    private var wifiLock: android.net.wifi.WifiManager.WifiLock? = null
+
+    @android.annotation.SuppressLint("WakelockTimeout")
+    private fun acquireLocks() {
+        try {
+            if (wakeLock == null) {
+                val pm = getSystemService(android.os.PowerManager::class.java)
+                wakeLock = pm?.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "xmd:download")
+                    ?.apply { setReferenceCounted(false) }
+            }
+            if (wakeLock?.isHeld != true) wakeLock?.acquire(12 * 60 * 60 * 1000L)
+            if (wifiLock == null) {
+                val wm = applicationContext.getSystemService(android.net.wifi.WifiManager::class.java)
+                val mode = if (android.os.Build.VERSION.SDK_INT >= 29)
+                    android.net.wifi.WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+                else
+                    @Suppress("DEPRECATION") android.net.wifi.WifiManager.WIFI_MODE_FULL_HIGH_PERF
+                wifiLock = wm?.createWifiLock(mode, "xmd:download")?.apply { setReferenceCounted(false) }
+            }
+            if (wifiLock?.isHeld != true) wifiLock?.acquire()
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun releaseLocks() {
+        try { if (wakeLock?.isHeld == true) wakeLock?.release() } catch (_: Exception) {}
+        try { if (wifiLock?.isHeld == true) wifiLock?.release() } catch (_: Exception) {}
+    }
+
     override fun onCreate() {
         super.onCreate()
         networkCallback = NetworkMonitor.register(
@@ -276,6 +308,7 @@ class DownloadService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        releaseLocks()
         networkCallback?.let { NetworkMonitor.unregister(this, it) }
         networkCallback = null
         internetCallback?.let { NetworkMonitor.unregister(this, it) }
@@ -650,12 +683,14 @@ class DownloadService : LifecycleService() {
         val maxWorkers = Settings.maxConcurrentDownloads().coerceIn(1, 5)
         val toLaunch = maxWorkers - activeWorkers.get()
         if (toLaunch <= 0) return
+        acquireLocks()
         repeat(toLaunch) {
             activeWorkers.incrementAndGet()
             lifecycleScope.launch(Dispatchers.IO) {
                 worker()
                 if (activeWorkers.decrementAndGet() == 0) {
                     withContext(Dispatchers.Main) {
+                        releaseLocks()
                         ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                         stopSelf()
                     }
@@ -1260,11 +1295,10 @@ class DownloadService : LifecycleService() {
                     item.status == ItemStatus.PAUSED -> "Paused — " + buildDetailLine(item.bytesDone, item.bytesTotal, 0.0)
                     item.status == ItemStatus.RETRYING -> "${item.error ?: "Retrying…"}"
                     item.platform == MediaPlatform.YOUTUBE && item.mediaStatusText.isNullOrBlank() && item.bytesTotal > 0 ->
-                        buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps, etaHoldKey = item.id) +
-                            (item.mediaFormatLabel?.let { "  •  $it" } ?: "")
+                        buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps, etaHoldKey = item.id)
                     item.platform == MediaPlatform.YOUTUBE ->
                         (if (item.progressPercent >= 0) "${item.progressPercent}%" else "Resolving…") +
-                            "  •  " + (item.mediaStatusText ?: item.mediaFormatLabel ?: "YouTube")
+                            "  •  " + (item.mediaStatusText ?: "YouTube")
                     else -> buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps, etaHoldKey = item.id)
                 }
                 barPercent = when {

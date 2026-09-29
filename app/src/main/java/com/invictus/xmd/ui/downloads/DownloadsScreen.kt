@@ -1273,7 +1273,6 @@ private fun statusText(item: QueueItem, speedEta: String?): String {
             item.platform == MediaPlatform.YOUTUBE && item.progressPercent >= 0 -> "${item.progressPercent}%"
             else -> "Downloading…"
         }
-        val label = if (item.platform == MediaPlatform.YOUTUBE) item.mediaFormatLabel?.let { " • $it" } else null
         buildString {
             append(sizePart)
             // A YouTube stage label ("Merging…") replaces the size, so no speed/ETA next to it.
@@ -1281,9 +1280,6 @@ private fun statusText(item: QueueItem, speedEta: String?): String {
             if (speedEta != null && !ytStage) {
                 append(" • ")
                 append(speedEta)
-            }
-            if (label != null) {
-                append(label)
             }
         }
     }

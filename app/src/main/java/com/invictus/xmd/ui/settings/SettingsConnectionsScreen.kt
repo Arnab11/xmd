@@ -11,9 +11,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.SegmentedButton
-import androidx.compose.material3.SegmentedButtonDefaults
-import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -26,11 +24,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.invictus.xmd.R
 
-private val CONNECTION_OPTIONS = listOf(2, 4, 8, 16)
 
 /**
- * Parallel connections per download (segmented picker, replacing the old
- * RadioGroup), global speed limit, max concurrent downloads. Each field now
+ * Parallel connections per download (1..24 slider), global speed limit, max concurrent downloads. Each field now
  * persists as soon as it changes, matching Downloads/Browser/Appearance --
  * no more Save button.
  */
@@ -64,21 +60,21 @@ fun SettingsConnectionsScreen(
                 color = MaterialTheme.colorScheme.onSurface,
             )
 
-            SingleChoiceSegmentedButtonRow(
+            Text(
+                text = connections.toString(),
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(top = 8.dp),
+            )
+            Slider(
+                value = connections.toFloat(),
+                onValueChange = { onConnectionsChanged(it.toInt().coerceIn(1, 24)) },
+                valueRange = 1f..24f,
+                steps = 22,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 16.dp),
-            ) {
-                CONNECTION_OPTIONS.forEachIndexed { index, value ->
-                    SegmentedButton(
-                        selected = connections == value,
-                        onClick = { onConnectionsChanged(value) },
-                        shape = SegmentedButtonDefaults.itemShape(index = index, count = CONNECTION_OPTIONS.size),
-                    ) {
-                        Text(value.toString())
-                    }
-                }
-            }
+                    .padding(bottom = 16.dp),
+            )
 
             HorizontalDivider(
                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f),
