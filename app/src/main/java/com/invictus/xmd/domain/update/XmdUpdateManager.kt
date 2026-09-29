@@ -180,6 +180,50 @@ class XmdUpdateManager(context: Context) {
                 .mapNotNull { commits.optJSONObject(it)?.optJSONObject("commit")?.optString("message") }
         }
 
+    fun ignoreVersion(version: String, channel: Settings.UpdateChannel) {
+        prefs.edit().putString(ignoredVersionKey(channel), version).apply()
+    }
+
+    private fun ignoredVersionKey(channel: Settings.UpdateChannel): String =
+        "ignored_version_${channel.name.lowercase()}"
+
+    fun selectApkAsset(release: XmdRelease): UpdateAsset? =
+        selectXmdApkAsset(release.assets, BuildConfig.FLAVOR, Build.SUPPORTED_ABIS.toList())
+
+    fun downloadUpdate(release: XmdRelease): Flow<Float> {
+        val asset = selectApkAsset(release) ?: throw IOException("No compatible APK asset found")
+        return downloadApkParallel(asset.downloadUrl, File(updatesDir, asset.name), asset.name, asset.size)
+    }
+
+    fun getApkFile(release: XmdRelease): File? {
+        val asset = selectApkAsset(release) ?: return null
+        val destination = File(updatesDir, asset.name)
+        val hasParts = updatesDir.listFiles()?.any { it.name.startsWith("${asset.name}.part") } == true
+        return if (destination.exists() && destination.length() > 0L && !hasParts) destination else null
+    }
+
+    fun getExistingProgress(release: XmdRelease): Float {
+        val asset = selectApkAsset(release) ?: return 0f
+        val destination = File(updatesDir, asset.name)
+        if (destination.exists() && destination.length() > 0L) return 100f
+        if (asset.size <= 0L) return 0f
+        val partBytes = updatesDir.listFiles()
+            ?.filter { it.name.startsWith("${asset.name}.part") }
+            ?.sumOf { it.length() } ?: 0L
+        if (partBytes > 0L) {
+            return ((partBytes.toFloat() / asset.size.toFloat()) * 100f).coerceIn(0f, 99f)
+        }
+        return 0f
+    }
+
+    fun clearCache() {
+        updatesDir.listFiles()?.forEach { it.delete() }
+        // APKs the pre-manager updater left directly in cacheDir.
+        appContext.cacheDir.listFiles()?.forEach {
+            if (it.isFile && it.name.startsWith("Xmd-") && it.name.endsWith(".apk")) it.delete()
+        }
+    }
+
     // ---- Network: release feeds ------------------------------------------
 
     /** GitHub's own "newest non-prerelease" pointer; null when the repo has none (404). */
