@@ -2,7 +2,6 @@ package com.invictus.xmd.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -11,15 +10,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -214,53 +209,7 @@ fun SettingsBrowserScreen(
         }
 
         Spacer(Modifier.height(8.dp))
-        SettingsSectionHeader(title = stringResource(R.string.settings_import_websites))
-
-        SettingsSectionCard(contentPadding = PaddingValues(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                            RoundedCornerShape(14.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Globe,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = stringResource(R.string.settings_import_websites_row_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Text(
-                        text = stringResource(R.string.settings_import_websites_hint),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-            }
-
-            Row(modifier = Modifier.fillMaxWidth().padding(top = 14.dp)) {
-                OutlinedButton(onClick = onImportWebsites, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_import_websites_button))
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                OutlinedButton(onClick = onExportWebsites, modifier = Modifier.weight(1f)) {
-                    Text(stringResource(R.string.settings_export_websites_button))
-                }
-            }
-        }
+        WebsiteSourcesSection(onImport = onImportWebsites, onExport = onExportWebsites)
     }
 
     if (showAddSiteDialog) {

@@ -505,34 +505,99 @@ private fun ShortcutOptionsDialog(
     onDelete: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val host = remember(shortcut.url) {
+        (runCatching { java.net.URI(shortcut.url).host }.getOrNull() ?: shortcut.url).removePrefix("www.")
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.wideDialogWidth(),
         properties = WideDialogProperties,
-        title = { Text(shortcut.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+        shape = RoundedCornerShape(28.dp),
+        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f), RoundedCornerShape(14.dp)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = shortcut.title.trim().firstOrNull()?.uppercase() ?: "?",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        text = shortcut.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = host,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        },
         text = {
-            Column {
-                DialogOptionRow(stringResource(R.string.edit_bookmark_title), onEdit)
-                DialogOptionRow(stringResource(R.string.action_delete), onDelete)
+            Column(verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp)) {
+                DialogOptionRow(
+                    icon = Icons.Edit,
+                    label = stringResource(R.string.edit_bookmark_title),
+                    onClick = onEdit,
+                )
+                DialogOptionRow(
+                    icon = Icons.Delete,
+                    label = stringResource(R.string.action_delete),
+                    onClick = onDelete,
+                    destructive = true,
+                )
             }
         },
         confirmButton = {},
-        dismissButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.cancel)) }
+        },
     )
 }
 
 @Composable
-private fun DialogOptionRow(label: String, onClick: () -> Unit) {
+private fun DialogOptionRow(
+    icon: com.invictus.xmd.ui.icons.AppIcon,
+    label: String,
+    onClick: () -> Unit,
+    destructive: Boolean = false,
+) {
+    val accent = if (destructive) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     Surface(
         onClick = onClick,
-        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(16.dp),
+        color = if (destructive) MaterialTheme.colorScheme.error.copy(alpha = 0.10f)
+        else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Text(
-            text = label,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(imageVector = icon, contentDescription = null, tint = accent, modifier = Modifier.size(22.dp))
+            Spacer(Modifier.width(14.dp))
+            Text(
+                text = label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = accent,
+            )
+        }
     }
 }
 

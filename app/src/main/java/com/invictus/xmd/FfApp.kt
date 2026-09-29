@@ -37,6 +37,8 @@ class FfApp : Application(), Application.ActivityLifecycleCallbacks {
         HistoryRepository.init(this)
         FaviconLoader.init(this)
         GithubAvatarLoader.init(this)
+        com.invictus.xmd.domain.browser.FmhySync.init(this)
+        com.invictus.xmd.domain.browser.FmhySync.autoCheckIfDue()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 DOWNLOAD_CHANNEL_ID,

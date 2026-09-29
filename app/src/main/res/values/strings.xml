@@ -623,4 +623,20 @@
     <string name="show_solutions">Show solutions</string>
     <string name="change_solution">Change solution</string>
     <string name="open_existing_file">Open file</string>
+    <string name="ws_saved_count">%1$d sites saved</string>
+    <string name="ws_pack_hint">Import a source pack from your device, or export yours to share.</string>
+    <string name="ws_import">Import</string>
+    <string name="ws_export">Export</string>
+    <string name="fmhy_title">FMHY Sync</string>
+    <string name="fmhy_refresh">Refresh</string>
+    <string name="fmhy_syncing">Syncing with FMHY…</string>
+    <string name="fmhy_never">Never synced · updates moved links, adds new sites</string>
+    <string name="fmhy_last">Synced %1$s · %2$s</string>
+    <string name="fmhy_auto_title">Auto-sync when FMHY updates</string>
+    <string name="fmhy_auto_hint">Checks for a new FMHY version when you open the app (at most every 6 hours).</string>
+    <string name="fmhy_starred_title">Only add recommended sites</string>
+    <string name="fmhy_starred_hint">New tiles come only from FMHY’s star-rated picks. Turn off to add everything.</string>
+    <string name="fmhy_result_done">FMHY: %1$d added, %2$d updated.</string>
+    <string name="fmhy_result_up_to_date">Already up to date with FMHY.</string>
+    <string name="fmhy_result_failed">Couldn\'t reach FMHY. Check your connection.</string>
 </resources>

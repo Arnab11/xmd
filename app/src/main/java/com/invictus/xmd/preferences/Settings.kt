@@ -436,9 +436,38 @@ object Settings {
 
     // ── About: Update checks ───────────────────────────────────────────
     // Whether the app silently checks GitHub for a newer version shortly
-    // after MainActivity starts (result shown in the UpdateSheet). Default ON,
-    // like Bunko -- it's a single lightweight request, no background job, and
+    // after MainActivity starts (result shown in the UpdateSheet). Default OFF;
     // users who already chose a value keep it.
+    // ── FMHY website sync ────────────────────────────────────────────
+    private const val KEY_FMHY_AUTO = "fmhy_auto_sync"
+    private const val KEY_FMHY_STARRED_ONLY = "fmhy_starred_only"
+    private const val KEY_FMHY_SHA = "fmhy_last_sha"
+    private const val KEY_FMHY_LAST_SYNC = "fmhy_last_sync_ms"
+    private const val KEY_FMHY_LAST_CHECK = "fmhy_last_check_ms"
+    private const val KEY_FMHY_SUMMARY = "fmhy_last_summary"
+
+    /** Auto-sync website sources when FMHY has a new commit (checked on app open). */
+    fun fmhyAutoSync(): Boolean = prefs.getBoolean(KEY_FMHY_AUTO, true)
+    fun setFmhyAutoSync(value: Boolean) { prefs.edit().putBoolean(KEY_FMHY_AUTO, value).apply() }
+
+    /** Only add community-recommended (star) FMHY sites as new shortcuts. */
+    fun fmhyStarredOnly(): Boolean = prefs.getBoolean(KEY_FMHY_STARRED_ONLY, true)
+    fun setFmhyStarredOnly(value: Boolean) { prefs.edit().putBoolean(KEY_FMHY_STARRED_ONLY, value).apply() }
+
+    fun fmhyLastSha(): String? = prefs.getString(KEY_FMHY_SHA, null)
+    fun fmhyLastSyncMs(): Long = prefs.getLong(KEY_FMHY_LAST_SYNC, 0L)
+    fun fmhyLastCheckMs(): Long = prefs.getLong(KEY_FMHY_LAST_CHECK, 0L)
+    fun fmhyLastSummary(): String? = prefs.getString(KEY_FMHY_SUMMARY, null)
+    fun setFmhyLastCheckMs(value: Long) { prefs.edit().putLong(KEY_FMHY_LAST_CHECK, value).apply() }
+    fun setFmhySynced(sha: String?, atMs: Long, summary: String) {
+        prefs.edit()
+            .putString(KEY_FMHY_SHA, sha)
+            .putLong(KEY_FMHY_LAST_SYNC, atMs)
+            .putLong(KEY_FMHY_LAST_CHECK, atMs)
+            .putString(KEY_FMHY_SUMMARY, summary)
+            .apply()
+    }
+
     fun autoCheckForUpdatesEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_CHECK_UPDATES, false)
     fun setAutoCheckForUpdatesEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_AUTO_CHECK_UPDATES, value).apply()
