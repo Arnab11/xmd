@@ -8,6 +8,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,24 +39,122 @@ sealed interface UpdateState {
     data class ReadyToInstall(val release: XmdRelease) : UpdateState
 }
 
+/**
+ * Process-wide owner of the running APK download. It lives outside any one
+ * screen's composition so closing the update sheet (or leaving MainActivity for
+ * About) never cancels the download, and every [UpdateController] -- there is
+ * one per screen -- observes the same progress instead of starting a second,
+ * conflicting download over the same .part files.
+ */
+internal object UpdateDownloadHub {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
+    var isDownloading: Boolean by mutableStateOf(false)
+        private set
+    var progress: Float by mutableFloatStateOf(0f)
+        private set
+    var error: String? by mutableStateOf(null)
+        private set
+
+    /** The release being (or last) downloaded. */
+    var release: XmdRelease? by mutableStateOf(null)
+        private set
+    var completedTag: String? by mutableStateOf(null)
+        private set
+
+    /** Bumped whenever a download ends (done or failed) so a hidden sheet can pop back up. */
+    var finishCount: Int by mutableIntStateOf(0)
+        private set
+
+    fun start(manager: XmdUpdateManager, target: XmdRelease, startProgress: Float) {
+        if (isDownloading) return
+        error = null
+        completedTag = null
+        release = target
+        progress = startProgress
+        isDownloading = true
+        scope.launch {
+            try {
+                manager.downloadUpdate(target).collect { progress = it }
+                completedTag = target.tagName
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (t: Exception) {
+                Log.w("XmdUpdate", "Update download failed.", t)
+                error = t.message?.takeIf { it.isNotBlank() } ?: "Download failed"
+            } finally {
+                isDownloading = false
+                finishCount++
+            }
+        }
+    }
+
+    /** Forget a finished/failed download (no-op while one is running). */
+    fun reset() {
+        if (isDownloading) return
+        progress = 0f
+        error = null
+        release = null
+        completedTag = null
+    }
+}
+
 @Stable
 class UpdateController internal constructor(
     private val manager: XmdUpdateManager,
     private val appContext: Context,
     private val scope: CoroutineScope,
 ) {
-    var state: UpdateState by mutableStateOf(UpdateState.Idle)
-        private set
-    var downloadProgress: Float by mutableFloatStateOf(0f)
-        private set
-    var isDownloading: Boolean by mutableStateOf(false)
-        private set
-    var downloadError: String? by mutableStateOf(null)
-        private set
+    private var rawState: UpdateState by mutableStateOf(UpdateState.Idle)
+
+    /** An Available release whose APK the shared download has since finished reads as ReadyToInstall. */
+    val state: UpdateState
+        get() {
+            val current = rawState
+            if (current is UpdateState.Available &&
+                UpdateDownloadHub.completedTag == current.release.tagName &&
+                manager.getApkFile(current.release) != null
+            ) {
+                return UpdateState.ReadyToInstall(current.release)
+            }
+            return current
+        }
+
+    private var localProgress: Float by mutableFloatStateOf(0f)
+
+    private fun hubApplies(): Boolean {
+        val tag = UpdateDownloadHub.release?.tagName ?: return false
+        return when (val current = rawState) {
+            is UpdateState.Available -> current.release.tagName == tag
+            is UpdateState.ReadyToInstall -> current.release.tagName == tag
+            else -> false
+        }
+    }
+
+    val downloadProgress: Float
+        get() = if (hubApplies()) UpdateDownloadHub.progress else localProgress
+    val isDownloading: Boolean
+        get() = UpdateDownloadHub.isDownloading
+    val downloadError: String?
+        get() = if (hubApplies()) UpdateDownloadHub.error else null
+
     var autoCheckEnabled: Boolean by mutableStateOf(Settings.autoCheckForUpdatesEnabled())
         private set
     var updateChannel: Settings.UpdateChannel by mutableStateOf(Settings.updateChannel())
         private set
+
+    // Sheet closed (back / swipe) while a download runs: it keeps going in the
+    // hub and the sheet comes back when that download ends.
+    private var hiddenAtFinish: Int? by mutableStateOf(null)
+    val sheetVisible: Boolean
+        get() {
+            val hidden = hiddenAtFinish ?: return true
+            return hidden != UpdateDownloadHub.finishCount
+        }
+
+    // Preview APKs are listed with size 0; the real size is fetched via HEAD.
+    private var resolvedSizeTag: String? by mutableStateOf(null)
+    private var resolvedSize: Long by mutableLongStateOf(0L)
 
     private var checkJob: Job? = null
 
@@ -65,30 +165,37 @@ class UpdateController internal constructor(
     }
 
     fun setChannel(next: Settings.UpdateChannel) {
-        if (next == updateChannel) return
+        if (next == updateChannel || isDownloading) return
         Settings.setUpdateChannel(next)
         updateChannel = next
         manager.clearCache()
-        downloadProgress = 0f
-        downloadError = null
-        state = UpdateState.Idle
+        UpdateDownloadHub.reset()
+        localProgress = 0f
+        rawState = UpdateState.Idle
         checkForUpdate(manual = true)
     }
 
     fun checkForUpdate(manual: Boolean = false) {
-        if (isDownloading) return
+        if (isDownloading) {
+            // Another screen's download is running: show it here instead of checking.
+            UpdateDownloadHub.release?.let { rawState = UpdateState.Available(it) }
+            if (manual) hiddenAtFinish = null
+            return
+        }
         checkJob?.cancel()
         checkJob = scope.launch {
-            state = UpdateState.Loading
+            rawState = UpdateState.Loading
             try {
                 val release = manager.checkForUpdate(channel = updateChannel, forceShow = manual)
-                state = if (release != null) {
+                rawState = if (release != null) {
+                    hiddenAtFinish = null
                     if (manager.getApkFile(release) != null) {
-                        downloadProgress = 100f
+                        localProgress = 100f
                         UpdateState.ReadyToInstall(release)
                     } else {
                         val existingProgress = manager.getExistingProgress(release)
-                        if (existingProgress > 0f) downloadProgress = existingProgress
+                        if (existingProgress > 0f) localProgress = existingProgress
+                        resolveSize(release)
                         UpdateState.Available(release)
                     }
                 } else if (manual) {
@@ -100,31 +207,26 @@ class UpdateController internal constructor(
                 throw cancelled
             } catch (t: Exception) {
                 Log.w("XmdUpdate", "Update check failed.", t)
-                state = if (manual) UpdateState.Error(t.message?.takeIf { it.isNotBlank() }) else UpdateState.Idle
+                rawState = if (manual) UpdateState.Error(t.message?.takeIf { it.isNotBlank() }) else UpdateState.Idle
+            }
+        }
+    }
+
+    private fun resolveSize(release: XmdRelease) {
+        if (manager.selectApkAsset(release)?.size?.let { it > 0L } == true) return
+        scope.launch {
+            val size = manager.fetchApkSize(release)
+            if (size > 0L) {
+                resolvedSize = size
+                resolvedSizeTag = release.tagName
             }
         }
     }
 
     fun downloadUpdate(release: XmdRelease) {
         if (isDownloading) return
-        downloadError = null
-        scope.launch {
-            isDownloading = true
-            try {
-                manager.downloadUpdate(release).collect { progress -> downloadProgress = progress }
-                isDownloading = false
-                downloadError = null
-                state = UpdateState.ReadyToInstall(release)
-            } catch (cancelled: CancellationException) {
-                isDownloading = false
-                throw cancelled
-            } catch (t: Exception) {
-                Log.w("XmdUpdate", "Update download failed.", t)
-                isDownloading = false
-                downloadError = t.message?.takeIf { it.isNotBlank() } ?: "Download failed"
-                state = UpdateState.Available(release)
-            }
-        }
+        hiddenAtFinish = null
+        UpdateDownloadHub.start(manager, release, downloadProgress)
     }
 
     fun installUpdate(release: XmdRelease) {
@@ -138,30 +240,41 @@ class UpdateController internal constructor(
         appContext.startActivity(intent)
     }
 
+    /** Sheet closed. Mid-download this only hides the sheet (the download carries on); otherwise it discards the update. */
     fun dismiss() {
+        if (isDownloading) {
+            hiddenAtFinish = UpdateDownloadHub.finishCount
+            return
+        }
         manager.clearCache()
-        downloadProgress = 0f
-        downloadError = null
-        state = UpdateState.Idle
+        UpdateDownloadHub.reset()
+        localProgress = 0f
+        rawState = UpdateState.Idle
     }
 
     /** Clears a transient NoUpdate/Error status once the UI has shown it. */
     fun dismissStatus() {
-        if (state == UpdateState.NoUpdate || state is UpdateState.Error) {
-            state = UpdateState.Idle
+        if (rawState == UpdateState.NoUpdate || rawState is UpdateState.Error) {
+            rawState = UpdateState.Idle
         }
     }
 
     fun ignoreVersion(version: String) {
+        if (isDownloading) return
         manager.ignoreVersion(version, updateChannel)
         manager.clearCache()
-        downloadProgress = 0f
-        downloadError = null
-        state = UpdateState.Idle
+        UpdateDownloadHub.reset()
+        localProgress = 0f
+        rawState = UpdateState.Idle
     }
 
     /** For the sheet's "Version x -> y" row and Ready/Available labelling. */
-    fun apkSize(release: XmdRelease): Long = manager.selectApkAsset(release)?.size ?: 0L
+    fun apkSize(release: XmdRelease): Long {
+        val listed = manager.selectApkAsset(release)?.size ?: 0L
+        if (listed > 0L) return listed
+        if (resolvedSizeTag == release.tagName && resolvedSize > 0L) return resolvedSize
+        return manager.getApkFile(release)?.length() ?: 0L
+    }
 }
 
 /**

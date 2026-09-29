@@ -60,8 +60,11 @@ fun UpdateSheet(
     val latestVersion = release.previewBuildNumber()?.let { stringResource(R.string.update_sheet_beta_build, it) }
         ?: release.tagName.removePrefix("v").removePrefix("V")
 
+    // Always forwarded: mid-download the controller only hides the sheet and the
+    // download keeps running. Swallowing it here left the sheet animated away but
+    // still composed, with its invisible window eating every touch (frozen app).
     ModalBottomSheet(
-        onDismissRequest = { if (!isDownloading) onDismiss() },
+        onDismissRequest = onDismiss,
     ) {
         Column(
             modifier = Modifier
@@ -94,16 +97,23 @@ fun UpdateSheet(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = release.body.ifBlank { stringResource(R.string.update_sheet_no_notes) },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                val summary = release.commitSummary
+                if (summary != null) {
+                    CommitSummaryText(summary)
+                } else {
+                    Text(
+                        text = release.body.ifBlank { stringResource(R.string.update_sheet_no_notes) },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
-            if (isDownloading || progress > 0f || downloadError != null) {
+            // Once the APK is fully downloaded the sheet is in "ready to install" -- a
+            // leftover "Downloading 100%" bar there is just noise.
+            if (isDownloading || downloadError != null || (progress > 0f && !isInstallReady)) {
                 DownloadProgressSection(progress = progress, errorMessage = downloadError)
             }
 
@@ -136,6 +146,29 @@ fun UpdateSheet(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/** Renders [summarizeCommitMessages] output: unbulleted lines are section titles, "•" lines are changes. */
+@Composable
+private fun CommitSummaryText(summary: String) {
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        summary.lines().forEach { line ->
+            when {
+                line.isBlank() -> Spacer(modifier = Modifier.height(6.dp))
+                line.startsWith("\u2022") -> Text(
+                    text = line,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                else -> Text(
+                    text = line,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
             }
         }
     }

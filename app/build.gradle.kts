@@ -20,6 +20,11 @@ android {
         // against the auto-built manifest's commit_count (see preview.yml).
         buildConfigField("int", "GIT_COUNT", getCommitCount())
 
+        // Commit this build was made from ("" when git isn't available). The
+        // Preview updater diffs it against the newest preview's commit to
+        // summarise what changed in the update sheet's "What's new".
+        buildConfigField("String", "GIT_SHA", "\"${getCommitSha()}\"")
+
         // Run number of the preview.yml workflow run that built this APK (0 for
         // every other build). The Preview update channel compares it with the
         // newest successful run of that workflow.
@@ -228,6 +233,10 @@ fun getCommitCount(): String =
 // Must stay a plain integer: it is emitted as `int PREVIEW_RUN` into BuildConfig.
 fun getPreviewRun(): String =
     System.getenv("GITHUB_RUN_NUMBER")?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) } ?: "0"
+
+// Emitted as a quoted String into BuildConfig, so only a plain 40-char hex sha is allowed through.
+fun getCommitSha(): String =
+    runCommand("git rev-parse HEAD")?.takeIf { it.length == 40 && it.all { c -> c.isDigit() || c in 'a'..'f' } } ?: ""
 
 fun runCommand(command: String): String? =
     try {

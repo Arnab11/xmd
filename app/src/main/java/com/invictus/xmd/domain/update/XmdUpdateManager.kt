@@ -48,6 +48,8 @@ data class XmdRelease(
     /** Auto preview only: run number of the preview.yml workflow run that built it. */
     val commitCount: Int? = null,
     val commitSha: String? = null,
+    /** Preview only: user-facing summary of the commits since this build (see [summarizeCommitMessages]); null when unavailable. */
+    val commitSummary: String? = null,
 )
 
 class CheckFailedException(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -100,52 +102,83 @@ class XmdUpdateManager(context: Context) {
         if (selectApkAsset(release) == null) {
             throw CheckFailedException("No compatible APK in ${release.tagName}")
         }
+        if (channel == Settings.UpdateChannel.PREVIEW && release.commitSha != null) {
+            val summary = previewCommitSummary(release.commitSha)
+            if (summary != null) return@withContext release.copy(commitSummary = summary)
+        }
         release
     }
 
-    fun ignoreVersion(version: String, channel: Settings.UpdateChannel) {
-        prefs.edit().putString(ignoredVersionKey(channel), version).apply()
-    }
-
-    private fun ignoredVersionKey(channel: Settings.UpdateChannel): String =
-        "ignored_version_${channel.name.lowercase()}"
-
-    fun selectApkAsset(release: XmdRelease): UpdateAsset? =
-        selectXmdApkAsset(release.assets, BuildConfig.FLAVOR, Build.SUPPORTED_ABIS.toList())
-
-    fun downloadUpdate(release: XmdRelease): Flow<Float> {
-        val asset = selectApkAsset(release) ?: throw IOException("No compatible APK asset found")
-        return downloadApkParallel(asset.downloadUrl, File(updatesDir, asset.name), asset.name, asset.size)
-    }
-
-    fun getApkFile(release: XmdRelease): File? {
-        val asset = selectApkAsset(release) ?: return null
-        val destination = File(updatesDir, asset.name)
-        val hasParts = updatesDir.listFiles()?.any { it.name.startsWith("${asset.name}.part") } == true
-        return if (destination.exists() && destination.length() > 0L && !hasParts) destination else null
-    }
-
-    fun getExistingProgress(release: XmdRelease): Float {
-        val asset = selectApkAsset(release) ?: return 0f
-        val destination = File(updatesDir, asset.name)
-        if (destination.exists() && destination.length() > 0L) return 100f
-        if (asset.size <= 0L) return 0f
-        val partBytes = updatesDir.listFiles()
-            ?.filter { it.name.startsWith("${asset.name}.part") }
-            ?.sumOf { it.length() } ?: 0L
-        if (partBytes > 0L) {
-            return ((partBytes.toFloat() / asset.size.toFloat()) * 100f).coerceIn(0f, 99f)
-        }
-        return 0f
-    }
-
-    fun clearCache() {
-        updatesDir.listFiles()?.forEach { it.delete() }
-        // APKs the pre-manager updater left directly in cacheDir.
-        appContext.cacheDir.listFiles()?.forEach {
-            if (it.isFile && it.name.startsWith("Xmd-") && it.name.endsWith(".apk")) it.delete()
+    /**
+     * Size of the APK for [release]: the feed's own size when it has one, else
+     * (auto previews list sizes as 0) the server's Content-Length via HEAD. 0 if unknown.
+     */
+    suspend fun fetchApkSize(release: XmdRelease): Long = withContext(Dispatchers.IO) {
+        val asset = selectApkAsset(release) ?: return@withContext 0L
+        if (asset.size > 0L) return@withContext asset.size
+        try {
+            val request = Request.Builder().url(asset.downloadUrl).head().header("User-Agent", userAgent()).build()
+            apiClient.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.header("Content-Length")?.toLongOrNull() ?: 0L else 0L
+            }
+        } catch (_: Exception) {
+            0L
         }
     }
+
+    // ---- Preview "What's new": commits since this build, summarised --------
+
+    private suspend fun previewCommitSummary(headSha: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val baseSha = BuildConfig.GIT_SHA.takeIf { it.isNotBlank() } ?: lookupPreviewRunSha(BuildConfig.PREVIEW_RUN)
+            val fromCompare = if (baseSha != null && !baseSha.equals(headSha, ignoreCase = true)) {
+                fetchCompareMessages(baseSha, headSha)
+            } else {
+                null
+            }
+            summarizeCommitMessages(fromCompare ?: fetchRecentMessages(headSha))
+        } catch (e: Exception) {
+            Log.w(Tag, "Could not build the preview change summary.", e)
+            null
+        }
+    }
+
+    /** head_sha of the successful preview.yml run [runNumber] -- for builds that predate BuildConfig.GIT_SHA. */
+    private fun lookupPreviewRunSha(runNumber: Int): String? {
+        if (runNumber <= 0) return null
+        val url = PreviewRunsUrl.removeSuffix("&per_page=1") + "&per_page=100"
+        return commitsClient.newCall(releaseRequest(url)).execute().use { response ->
+            if (!response.isSuccessful) return@use null
+            val body = response.body?.string() ?: return@use null
+            val runs = JSONObject(body).optJSONArray("workflow_runs") ?: return@use null
+            (0 until runs.length())
+                .mapNotNull { runs.optJSONObject(it) }
+                .firstOrNull { it.optInt("run_number", -1) == runNumber }
+                ?.optString("head_sha")
+                ?.ifBlank { null }
+        }
+    }
+
+    /** Commit messages between [base] and [head], newest first; null if GitHub can't compare them (e.g. rewritten history). */
+    private fun fetchCompareMessages(base: String, head: String): List<String>? =
+        commitsClient.newCall(releaseRequest("https://api.github.com/repos/$Repo/compare/$base...$head")).execute().use { response ->
+            if (!response.isSuccessful) return@use null
+            val body = response.body?.string() ?: return@use null
+            val commits = JSONObject(body).optJSONArray("commits") ?: return@use null
+            (0 until commits.length())
+                .mapNotNull { commits.optJSONObject(it)?.optJSONObject("commit")?.optString("message") }
+                .asReversed()
+        }
+
+    /** Fallback when there is no base to compare against: the latest commits leading to [head]. */
+    private fun fetchRecentMessages(head: String): List<String> =
+        commitsClient.newCall(releaseRequest("https://api.github.com/repos/$Repo/commits?sha=$head&per_page=15")).execute().use { response ->
+            if (!response.isSuccessful) return@use emptyList()
+            val body = response.body?.string() ?: return@use emptyList()
+            val commits = JSONArray(body)
+            (0 until commits.length())
+                .mapNotNull { commits.optJSONObject(it)?.optJSONObject("commit")?.optString("message") }
+        }
 
     // ---- Network: release feeds ------------------------------------------
 
@@ -498,6 +531,10 @@ class XmdUpdateManager(context: Context) {
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
             .followRedirects(true)
+            .build()
+        /** Change-summary lookups are optional garnish: never let them hold the sheet up for long. */
+        val commitsClient: OkHttpClient = apiClient.newBuilder()
+            .callTimeout(6, TimeUnit.SECONDS)
             .build()
         val downloadClient: OkHttpClient = OkHttpClient.Builder()
             .dispatcher(Dispatcher().apply {

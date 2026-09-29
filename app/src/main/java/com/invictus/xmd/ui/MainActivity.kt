@@ -708,7 +708,7 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                     is com.invictus.xmd.domain.update.UpdateState.ReadyToInstall -> updateState.release
                     else -> null
                 }
-                if (updateRelease != null) {
+                if (updateRelease != null && updateController.sheetVisible) {
                     val isInstallReady =
                         updateState is com.invictus.xmd.domain.update.UpdateState.ReadyToInstall
                     com.invictus.xmd.ui.update.UpdateSheet(

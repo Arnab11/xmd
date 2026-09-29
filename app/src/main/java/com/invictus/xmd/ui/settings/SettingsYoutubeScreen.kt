@@ -330,14 +330,23 @@ fun SettingsYoutubeScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         YtDlpManager.SPONSORBLOCK_CATEGORIES.chunked(3).forEach { rowCategories ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Three equal-width chips per row so they sit side by side
+                            // instead of each stretching across the card; a short last
+                            // row is padded with empty weight so its chips keep the same width.
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
                                 rowCategories.forEach { category ->
                                     AppFilterChip(
+                                        modifier = Modifier.weight(1f),
                                         label = category.replace('_', ' ').replaceFirstChar { it.uppercase() },
                                         selected = category in sponsorBlockCategories,
                                         onClick = { onSponsorBlockCategoryToggled(category) },
+                                        wrapLongLabel = true,
                                     )
                                 }
+                                repeat(3 - rowCategories.size) { Spacer(Modifier.weight(1f)) }
                             }
                         }
                     }
