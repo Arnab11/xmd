@@ -75,7 +75,31 @@ class DownloadService : LifecycleService() {
         private const val NOTIFICATION_ID = 42
         private const val DATA_LIMIT_NOTIFICATION_ID = 43
         private const val BETWEEN_CLAIM_DELAY_MS = 500L
-        private const val MAX_AUTO_RETRIES = 3
+        private const val MAX_AUTO_RETRIES = 5
+        private const val MAX_AUTO_RETRY_DELAY_MS = 30_000L
+
+        /** Exponential backoff for auto-retry attempt [attempt] (1-based):
+         *  2s, 4s, 8s, 16s, 30s (capped). Gives a flaky link real time to
+         *  recover instead of hammering it 2-6 seconds apart. */
+        private fun autoRetryDelayMs(attempt: Int): Long =
+            minOf(2_000L shl (attempt - 1).coerceIn(0, 10), MAX_AUTO_RETRY_DELAY_MS)
+
+        private val YOUTUBE_NETWORK_ERROR_MARKERS = listOf(
+            "timed out", "timeout", "connection reset", "connection aborted",
+            "connection refused", "remote end closed", "incomplete read",
+            "temporary failure in name resolution", "network is unreachable",
+            "unable to connect", "urlopen error", "transporterror", "http error 5",
+        )
+
+        /** yt-dlp surfaces network trouble as text in its error, not as an
+         *  IOException -- match the transient ones (timeouts, resets, DNS,
+         *  5xx) and leave permanent failures (private/removed video, 403/404,
+         *  age gate) alone so they still fail straight away. */
+        private fun isRetryableYoutubeError(e: Throwable): Boolean {
+            if (e is IOException) return true
+            val message = e.message.orEmpty().lowercase()
+            return YOUTUBE_NETWORK_ERROR_MARKERS.any { it in message }
+        }
         private const val NOTIFY_THROTTLE_MS = 500L
         private const val ETA_HOLD_MS = 1_000L
 
@@ -673,7 +697,7 @@ class DownloadService : LifecycleService() {
      * almost nothing (temp-then-move, byte progress, Content-Disposition
      * probing) actually applies to it. Full-flavor only -- see YtDlpManager.
      */
-    private suspend fun downloadYoutube(item: QueueItem) {
+    private suspend fun downloadYoutube(item: QueueItem, attempt: Int = 0) {
         val itemId = item.id
         val formatSelector = item.mediaFormatSelector
         val formatLabel = item.mediaFormatLabel
@@ -711,6 +735,10 @@ class DownloadService : LifecycleService() {
             titleHint = ytTitle,
         )
 
+        // Set in the catch below when a transient network failure is eligible
+        // for auto-retry; acted on after the finally (a delay can't run inside
+        // the synchronized block).
+        var retryYoutube = false
         try {
             val customName = item.fileName?.takeUnless { it.isBlank() || it.startsWith("YouTube (") || it == "YouTube Video" }
             val file = withContext(Dispatchers.IO) {
@@ -721,6 +749,9 @@ class DownloadService : LifecycleService() {
                     processId = itemId,
                     context = this@DownloadService,
                     customFileName = customName,
+                    // A retry keeps yt-dlp's partial files so it resumes
+                    // instead of starting the whole video over.
+                    keepPartial = attempt > 0,
                     sponsorBlockMode = item.sponsorBlockMode,
                     sponsorBlockCategories = item.sponsorBlockCategories
                         .split(',')
@@ -799,6 +830,9 @@ class DownloadService : LifecycleService() {
                         Settings.NETWORK_WAIT_MARKER,
                         resetMediaProgress = true,
                     )
+                    Settings.autoRetryEnabled() && attempt < MAX_AUTO_RETRIES && isRetryableYoutubeError(e) -> {
+                        retryYoutube = true
+                    }
                     else -> {
                         val cleanMsg = e.message?.let { msg -> ErrorUtils.cleanErrorText(msg).takeIf { it.isNotBlank() } }
                         QueueRepository.markFailed(
@@ -814,6 +848,20 @@ class DownloadService : LifecycleService() {
                 youtubeStopReasons.remove(itemId)
             }
             updateNotification()
+        }
+
+        if (retryYoutube) {
+            val next = attempt + 1
+            QueueRepository.markRetrying(itemId, "Network error — retrying ($next/$MAX_AUTO_RETRIES)…")
+            updateNotification()
+            kotlinx.coroutines.delay(autoRetryDelayMs(next))
+
+            // Cancelled during the wait: ACTION_CANCEL_* already set the item to
+            // FAILED, so don't restart a download the user gave up on.
+            val stillPending = QueueRepository.current().firstOrNull { it.id == itemId }
+            if (stillPending == null || stillPending.status != ItemStatus.RETRYING) return
+            QueueRepository.markDownloading(itemId)
+            downloadYoutube(item, next)
         }
     }
 
@@ -1052,7 +1100,7 @@ class DownloadService : LifecycleService() {
                         "Network error — retrying ($attempt/$MAX_AUTO_RETRIES)…",
                     )
                     updateNotification()
-                    kotlinx.coroutines.delay(2_000L * attempt) // 2s, 4s, 6s backoff
+                    kotlinx.coroutines.delay(autoRetryDelayMs(attempt))
 
                     // Cancel during the wait (no live engine to interrupt at that
                     // point) is handled by ACTION_CANCEL_ITEM/ALL setting the item

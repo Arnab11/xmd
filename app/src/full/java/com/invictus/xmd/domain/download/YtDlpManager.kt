@@ -660,6 +660,10 @@ object YtDlpManager {
         processId: String,
         context: Context,
         customFileName: String? = null,
+        // True on an auto-retry: keep the previous attempt's partial files in the
+        // temp dir so yt-dlp's own --continue resumes them, instead of wiping
+        // it and re-downloading from zero.
+        keepPartial: Boolean = false,
         sponsorBlockMode: SponsorBlockMode = SponsorBlockMode.OFF,
         sponsorBlockCategories: Set<String> = emptySet(),
         // Video only (see the `!option.isAudioOnly` guard below) -- an audio
@@ -674,7 +678,7 @@ object YtDlpManager {
         outputDir.mkdirs()
 
         val tempDir = File(context.cacheDir, "ytdlp/$processId")
-        tempDir.deleteRecursively()
+        if (!keepPartial) tempDir.deleteRecursively()
         tempDir.mkdirs()
 
         val request = YoutubeDLRequest(url)

@@ -121,7 +121,7 @@ object Settings {
         _amoledModeFlow.value = enabled
     }
 
-    fun connectionsPerDownload(): Int = prefs.getInt(KEY_CONNECTIONS, 16)
+    fun connectionsPerDownload(): Int = prefs.getInt(KEY_CONNECTIONS, 8)
     fun setConnectionsPerDownload(value: Int) {
         prefs.edit().putInt(KEY_CONNECTIONS, value).apply()
     }
@@ -137,8 +137,9 @@ object Settings {
         prefs.edit().putInt(KEY_MAX_CONCURRENT, value.coerceIn(1, 5)).apply()
     }
 
-    /** Auto-retry a failed download up to 3 times when it fails on a plain
-     *  network error (timeout, connection dropped, DNS failure etc.) --
+    /** Auto-retry a failed download up to 5 times (exponential backoff) when it
+     *  fails on a plain network error (timeout, connection dropped, DNS
+     *  failure etc.) -- direct and YouTube downloads;
      *  never for server/link-level failures like an expired share link,
      *  those still need a manual Retry. Default OFF. */
     fun autoRetryEnabled(): Boolean = prefs.getBoolean(KEY_AUTO_RETRY, false)

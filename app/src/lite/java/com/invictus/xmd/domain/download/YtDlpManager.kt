@@ -98,6 +98,7 @@ object YtDlpManager {
         processId: String,
         context: Context,
         customFileName: String? = null,
+        keepPartial: Boolean = false,
         sponsorBlockMode: SponsorBlockMode = SponsorBlockMode.OFF,
         sponsorBlockCategories: Set<String> = emptySet(),
         embedSubtitles: Boolean = false,

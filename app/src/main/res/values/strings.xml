@@ -249,7 +249,7 @@
     <string name="settings_speed_limit">Speed Limit per Download (KB/s, 0 = Unlimited)</string>
     <string name="settings_max_concurrent">Maximum Simultaneous Downloads (1–5)</string>
     <string name="settings_auto_retry">Auto Retry on Network Error</string>
-    <string name="settings_auto_retry_hint">Retry network failures up to 3 times.</string>
+    <string name="settings_auto_retry_hint">Retry timeouts and dropped connections up to 5 times, waiting a little longer each time (direct and YouTube downloads).</string>
     <string name="settings_default_location">Default Save Location</string>
     <string name="settings_default_location_hint">Where new downloads are saved unless a custom folder is picked for that download.</string>
     <string name="settings_disable_categorization">Disable Folder Categorization</string>
