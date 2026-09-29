@@ -560,11 +560,20 @@ object YtDlpManager {
 
     fun isReady(): Boolean = initialized
 
-    /** One progress tick, parsed from yt-dlp's own stdout rather than trusting the library's percent-only callback alone (see parseProgressLine). */
+    /**
+     * One progress tick, parsed from yt-dlp's own stdout rather than trusting the library's percent-only callback alone (see parseProgressLine).
+     *
+     * On a live download-progress line [statusText] is null and the structured
+     * [bytesDone]/[bytesTotal]/[speedBps] fields are set instead, so the UI can format
+     * size, speed and time-left exactly like a direct download. On stage/warning lines
+     * [statusText] holds the label ("Merging video + audio…") and the byte fields are -1.
+     */
     data class DownloadProgress(
         val percent: Int,
-        /** e.g. "12.4MiB/s, ETA 00:32" -- null once nothing matches (postprocessing stages: merging, extracting audio, embedding thumbnail, etc). */
-        val statusText: String?
+        val statusText: String?,
+        val bytesDone: Long = -1L,
+        val bytesTotal: Long = -1L,
+        val speedBps: Double = 0.0,
     )
 
     // Matches yt-dlp's standard download-progress line, e.g.:
@@ -574,7 +583,17 @@ object YtDlpManager {
     private val DOWNLOAD_PERCENT = Regex("""\[download\]\s+([\d.]+)%""")
     private val DOWNLOAD_SIZE = Regex("""\bof\s+(~?\s*[\d.]+\s*[a-zA-Z]+)""")
     private val DOWNLOAD_SPEED = Regex("""\bat\s+([\d.]+\s*[a-zA-Z/]+)""")
-    private val DOWNLOAD_ETA = Regex("""\bETA\s+(\S+)""")
+
+    /** "5.23GiB" / "~ 5.23GiB" / "9.77MiB/s" -> bytes (or bytes/sec). Null if unparseable. */
+    private val SIZE_TOKEN = Regex("""([\d.]+)\s*([KMGT]?)i?B""", RegexOption.IGNORE_CASE)
+    private fun parseSizeToBytes(text: String?): Long? {
+        val m = SIZE_TOKEN.find(text ?: return null) ?: return null
+        val value = m.groupValues[1].toDoubleOrNull() ?: return null
+        val pow = when (m.groupValues[2].uppercase()) {
+            "K" -> 1; "M" -> 2; "G" -> 3; "T" -> 4; else -> 0
+        }
+        return (value * Math.pow(1024.0, pow.toDouble())).toLong()
+    }
 
     // Postprocessing stage markers -- these lines have no percentage at all,
     // so they only feed statusText (percent stays at whatever it last was).
@@ -588,22 +607,20 @@ object YtDlpManager {
         val line = rawLine.replace(ANSI_REGEX, "").trim()
         val percentMatch = DOWNLOAD_PERCENT.find(line)
         if (percentMatch != null) {
-            val percent = percentMatch.groupValues[1].toFloatOrNull()?.toInt()?.coerceIn(0, 100) ?: lastPercent
-            val size = DOWNLOAD_SIZE.find(line)?.groupValues?.get(1)?.trim()
-            val speed = DOWNLOAD_SPEED.find(line)?.groupValues?.get(1)?.trim()?.takeUnless { it.startsWith("Unknown", ignoreCase = true) }
-            val eta = DOWNLOAD_ETA.find(line)?.groupValues?.get(1)?.trim()?.takeUnless { it.equals("Unknown", ignoreCase = true) }
-            val status = buildString {
-                if (!speed.isNullOrEmpty()) append(speed)
-                if (!size.isNullOrEmpty()) {
-                    if (isNotEmpty()) append(" · ")
-                    append(size)
-                }
-                if (!eta.isNullOrEmpty()) {
-                    if (isNotEmpty()) append(" · ")
-                    append("ETA $eta")
-                }
-            }.ifEmpty { null }
-            return DownloadProgress(percent, status)
+            val pctFloat = percentMatch.groupValues[1].toFloatOrNull()
+            val percent = pctFloat?.toInt()?.coerceIn(0, 100) ?: lastPercent
+            val total = parseSizeToBytes(DOWNLOAD_SIZE.find(line)?.groupValues?.get(1))?.takeIf { it > 0 }
+            val speed = parseSizeToBytes(
+                DOWNLOAD_SPEED.find(line)?.groupValues?.get(1)?.takeUnless { it.startsWith("Unknown", ignoreCase = true) }
+            )?.toDouble() ?: 0.0
+            val done = if (total != null && pctFloat != null) (total * (pctFloat / 100.0)).toLong().coerceIn(0L, total) else -1L
+            return DownloadProgress(
+                percent = percent,
+                statusText = null,
+                bytesDone = if (total != null) done else -1L,
+                bytesTotal = total ?: -1L,
+                speedBps = speed,
+            )
         }
         if (line.startsWith("[download] Destination:")) {
             return DownloadProgress(lastPercent.coerceAtLeast(0), "Starting download…")
@@ -791,17 +808,40 @@ object YtDlpManager {
         }
 
         var lastPercent = 0
+        // yt-dlp downloads video and audio as separate streams and reports each
+        // one's size/percent on its own. Keep bytes cumulative across streams so
+        // the size never resets to 0 when the audio stream starts (only the total
+        // grows, by the audio size, once that stream begins).
+        var streamOffset = 0L
+        var streamTotal = 0L
+        var hasByteProgress = false
         // Correct signature: execute(request, processId, callback) with
         // callback = (progress: Float, etaInSeconds: Long, line: String) -> Unit.
         // The library's own `progress` float is used only as a last-resort
         // fallback (it can be -1/stale during postprocessing) -- the raw
         // `line` is what actually drives percent+status via parseProgressLine.
         val response = YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
+            if (line.replace(ANSI_REGEX, "").trim().startsWith("[download] Destination:")) {
+                streamOffset += streamTotal
+                streamTotal = 0L
+            }
             val parsed = parseProgressLine(line, lastPercent)
             if (parsed != null) {
-                lastPercent = parsed.percent
-                onProgress(parsed)
-            } else if (progress >= 0f) {
+                var out = parsed
+                if (parsed.bytesTotal > 0) {
+                    streamTotal = parsed.bytesTotal
+                    val done = streamOffset + parsed.bytesDone.coerceAtLeast(0L)
+                    val total = streamOffset + parsed.bytesTotal
+                    hasByteProgress = true
+                    out = parsed.copy(
+                        percent = (done * 100 / total).toInt().coerceIn(0, 100),
+                        bytesDone = done,
+                        bytesTotal = total,
+                    )
+                }
+                lastPercent = out.percent
+                onProgress(out)
+            } else if (progress >= 0f && !hasByteProgress) {
                 val fallbackPercent = progress.toInt().coerceIn(0, 100)
                 lastPercent = fallbackPercent
                 onProgress(DownloadProgress(fallbackPercent, "Downloading…"))

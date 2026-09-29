@@ -5,9 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.net.wifi.WifiManager
-import android.os.Build
-import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import androidx.lifecycle.LifecycleService
@@ -80,11 +77,6 @@ class DownloadService : LifecycleService() {
         private const val BETWEEN_CLAIM_DELAY_MS = 500L
         private const val MAX_AUTO_RETRIES = 5
         private const val MAX_AUTO_RETRY_DELAY_MS = 30_000L
-        private const val DOWNLOAD_LOCK_TAG = "xmd:downloads"
-        // Safety net: even if a release path is ever missed, the wake lock
-        // drops on its own instead of draining the battery indefinitely.
-        // Re-acquired (timeout reset) every time workers are topped up.
-        private const val WAKE_LOCK_TIMEOUT_MS = 6 * 60 * 60 * 1000L
 
         /** Exponential backoff for auto-retry attempt [attempt] (1-based):
          *  2s, 4s, 8s, 16s, 30s (capped). Gives a flaky link real time to
@@ -266,46 +258,6 @@ class DownloadService : LifecycleService() {
     // downloads are still in flight.
     private val activeWorkers = java.util.concurrent.atomic.AtomicInteger(0)
 
-    // Held only while at least one worker loop is alive (i.e. something is
-    // actually downloading or in an auto-retry wait). Without them the CPU can
-    // doze and Wi-Fi can drop into power-save once the screen is off, which
-    // stalls sockets and surfaces as timeouts.
-    private var wakeLock: PowerManager.WakeLock? = null
-    private var wifiLock: WifiManager.WifiLock? = null
-
-    private fun acquireDownloadLocks() {
-        try {
-            val wl = wakeLock ?: getSystemService(PowerManager::class.java)
-                ?.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, DOWNLOAD_LOCK_TAG)
-                ?.apply { setReferenceCounted(false) }
-                ?.also { wakeLock = it }
-            // Not reference-counted, so acquiring again just resets the timeout.
-            wl?.acquire(WAKE_LOCK_TIMEOUT_MS)
-
-            val fl = wifiLock ?: applicationContext.getSystemService(WifiManager::class.java)
-                ?.createWifiLock(
-                    if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY
-                    else @Suppress("DEPRECATION") WifiManager.WIFI_MODE_FULL_HIGH_PERF,
-                    DOWNLOAD_LOCK_TAG,
-                )
-                ?.apply { setReferenceCounted(false) }
-                ?.also { wifiLock = it }
-            if (fl != null && !fl.isHeld) fl.acquire()
-        } catch (e: Exception) {
-            // Locks are a reliability boost, never a reason to fail a download.
-            android.util.Log.w("DownloadService", "Couldn't acquire download locks", e)
-        }
-    }
-
-    private fun releaseDownloadLocks() {
-        try {
-            wakeLock?.takeIf { it.isHeld }?.release()
-            wifiLock?.takeIf { it.isHeld }?.release()
-        } catch (e: Exception) {
-            android.util.Log.w("DownloadService", "Couldn't release download locks", e)
-        }
-    }
-
     private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
     private var internetCallback: android.net.ConnectivityManager.NetworkCallback? = null
 
@@ -324,7 +276,6 @@ class DownloadService : LifecycleService() {
     }
 
     override fun onDestroy() {
-        releaseDownloadLocks()
         networkCallback?.let { NetworkMonitor.unregister(this, it) }
         networkCallback = null
         internetCallback?.let { NetworkMonitor.unregister(this, it) }
@@ -698,18 +649,12 @@ class DownloadService : LifecycleService() {
     private fun topUpWorkers() {
         val maxWorkers = Settings.maxConcurrentDownloads().coerceIn(1, 5)
         val toLaunch = maxWorkers - activeWorkers.get()
-        if (toLaunch <= 0) {
-            // Workers already at max -- still refresh the wake lock's timeout.
-            if (activeWorkers.get() > 0) acquireDownloadLocks()
-            return
-        }
-        acquireDownloadLocks()
+        if (toLaunch <= 0) return
         repeat(toLaunch) {
             activeWorkers.incrementAndGet()
             lifecycleScope.launch(Dispatchers.IO) {
                 worker()
                 if (activeWorkers.decrementAndGet() == 0) {
-                    releaseDownloadLocks()
                     withContext(Dispatchers.Main) {
                         ServiceCompat.stopForeground(this@DownloadService, ServiceCompat.STOP_FOREGROUND_REMOVE)
                         stopSelf()
@@ -818,7 +763,14 @@ class DownloadService : LifecycleService() {
                         .filter { it.isNotBlank() }
                         .toSet(),
                 ) { progress ->
-                    QueueRepository.reportYoutubeProgress(itemId, progress.percent, progress.statusText)
+                    QueueRepository.reportYoutubeProgress(
+                        itemId,
+                        progress.percent,
+                        progress.statusText,
+                        progress.bytesDone,
+                        progress.bytesTotal,
+                        progress.speedBps,
+                    )
                     updateNotificationThrottled()
                 }
             }
@@ -827,6 +779,7 @@ class DownloadService : LifecycleService() {
                 filePath = file.absolutePath,
                 fileName = file.name,
                 progressPercent = 100,
+                finalBytes = file.length().takeIf { it > 0 },
             )
         } catch (e: Throwable) {
             // Throwable (not just Exception) for the same reason as
@@ -1275,10 +1228,9 @@ class DownloadService : LifecycleService() {
             etaHoldCache.keys.retainAll(liveIds)
         }
 
-        // yt-dlp reports a plain 0-100% instead of bytes -- excluded from the
-        // byte-based sums below (mixing the two would produce meaningless
-        // totals) and handled as its own case in the single-item branch.
-        val byteActive = active.filter { it.platform != MediaPlatform.YOUTUBE }
+        // YouTube items only join the byte-based sums below once yt-dlp has
+        // reported a size (before that they only have a plain 0-100%).
+        val byteActive = active.filter { it.platform != MediaPlatform.YOUTUBE || it.bytesTotal > 0 }
         val totalDone = byteActive.sumOf { it.bytesDone }
         val totalSize = byteActive.sumOf { it.bytesTotal }
         val totalSpeed = byteActive.sumOf { it.speedBps }
@@ -1307,6 +1259,9 @@ class DownloadService : LifecycleService() {
                 text = when {
                     item.status == ItemStatus.PAUSED -> "Paused — " + buildDetailLine(item.bytesDone, item.bytesTotal, 0.0)
                     item.status == ItemStatus.RETRYING -> "${item.error ?: "Retrying…"}"
+                    item.platform == MediaPlatform.YOUTUBE && item.mediaStatusText.isNullOrBlank() && item.bytesTotal > 0 ->
+                        buildDetailLine(item.bytesDone, item.bytesTotal, item.speedBps, etaHoldKey = item.id) +
+                            (item.mediaFormatLabel?.let { "  •  $it" } ?: "")
                     item.platform == MediaPlatform.YOUTUBE ->
                         (if (item.progressPercent >= 0) "${item.progressPercent}%" else "Resolving…") +
                             "  •  " + (item.mediaStatusText ?: item.mediaFormatLabel ?: "YouTube")
@@ -1328,7 +1283,7 @@ class DownloadService : LifecycleService() {
                     if (pausedCount > 0) append("  •  $pausedCount paused")
                     if (ytCount > 0) append("  •  $ytCount YouTube")
                 }
-                val relevantByte = relevant.filter { it.platform != MediaPlatform.YOUTUBE }
+                val relevantByte = relevant.filter { it.platform != MediaPlatform.YOUTUBE || it.bytesTotal > 0 }
                 val relevantTotal = relevantByte.sumOf { it.bytesTotal }
                 val relevantDone = relevantByte.sumOf { it.bytesDone }
                 barPercent = if (relevantTotal > 0) ((relevantDone * 100) / relevantTotal).toInt() else 0

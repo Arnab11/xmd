@@ -88,7 +88,10 @@ object YtDlpManager {
 
     data class DownloadProgress(
         val percent: Int,
-        val statusText: String?
+        val statusText: String?,
+        val bytesDone: Long = -1L,
+        val bytesTotal: Long = -1L,
+        val speedBps: Double = 0.0,
     )
 
     fun download(

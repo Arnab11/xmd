@@ -1276,7 +1276,9 @@ private fun statusText(item: QueueItem, speedEta: String?): String {
         val label = if (item.platform == MediaPlatform.YOUTUBE) item.mediaFormatLabel?.let { " • $it" } else null
         buildString {
             append(sizePart)
-            if (speedEta != null) {
+            // A YouTube stage label ("Merging…") replaces the size, so no speed/ETA next to it.
+            val ytStage = item.platform == MediaPlatform.YOUTUBE && !item.mediaStatusText.isNullOrBlank()
+            if (speedEta != null && !ytStage) {
                 append(" • ")
                 append(speedEta)
             }

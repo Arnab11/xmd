@@ -261,6 +261,7 @@ object QueueRepository {
             error = null,
             progressPercent = if (resetMediaProgress) -1 else it.progressPercent,
             mediaStatusText = if (resetMediaProgress) null else it.mediaStatusText,
+            speedBps = if (resetMediaProgress) 0.0 else it.speedBps,
         )
     }
 
@@ -274,6 +275,7 @@ object QueueRepository {
             error = reason,
             progressPercent = if (resetMediaProgress) -1 else it.progressPercent,
             mediaStatusText = if (resetMediaProgress) null else it.mediaStatusText,
+            speedBps = if (resetMediaProgress) 0.0 else it.speedBps,
         )
     }
 
@@ -303,6 +305,7 @@ object QueueRepository {
                     error = error,
                     progressPercent = if (resetMediaProgress) -1 else it.progressPercent,
                     mediaStatusText = if (resetMediaProgress) null else it.mediaStatusText,
+                    speedBps = if (resetMediaProgress) 0.0 else it.speedBps,
                 )
             }
         }
@@ -324,7 +327,19 @@ object QueueRepository {
         it.copy(bytesDone = bytesDone, bytesTotal = bytesTotal, speedBps = speedBps)
     }
 
-    fun reportYoutubeProgress(id: String, percent: Int, statusText: String?) = mutateNonTerminal(id) {
+    /**
+     * [bytesDone]/[bytesTotal] < 0 mean "this tick carries no byte info" (stage or
+     * warning line) -- the previous values are kept so the size doesn't vanish,
+     * while [speedBps] drops to 0 so the speed/time-left text hides.
+     */
+    fun reportYoutubeProgress(
+        id: String,
+        percent: Int,
+        statusText: String?,
+        bytesDone: Long = -1L,
+        bytesTotal: Long = -1L,
+        speedBps: Double = 0.0,
+    ) = mutateNonTerminal(id) {
         if (it.status != ItemStatus.DOWNLOADING) {
             it
         } else {
@@ -332,6 +347,9 @@ object QueueRepository {
                 progressPercent = percent,
                 mediaStatusText = statusText,
                 error = null,
+                bytesDone = if (bytesDone >= 0) bytesDone else it.bytesDone,
+                bytesTotal = if (bytesTotal >= 0) bytesTotal else it.bytesTotal,
+                speedBps = speedBps,
             )
         }
     }
@@ -365,12 +383,18 @@ object QueueRepository {
         filePath: String?,
         fileName: String? = null,
         progressPercent: Int? = null,
+        // Final on-disk size (YouTube): yt-dlp's live totals are per-stream
+        // estimates, so the finished row shows the real file size instead.
+        finalBytes: Long? = null,
     ) {
         val updated = mutate(id) {
             if (it.status != ItemStatus.DOWNLOADING && it.status != ItemStatus.SAVING) {
                 it
             } else {
                 it.copy(
+                    bytesDone = finalBytes ?: it.bytesDone,
+                    bytesTotal = finalBytes ?: it.bytesTotal,
+                    speedBps = if (finalBytes != null) 0.0 else it.speedBps,
                     status = ItemStatus.DONE,
                     fileName = fileName ?: it.fileName,
                     filePath = filePath,
