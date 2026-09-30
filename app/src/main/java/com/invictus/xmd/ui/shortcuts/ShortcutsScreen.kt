@@ -167,7 +167,7 @@ fun ShortcutsScreen(
 
 // ── Grid + drag-to-reorder ───────────────────────────────────────────────
 
-private const val GRID_COLUMNS = 4
+private const val GRID_COLUMNS = 5
 
 /**
  * Hand-rolled drag-to-reorder (no reorderable-grid primitive in the Compose
@@ -317,6 +317,8 @@ private fun Modifier.pointerInputDragReorder(
 // ── Tiles ─────────────────────────────────────────────────────────────────
 
 private val TileShape = RoundedCornerShape(20.dp)
+private val GridTileShape = RoundedCornerShape(15.dp)
+private val GridIconSize = 46.dp
 
 @Composable
 private fun ShortcutTile(
@@ -356,13 +358,13 @@ private fun ShortcutTile(
 
     Column(
         modifier = modifier
-            .padding(horizontal = 4.dp, vertical = 8.dp)
+            .padding(horizontal = 2.dp, vertical = 6.dp)
             .graphicsLayer { scaleX = scale; scaleY = scale },
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Card(
-            modifier = Modifier.size(56.dp),
-            shape = TileShape,
+            modifier = Modifier.size(GridIconSize),
+            shape = GridTileShape,
             colors = CardDefaults.cardColors(containerColor = avatarBg),
             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         ) {
@@ -379,7 +381,7 @@ private fun ShortcutTile(
                     Text(
                         text = title.trim().firstOrNull()?.uppercase() ?: "?",
                         color = avatarFg,
-                        fontSize = 22.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                     )
                 }
@@ -389,23 +391,23 @@ private fun ShortcutTile(
         Text(
             text = title,
             color = MaterialTheme.colorScheme.onSurface,
-            fontSize = 11.sp,
-            lineHeight = 13.sp,
+            fontSize = 10.sp,
+            lineHeight = 12.sp,
             fontWeight = FontWeight.Medium,
             maxLines = if (showHost) 1 else 2,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.width(72.dp),
+            modifier = Modifier.fillMaxWidth(),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
         if (showHost) {
             Text(
                 text = host,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 9.sp,
-                lineHeight = 11.sp,
+                fontSize = 8.sp,
+                lineHeight = 10.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.width(72.dp),
+                modifier = Modifier.fillMaxWidth(),
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center,
             )
         }
@@ -417,15 +419,15 @@ private fun ShortcutTile(
 private fun AddShortcutTile(onClick: (() -> Unit)?) {
     Column(
         modifier = Modifier
-            .padding(8.dp)
+            .padding(horizontal = 2.dp, vertical = 6.dp)
             .then(if (onClick != null) Modifier.combinedClickable(onClick = onClick) else Modifier),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(
             modifier = Modifier
-                .size(56.dp)
-                .background(MaterialTheme.colorScheme.surfaceContainerHigh, TileShape)
-                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, TileShape),
+                .size(GridIconSize)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh, GridTileShape)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, GridTileShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(
@@ -438,9 +440,9 @@ private fun AddShortcutTile(onClick: (() -> Unit)?) {
         Text(
             text = stringResource(R.string.action_add),
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             maxLines = 1,
-            modifier = Modifier.width(64.dp),
+            modifier = Modifier.fillMaxWidth(),
             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
         )
     }

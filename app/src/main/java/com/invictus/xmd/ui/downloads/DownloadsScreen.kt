@@ -92,6 +92,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.saveable.rememberSaveable
 import kotlinx.coroutines.delay
+import com.invictus.xmd.utils.media.MediaProbe
+import com.invictus.xmd.utils.media.MediaInfoProbe
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -1495,6 +1500,12 @@ private fun DownloadInfoDialog(item: QueueItem, onDismiss: () -> Unit) {
         item.bytesDone > 0 -> item.bytesDone
         else -> 0L
     }
+    val probe by produceState<MediaProbe?>(initialValue = null, item.filePath) {
+        val path = item.filePath
+        value = if (path.isNullOrBlank()) null else withContext(Dispatchers.IO) {
+            runCatching { MediaInfoProbe.probe(path) }.getOrNull()
+        }
+    }
     val platformLabel = when (item.platform) {
         com.invictus.xmd.domain.download.MediaPlatform.YOUTUBE -> stringResource(R.string.info_platform_youtube)
         com.invictus.xmd.domain.download.MediaPlatform.DIRECT -> stringResource(R.string.info_platform_direct)
@@ -1511,6 +1522,9 @@ private fun DownloadInfoDialog(item: QueueItem, onDismiss: () -> Unit) {
     val rows = listOf(
         stringResource(R.string.info_file_name) to fileName,
         stringResource(R.string.info_size) to size.takeIf { it > 0 }?.let { formatBytes(it) },
+        stringResource(R.string.info_media_duration) to probe?.durationMs?.let { formatMediaDuration(it) },
+        stringResource(R.string.info_codec) to probe?.codec,
+        stringResource(R.string.info_quality) to probe?.quality,
         stringResource(R.string.info_format) to item.mediaFormatLabel?.takeIf { it.isNotBlank() },
         stringResource(R.string.info_platform) to platformLabel,
         stringResource(R.string.info_category) to item.category.label,
@@ -1562,6 +1576,15 @@ private fun DownloadInfoDialog(item: QueueItem, onDismiss: () -> Unit) {
             }
         },
     )
+}
+
+private fun formatMediaDuration(ms: Long): String {
+    val total = ms / 1000
+    val h = total / 3600
+    val m = (total % 3600) / 60
+    val sec = total % 60
+    return if (h > 0) String.format(java.util.Locale.US, "%d:%02d:%02d", h, m, sec)
+    else String.format(java.util.Locale.US, "%d:%02d", m, sec)
 }
 
 @Composable
