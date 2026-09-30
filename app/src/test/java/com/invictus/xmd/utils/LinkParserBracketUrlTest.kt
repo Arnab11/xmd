@@ -36,4 +36,14 @@ class LinkParserBracketUrlTest {
     fun garbageStillInvalid() {
         assertFalse(LinkParser.isGenericDownloadUrl("uu"))
     }
+
+    @Test
+    fun websiteLinksAreLikelyWebpages() {
+        assertTrue(LinkParser.isLikelyWebpage("https://google.com"))
+        assertTrue(LinkParser.isLikelyWebpage("https://gofile.io/d/abc123"))
+        assertFalse(LinkParser.isLikelyWebpage(url))
+        assertFalse(LinkParser.isLikelyWebpage("https://cdn.example.com/dl?id=5&sig=x"))
+        assertFalse(LinkParser.isLikelyWebpage("https://www.youtube.com/watch?v=abc"))
+        assertFalse(LinkParser.isLikelyWebpage("magnet:?xt=urn:btih:abc"))
+    }
 }

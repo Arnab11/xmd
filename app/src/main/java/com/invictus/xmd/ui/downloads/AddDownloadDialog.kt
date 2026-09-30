@@ -143,6 +143,10 @@ fun AddDownloadDialog(
     onPasteRequest: () -> String?,
     onChangeSaveDir: (onPicked: (String) -> Unit) -> Unit,
     onDismiss: () -> Unit,
+    /** Non-null only for manual entry points: when the typed/pasted link is a
+     *  website (not a file), the Start button becomes "Open in Browser" and
+     *  calls this instead of enqueueing a download. */
+    onOpenInBrowser: ((String) -> Unit)? = null,
     onStart: (
         link: String,
         name: String?,
@@ -248,6 +252,9 @@ fun AddDownloadDialog(
 
     val needsYtDlp = LinkParser.needsYtDlp(link)
     val isGeneric = !LinkParser.isYoutubeLink(link)
+    val isWebpage = remember(link, onOpenInBrowser) {
+        onOpenInBrowser != null && LinkParser.isLikelyWebpage(link)
+    }
     val needsPrepare = remember(link) {
         val trimmed = link.trim()
         trimmed.isNotBlank() && (LinkParser.isShareLink(trimmed) || LinkParser.isFitgirlPage(trimmed))
@@ -1023,7 +1030,9 @@ fun AddDownloadDialog(
                 val startingPlaylistSelection =
                     (playlistPickerOpen || isBarePlaylistLink) && playlistEntriesForStart.isNotEmpty()
                 StartChipButton(onClick = {
-                    if (startingPlaylistSelection) {
+                    if (isWebpage) {
+                        onOpenInBrowser?.invoke(link.trim())
+                    } else if (startingPlaylistSelection) {
                         // One onStart call per selected entry -- reuses the
                         // exact same enqueue path as a single download, just
                         // looped, so no new plumbing was needed in the two
@@ -1082,7 +1091,9 @@ fun AddDownloadDialog(
                         )
                     }
                 }) {
-                    if (needsPrepare) {
+                    if (isWebpage) {
+                        Text(stringResource(R.string.download_dialog_open_in_browser))
+                    } else if (needsPrepare) {
                         Icon(
                             imageVector = Icons.Sync,
                             contentDescription = null,

@@ -792,6 +792,11 @@ class MainActivity : AppCompatActivity(), DownloadsFragment.Callbacks, BrowserFr
                             )
                         },
                         allowPickTorrentFile = state.allowPickTorrentFile,
+                        onOpenInBrowser = if (state.allowPickTorrentFile) { link ->
+                            addDownloadDialogState = null
+                            browserFragment()?.openInNewTab(link)
+                            selectMainDestination(MainDestination.Browser)
+                        } else null,
                         onCopyLink = { text ->
                             if (text.isNotBlank()) {
                                 clipboardManager.setPrimaryClip(

@@ -140,6 +140,23 @@ object LinkParser {
     }
 
     /**
+     * Conservative "this is a website, not a file" check for the Add Download
+     * dialog: a plain webpage link (see [isPlainWebpageLink]) that isn't a
+     * yt-dlp link and looks page-like -- no query string and a last path
+     * segment without a file extension (google.com, gofile.io/d/abc).
+     * Extensionless/tokenized CDN direct links usually carry a query string,
+     * so they keep the normal Start button.
+     */
+    fun isLikelyWebpage(link: String): Boolean {
+        val trimmed = link.trim()
+        if (!isPlainWebpageLink(trimmed) || needsYtDlp(trimmed)) return false
+        val uri = UrlUtils.lenientUri(trimmed) ?: return false
+        if (!uri.rawQuery.isNullOrEmpty()) return false
+        val last = uri.path.orEmpty().trimEnd('/').substringAfterLast('/')
+        return !last.contains('.')
+    }
+
+    /**
      * True for a link received through the system "Share" sheet that should
      * open in xmd's Browser tab: a plain webpage that is NOT something the
      * download flow handles itself (YouTube / Instagram / Facebook / HLS /

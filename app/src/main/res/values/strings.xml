@@ -164,8 +164,6 @@
     <string name="download_settings_title">Download Settings</string>
     <string name="threads_per_download">Threads per download</string>
     <string name="max_download_speed">Max download speed</string>
-    <string name="settings_storage_title">Storage</string>
-    <string name="settings_storage_free_of">%1$s free of %2$s</string>
     <string name="download_dialog_subtitles_title">Subtitles</string>
     <string name="download_dialog_playlist_file_title">Playlist file</string>
     <string name="download_dialog_playlist_file_off">Off</string>
@@ -613,6 +611,7 @@
     <string name="dialog_link_pasted_toast">Link pasted</string>
     <string name="torrent_dialog_cancel">Cancel</string>
     <string name="torrent_dialog_start">Start</string>
+    <string name="download_dialog_open_in_browser">Open in Browser</string>
     <string name="download_dialog_advanced_streams_title">Available Streams</string>
     <string name="download_dialog_advanced_streams_probing">Probing available streams…</string>
     <string name="download_dialog_advanced_streams_empty">No extra streams found</string>
