@@ -60,7 +60,7 @@ object LinkParser {
     )
 
     fun isDirectLink(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         return (uri.scheme == "http" || uri.scheme == "https") && uri.host == DIRECT_HOST
     }
 
@@ -76,7 +76,7 @@ object LinkParser {
      * any content:// URI reaching here is trusted to be one).
      */
     fun isTorrentFileLink(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         if (uri.scheme == "content") return true
         if (uri.scheme != "http" && uri.scheme != "https") return false
         val name = uri.path?.substringAfterLast('/')?.substringBefore('?').orEmpty()
@@ -113,7 +113,7 @@ object LinkParser {
      * in another app's chooser (open it in the Browser tab instead).
      */
     fun hasKnownDownloadExtension(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         val name = uri.path?.substringAfterLast('/').orEmpty()
         val ext = name.substringAfterLast('.', missingDelimiterValue = "").lowercase()
         return ext.isNotEmpty() && ext in KNOWN_DOWNLOAD_EXTENSIONS
@@ -160,7 +160,7 @@ object LinkParser {
     fun isGenericDownloadUrl(link: String): Boolean {
         val trimmed = link.trim()
         if (isTorrentLink(trimmed)) return true
-        val uri = runCatching { URI(trimmed) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(trimmed) ?: return false
         if (uri.scheme != "http" && uri.scheme != "https") return false
         if (uri.host.isNullOrBlank()) return false
         if (isShareLink(link)) return false
@@ -177,18 +177,18 @@ object LinkParser {
     }
 
     fun isShareLink(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         return uri.host in SHARE_HOSTS
     }
 
     fun isFitgirlPage(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         return uri.host in FITGIRL_HOSTS
     }
 
     /** True for a youtube.com/youtu.be link (or music.youtube.com) -- routed to the yt-dlp quality-picker flow instead of a normal resolve. */
     fun isYoutubeLink(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         return uri.host in YOUTUBE_HOSTS
     }
 
@@ -203,7 +203,7 @@ object LinkParser {
      * and only once a video page is actually open.
      */
     fun isYoutubeVideoPage(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         if (uri.host !in YOUTUBE_HOSTS) return false
         if (uri.host == "youtu.be") return uri.path.trim('/').isNotEmpty()
         val path = uri.path.orEmpty()
@@ -212,13 +212,13 @@ object LinkParser {
 
     /** True for an instagram.com link (reel/post/story) -- routed to the yt-dlp quality-picker flow instead of a normal resolve. */
     fun isInstagramLink(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         return uri.host in INSTAGRAM_HOSTS
     }
 
     /** True for a facebook.com/fb.watch/fb.com link (video/reel/post/photo) -- routed to the yt-dlp quality-picker flow instead of a normal resolve. */
     fun isFacebookLink(link: String): Boolean {
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         return uri.host in FACEBOOK_HOSTS
     }
 
@@ -259,7 +259,7 @@ object LinkParser {
      */
     fun isYoutubePlaylistLink(link: String): Boolean {
         if (!isYoutubeLink(link)) return false
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         val query = uri.rawQuery ?: return false
         return query.split('&').any { it.startsWith("list=") && it.length > "list=".length }
     }
@@ -275,7 +275,7 @@ object LinkParser {
      */
     fun isBareYoutubePlaylistLink(link: String): Boolean {
         if (!isYoutubePlaylistLink(link)) return false
-        val uri = runCatching { URI(link.trim()) }.getOrNull() ?: return false
+        val uri = UrlUtils.lenientUri(link) ?: return false
         val query = uri.rawQuery ?: return false
         return query.split('&').none { it.startsWith("v=") && it.length > "v=".length }
     }
@@ -297,7 +297,7 @@ object LinkParser {
 
     /** Extracts the file id from a fuckingfast.co share URL, e.g. fuckingfast.co/f/abc123 -> abc123 */
     fun fileId(link: String): String {
-        val uri = URI(link.trim())
+        val uri = UrlUtils.lenientUri(link) ?: throw ResolutionError("Invalid URL: $link")
         if (uri.host !in SHARE_HOSTS) {
             throw ResolutionError("Unsupported FuckingFast URL: $link")
         }
@@ -355,7 +355,7 @@ object LinkParser {
         for (raw in links) {
             val link = raw.trim().trim('"').trim('\'')
             if (link.isEmpty()) continue
-            val host = runCatching { URI(link).host }.getOrNull()
+            val host = UrlUtils.lenientUri(link)?.host
             if (host in FITGIRL_HOSTS) {
                 expanded.addAll(extractFitgirlLinks(link, client))
             } else {

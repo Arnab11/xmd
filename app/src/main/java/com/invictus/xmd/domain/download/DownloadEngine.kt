@@ -237,7 +237,7 @@ class DownloadEngine(
             name.map { if (it in INVALID_CHARS) '_' else it }.joinToString("").take(220)
 
         fun filenameFromUrl(url: String): String {
-            val path = runCatching { URI(url).path }.getOrNull().orEmpty()
+            val path = com.invictus.xmd.utils.UrlUtils.lenientUri(url)?.path.orEmpty()
             val raw  = path.substringAfterLast('/').let {
                 runCatching { URLDecoder.decode(it, "UTF-8") }.getOrDefault(it)
             }
@@ -245,7 +245,7 @@ class DownloadEngine(
         }
 
         fun filenameFromLink(link: String): String {
-            val fragment = runCatching { URI(link).fragment }.getOrNull()?.trim().orEmpty()
+            val fragment = com.invictus.xmd.utils.UrlUtils.lenientUri(link)?.fragment?.trim().orEmpty()
             if (fragment.isEmpty()) return ""
             return sanitize(fragment)
         }

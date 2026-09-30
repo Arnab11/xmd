@@ -121,7 +121,7 @@ object ShowDetector {
 
     private fun urlFolderCandidates(sourceUrl: String?): List<String> {
         if (sourceUrl.isNullOrBlank() || !sourceUrl.startsWith("http", ignoreCase = true)) return emptyList()
-        val path = runCatching { URI(sourceUrl.trim()).path }.getOrNull().orEmpty()
+        val path = com.invictus.xmd.utils.UrlUtils.lenientUri(sourceUrl)?.path.orEmpty()
         val segments = path.split('/').filter { it.isNotBlank() }
         if (segments.size < 2) return emptyList()
         return segments.dropLast(1).asReversed().map { runCatching { java.net.URLDecoder.decode(it, "UTF-8") }.getOrDefault(it) }

@@ -39,7 +39,7 @@ object MediaSniffer {
      * cheap: two regex passes on a String, no allocation beyond that).
      */
     fun classifyUrl(url: String): Sniffed? {
-        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        val uri = com.invictus.xmd.utils.UrlUtils.lenientUri(url) ?: return null
         if (uri.scheme != "http" && uri.scheme != "https") return null
         val path = uri.path.orEmpty()
 
@@ -74,7 +74,7 @@ object MediaSniffer {
      * that false-positive class entirely.
      */
     fun classifyUrlStrict(url: String): Sniffed? {
-        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        val uri = com.invictus.xmd.utils.UrlUtils.lenientUri(url) ?: return null
         if (uri.scheme != "http" && uri.scheme != "https") return null
 
         return when {
@@ -112,7 +112,7 @@ object MediaSniffer {
     /** Best-effort display name from the URL's last path segment, falling
      *  back to the host when the path is empty/opaque (e.g. a bare "/"). */
     fun guessLabel(url: String): String {
-        val uri = runCatching { URI(url) }.getOrNull()
+        val uri = com.invictus.xmd.utils.UrlUtils.lenientUri(url)
         val last = uri?.path?.trimEnd('/')?.substringAfterLast('/')
         return last?.takeIf { it.isNotBlank() } ?: uri?.host ?: url
     }
