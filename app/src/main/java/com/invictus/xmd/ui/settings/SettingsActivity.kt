@@ -619,6 +619,9 @@ private fun ConnectionsRoute() {
     var speedLimitKBps by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.speedLimitKBps())
     }
+    var speedUnitMb by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.speedLimitUnitMb())
+    }
     var maxConcurrent by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.maxConcurrentDownloads())
     }
@@ -626,6 +629,7 @@ private fun ConnectionsRoute() {
     SettingsConnectionsScreen(
         connections = connections,
         speedLimitKBps = speedLimitKBps,
+        speedUnitMb = speedUnitMb,
         maxConcurrent = maxConcurrent,
         onConnectionsChanged = { value ->
             connections = value
@@ -634,6 +638,10 @@ private fun ConnectionsRoute() {
         onSpeedLimitChanged = { value ->
             speedLimitKBps = value
             com.invictus.xmd.preferences.Settings.setSpeedLimitKBps(value)
+        },
+        onSpeedUnitChanged = { useMb ->
+            speedUnitMb = useMb
+            com.invictus.xmd.preferences.Settings.setSpeedLimitUnitMb(useMb)
         },
         onMaxConcurrentChanged = { value ->
             maxConcurrent = value

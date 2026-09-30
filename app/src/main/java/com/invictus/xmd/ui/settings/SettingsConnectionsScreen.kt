@@ -2,6 +2,7 @@ package com.invictus.xmd.ui.settings
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,7 +35,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import com.invictus.xmd.ui.icons.Icon
+import com.invictus.xmd.ui.icons.Icons
 import com.invictus.xmd.R
+import java.util.Locale
+import kotlin.math.roundToInt
 
 private const val MIN_CONNECTIONS = 1
 private const val MAX_CONNECTIONS = 24
@@ -51,6 +68,31 @@ private val SPEED_PRESETS = listOf(
     5120 to "5 MB/s",
 )
 
+private const val KB_PER_MB = 1024.0
+
+/** Text -> KB/s for the given unit, or null when it isn't a number yet (empty, lone "."). */
+private fun parseSpeedKBps(text: String, mb: Boolean): Int? {
+    val v = text.toDoubleOrNull() ?: return null
+    return (if (mb) v * KB_PER_MB else v).roundToInt().coerceAtLeast(0)
+}
+
+/** KB/s -> field text in the given unit (MB/s shows up to 3 decimals, trailing zeros trimmed); 0 shows the "Unlimited" label. */
+private fun formatSpeed(kbps: Int, mb: Boolean, unlimitedLabel: String): String =
+    if (kbps == 0) unlimitedLabel
+    else if (!mb) kbps.toString()
+    else String.format(Locale.US, "%.3f", kbps / KB_PER_MB).trimEnd('0').trimEnd('.')
+
+/** KB/s: digits only (7 max). MB/s: digits with one dot, <=4 integer and <=3 decimal digits. */
+private fun sanitizeSpeedInput(input: String, mb: Boolean): String {
+    if (!mb) return input.filter(Char::isDigit).take(7)
+    val cleaned = input.replace(',', '.').filter { it.isDigit() || it == '.' }
+    val dot = cleaned.indexOf('.')
+    if (dot < 0) return cleaned.take(4)
+    val whole = cleaned.substring(0, dot).take(4)
+    val frac = cleaned.substring(dot + 1).filter(Char::isDigit).take(3)
+    return "$whole.$frac"
+}
+
 /**
  * Connections & Speed, as three cards: connections per download (slider with
  * a live value badge), speed limit (preset chips + custom field) and
@@ -61,19 +103,46 @@ private val SPEED_PRESETS = listOf(
 fun SettingsConnectionsScreen(
     connections: Int,
     speedLimitKBps: Int,
+    speedUnitMb: Boolean,
     maxConcurrent: Int,
     onConnectionsChanged: (Int) -> Unit,
     onSpeedLimitChanged: (Int) -> Unit,
+    onSpeedUnitChanged: (Boolean) -> Unit,
     onMaxConcurrentChanged: (Int) -> Unit,
 ) {
-    // Keyed on the persisted value so an external change refreshes the field,
-    // while an in-progress edit (empty / mid-digit) isn't clobbered.
-    var speedLimitText by remember(speedLimitKBps) { mutableStateOf(speedLimitKBps.toString()) }
+    // The stored limit is always KB/s; the field just shows it in the chosen
+    // unit. Text is only rewritten explicitly (chip tap, unit switch, commit)
+    // so an in-progress edit like "1." or an empty field isn't clobbered.
+    val unlimitedLabel = stringResource(R.string.conn_unlimited)
+    var speedLimitText by remember { mutableStateOf(formatSpeed(speedLimitKBps, speedUnitMb, unlimitedLabel)) }
+    var unitMenuOpen by remember { mutableStateOf(false) }
+    var customFieldHadFocus by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Tidy the text after editing: an empty/partial entry falls back to the
+    // saved limit, "05" / "1." become "5" / "1".
+    fun commitCustomSpeed() {
+        val kbps = parseSpeedKBps(speedLimitText, speedUnitMb)
+        if (kbps == null) {
+            speedLimitText = formatSpeed(speedLimitKBps, speedUnitMb, unlimitedLabel)
+        } else {
+            if (kbps != speedLimitKBps) onSpeedLimitChanged(kbps)
+            speedLimitText = formatSpeed(kbps, speedUnitMb, unlimitedLabel)
+        }
+    }
+    fun dismissCustomField() {
+        focusManager.clearFocus()
+        keyboardController?.hide()
+    }
     val concurrent = maxConcurrent.coerceIn(MIN_CONCURRENT, MAX_CONCURRENT)
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            // Tap anywhere that isn't a control: drop focus + keyboard (which also
+            // commits the custom speed field).
+            .pointerInput(Unit) { detectTapGestures(onTap = { dismissCustomField() }) }
             .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -131,7 +200,13 @@ fun SettingsConnectionsScreen(
                 SPEED_PRESETS.forEach { (value, label) ->
                     FilterChip(
                         selected = speedLimitKBps == value,
-                        onClick = { onSpeedLimitChanged(value) },
+                        onClick = {
+                            // Drop focus first so the field's own commit runs against
+                            // the old state, then apply the preset on top.
+                            dismissCustomField()
+                            onSpeedLimitChanged(value)
+                            speedLimitText = formatSpeed(value, speedUnitMb, unlimitedLabel)
+                        },
                         label = { Text(label ?: stringResource(R.string.conn_unlimited)) },
                     )
                 }
@@ -139,15 +214,68 @@ fun SettingsConnectionsScreen(
             OutlinedTextField(
                 value = speedLimitText,
                 onValueChange = { input ->
-                    val filtered = input.filter(Char::isDigit).take(7)
+                    val filtered = sanitizeSpeedInput(input, speedUnitMb)
                     speedLimitText = filtered
-                    filtered.toIntOrNull()?.let(onSpeedLimitChanged)
+                    parseSpeedKBps(filtered, speedUnitMb)?.let(onSpeedLimitChanged)
                 },
                 label = { Text(stringResource(R.string.conn_custom_speed)) },
-                suffix = { Text("KB/s") },
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = KeyboardType.Number),
+                suffix = {
+                    Box {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { unitMenuOpen = true }
+                                .padding(start = 6.dp, top = 4.dp, bottom = 4.dp),
+                        ) {
+                            Text(if (speedUnitMb) "MB/s" else "KB/s")
+                            Icon(
+                                imageVector = Icons.ChevronDown,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = unitMenuOpen,
+                            onDismissRequest = { unitMenuOpen = false },
+                        ) {
+                            listOf(false to "KB/s", true to "MB/s").forEach { (isMb, label) ->
+                                DropdownMenuItem(
+                                    text = { Text(label) },
+                                    onClick = {
+                                        unitMenuOpen = false
+                                        if (isMb != speedUnitMb) {
+                                            // Convert from the saved KB/s value, so switching
+                                            // back and forth never loses precision.
+                                            onSpeedUnitChanged(isMb)
+                                            speedLimitText = formatSpeed(speedLimitKBps, isMb, unlimitedLabel)
+                                        }
+                                    },
+                                )
+                            }
+                        }
+                    }
+                },
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = if (speedUnitMb) KeyboardType.Decimal else KeyboardType.Number,
+                    imeAction = ImeAction.Done,
+                ),
+                keyboardActions = KeyboardActions(onDone = {
+                    commitCustomSpeed()
+                    dismissCustomField()
+                }),
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 14.dp)
+                    .onFocusChanged { state ->
+                        if (state.isFocused) {
+                            customFieldHadFocus = true
+                        } else if (customFieldHadFocus) {
+                            customFieldHadFocus = false
+                            commitCustomSpeed()
+                        }
+                    },
             )
         }
 

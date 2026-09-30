@@ -44,6 +44,7 @@ object Settings {
     private const val KEY_DARK_MODE = "app_dark_mode"
     private const val KEY_AMOLED_MODE = "app_amoled_mode"
     private const val KEY_SPEED_LIMIT_KBPS = "speed_limit_kbps"
+    private const val KEY_SPEED_LIMIT_UNIT_MB = "speed_limit_unit_mb"
     private const val KEY_MAX_CONCURRENT = "max_concurrent_downloads"
     private const val KEY_AUTO_RETRY = "auto_retry_network_errors"
     private const val KEY_ONBOARDING_COMPLETED = "onboarding_completed"
@@ -130,6 +131,12 @@ object Settings {
     fun speedLimitKBps(): Int = prefs.getInt(KEY_SPEED_LIMIT_KBPS, 0)
     fun setSpeedLimitKBps(value: Int) {
         prefs.edit().putInt(KEY_SPEED_LIMIT_KBPS, value.coerceAtLeast(0)).apply()
+    }
+
+    /** Unit the custom speed field is shown/entered in (the stored limit itself is always KB/s). */
+    fun speedLimitUnitMb(): Boolean = prefs.getBoolean(KEY_SPEED_LIMIT_UNIT_MB, false)
+    fun setSpeedLimitUnitMb(value: Boolean) {
+        prefs.edit().putBoolean(KEY_SPEED_LIMIT_UNIT_MB, value).apply()
     }
 
     fun maxConcurrentDownloads(): Int = prefs.getInt(KEY_MAX_CONCURRENT, 2)

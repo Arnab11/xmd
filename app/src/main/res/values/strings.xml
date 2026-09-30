@@ -667,7 +667,7 @@
     <string name="conn_speed_title">Speed limit</string>
     <string name="conn_speed_hint">Per download. Pick a preset or type your own.</string>
     <string name="conn_unlimited">Unlimited</string>
-    <string name="conn_custom_speed">Custom (KB/s)</string>
+    <string name="conn_custom_speed">Custom</string>
     <string name="conn_concurrent_title">Simultaneous downloads</string>
     <string name="conn_concurrent_hint">How many downloads run at the same time (1–5).</string>
 </resources>
