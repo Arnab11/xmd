@@ -152,9 +152,18 @@ object LinkParser {
         if (!isPlainWebpageLink(trimmed) || needsYtDlp(trimmed)) return false
         val uri = UrlUtils.lenientUri(trimmed) ?: return false
         if (!uri.rawQuery.isNullOrEmpty()) return false
-        val last = uri.path.orEmpty().trimEnd('/').substringAfterLast('/')
-        return !last.contains('.')
+        val path = uri.path.orEmpty().trimEnd('/')
+        if (path.substringAfterLast('/').contains('.')) return false
+        // Extensionless file endpoints (pixeldrain /api/file/<id>, /download/<id>,
+        // release assets, raw blobs...) are downloads even though they look page-like.
+        val segments = path.lowercase().split('/').filter { it.isNotEmpty() }
+        return segments.none { it in DOWNLOAD_PATH_HINTS }
     }
+
+    private val DOWNLOAD_PATH_HINTS = setOf(
+        "download", "downloads", "dl", "file", "files", "get", "api",
+        "raw", "attachment", "attachments", "releases", "cdn", "media", "storage"
+    )
 
     /**
      * True for a link received through the system "Share" sheet that should

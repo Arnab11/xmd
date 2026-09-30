@@ -45,5 +45,7 @@ class LinkParserBracketUrlTest {
         assertFalse(LinkParser.isLikelyWebpage("https://cdn.example.com/dl?id=5&sig=x"))
         assertFalse(LinkParser.isLikelyWebpage("https://www.youtube.com/watch?v=abc"))
         assertFalse(LinkParser.isLikelyWebpage("magnet:?xt=urn:btih:abc"))
+        assertFalse(LinkParser.isLikelyWebpage("https://pixeldrain.com/api/file/abc123"))
+        assertFalse(LinkParser.isLikelyWebpage("https://host.com/download/xyz"))
     }
 }

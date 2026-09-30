@@ -612,6 +612,7 @@
     <string name="torrent_dialog_cancel">Cancel</string>
     <string name="torrent_dialog_start">Start</string>
     <string name="download_dialog_open_in_browser">Open in Browser</string>
+    <string name="download_dialog_download_anyway">Download anyway</string>
     <string name="download_dialog_advanced_streams_title">Available Streams</string>
     <string name="download_dialog_advanced_streams_probing">Probing available streams…</string>
     <string name="download_dialog_advanced_streams_empty">No extra streams found</string>

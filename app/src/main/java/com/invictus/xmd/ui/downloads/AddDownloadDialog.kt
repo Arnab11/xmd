@@ -252,9 +252,13 @@ fun AddDownloadDialog(
 
     val needsYtDlp = LinkParser.needsYtDlp(link)
     val isGeneric = !LinkParser.isYoutubeLink(link)
-    val isWebpage = remember(link, onOpenInBrowser) {
+    val looksLikeWebpage = remember(link, onOpenInBrowser) {
         onOpenInBrowser != null && LinkParser.isLikelyWebpage(link)
     }
+    // "Download anyway" escape hatch: an extensionless direct-file link can
+    // look exactly like a webpage, so the user can always force a download.
+    var forceDownload by remember(link) { mutableStateOf(false) }
+    val isWebpage = looksLikeWebpage && !forceDownload
     val needsPrepare = remember(link) {
         val trimmed = link.trim()
         trimmed.isNotBlank() && (LinkParser.isShareLink(trimmed) || LinkParser.isFitgirlPage(trimmed))
@@ -1115,7 +1119,14 @@ fun AddDownloadDialog(
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text(stringResource(R.string.torrent_dialog_cancel)) }
+            Row {
+                if (looksLikeWebpage && !forceDownload) {
+                    TextButton(onClick = { forceDownload = true }) {
+                        Text(stringResource(R.string.download_dialog_download_anyway))
+                    }
+                }
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.torrent_dialog_cancel)) }
+            }
         },
     )
 
