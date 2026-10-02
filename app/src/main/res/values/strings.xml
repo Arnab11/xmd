@@ -650,6 +650,9 @@
     <string name="show_solutions">Show solutions</string>
     <string name="change_solution">Change solution</string>
     <string name="open_existing_file">Open file</string>
+    <string name="download_dialog_play_external">Play</string>
+    <string name="open_in_external_player">Open in player</string>
+    <string name="no_player_found">No external media player found</string>
     <string name="ws_saved_count">%1$d sites saved</string>
     <string name="ws_pack_hint">Import a source pack from your device, or export yours to share.</string>
     <string name="ws_import">Import</string>

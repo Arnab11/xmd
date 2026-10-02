@@ -518,6 +518,13 @@ class BrowserFragment : Fragment() {
                                     (activity as? Callbacks)?.triggerSniffedMedia(stream.url, needsPicker)
                                 },
                                 onCopyLink = ::copyLinkToClipboard,
+                                onPlayClick = { stream ->
+                                    com.invictus.xmd.utils.media.MediaPlaybackUtils.openMediaInExternalPlayer(
+                                        context = requireContext(),
+                                        url = stream.url,
+                                        isAudioOnly = stream.kind == com.invictus.xmd.domain.browser.MediaSniffer.Kind.DIRECT_AUDIO,
+                                    )
+                                },
                                 onDismiss = { sniffedSheetStreams = null },
                             )
                         }
