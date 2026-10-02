@@ -479,6 +479,8 @@
 
     <!-- Link long-press context menu -->
     <string name="link_menu_open_new_tab">Open in new tab</string>
+    <string name="link_menu_open_background_tab">Open in background tab</string>
+    <string name="link_menu_download_link">Download link</string>
     <string name="link_menu_open_image_new_tab">Open image in new tab</string>
     <string name="link_menu_download_image">Download image</string>
     <string name="link_menu_copy_link_address">Copy link address</string>
