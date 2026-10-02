@@ -1186,25 +1186,21 @@ private fun DownloadProgressBar(
     color: Color = MaterialTheme.colorScheme.primary,
     trackColor: Color = MaterialTheme.colorScheme.surfaceContainerHighest,
 ) {
-    val infiniteTransition = rememberInfiniteTransition(label = "download_wave_transition")
-    val wavePhase by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "wave_phase",
-    )
-    val indeterminateOffset by infiniteTransition.animateFloat(
-        initialValue = -0.35f,
-        targetValue = 1.35f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1400, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Restart,
-        ),
-        label = "indeterminate_offset",
-    )
+    val indeterminateOffset = if (isIndeterminate) {
+        val infiniteTransition = rememberInfiniteTransition(label = "download_indeterminate_transition")
+        val offset by infiniteTransition.animateFloat(
+            initialValue = -0.35f,
+            targetValue = 1.35f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1400, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Restart,
+            ),
+            label = "indeterminate_offset",
+        )
+        offset
+    } else {
+        0f
+    }
 
     Canvas(
         modifier = modifier
@@ -1241,7 +1237,7 @@ private fun DownloadProgressBar(
             val progressWidth = (totalWidth * progress.coerceIn(0f, 1f))
             if (progressWidth > 0f) {
                 if (isDownloading && progress < 1f) {
-                    // Animated wavy progress bar when downloading
+                    // Static wavy progress bar when downloading
                     val waveLength = 22.dp.toPx()
                     val amplitude = 2.2.dp.toPx()
                     val path = Path()
@@ -1250,7 +1246,7 @@ private fun DownloadProgressBar(
                     var x = 0f
                     val step = 2f
                     while (x <= progressWidth) {
-                        val angle = ((x / waveLength) + wavePhase) * 2f * Math.PI.toFloat()
+                        val angle = (x / waveLength) * 2f * Math.PI.toFloat()
                         val taper = ((progressWidth - x) / 12.dp.toPx()).coerceIn(0f, 1f) *
                             (x / 12.dp.toPx()).coerceIn(0f, 1f)
                         val y = centerY + (kotlin.math.sin(angle) * amplitude * taper)
