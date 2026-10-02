@@ -118,6 +118,7 @@ class BrowserFragment : Fragment() {
          *  any other direct-download link. */
         fun triggerSniffedMedia(url: String, needsPicker: Boolean)
         fun onBrowserHeaderInteractionChanged(locked: Boolean)
+        fun onBrowserWebpageVisibilityChanged(isWebpageOpen: Boolean) {}
     }
 
     companion object {
@@ -1099,11 +1100,14 @@ class BrowserFragment : Fragment() {
                     )
                 }
 
+                val pageUrl = request.requestHeaders?.entries?.firstOrNull {
+                    it.key.equals("Referer", ignoreCase = true)
+                }?.value ?: tab.openedByUrl ?: tab.url
                 downloadInterceptor.interceptRequest(
                     com.invictus.xmd.domain.browser.WebRequest(
                         url = request.url.toString(),
                         headers = request.requestHeaders ?: emptyMap(),
-                        page = view.originalUrl ?: view.url ?: tab.openedByUrl ?: tab.url
+                        page = pageUrl
                     )
                 )
 
@@ -1667,6 +1671,7 @@ class BrowserFragment : Fragment() {
     override fun onResume() {
         super.onResume()
         updateHeaderInteractionState()
+        (activity as? Callbacks)?.onBrowserWebpageVisibilityChanged(!speedDialVisible)
     }
 
     private fun showSpeedDial() {
@@ -1681,10 +1686,12 @@ class BrowserFragment : Fragment() {
         clearDetectedLink()
         sniffedMediaFabVisible = false
         hideNavLoadingVeil()
+        (activity as? Callbacks)?.onBrowserWebpageVisibilityChanged(false)
     }
 
     private fun showWebView() {
         speedDialVisible = false
+        (activity as? Callbacks)?.onBrowserWebpageVisibilityChanged(true)
     }
 
     /**
