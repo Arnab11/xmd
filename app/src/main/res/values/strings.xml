@@ -96,6 +96,11 @@
     <string name="delete_downloads_message">Remove %1$d downloads from the queue?</string>
     <string name="delete_file_from_device">Also delete file from device</string>
     <string name="delete_files_from_device">Also delete files from device</string>
+    <string name="cancel_download_title">Cancel this download?</string>
+    <string name="cancel_download_message">Are you sure you want to cancel this download? Downloaded progress will be lost.</string>
+    <string name="cancel_downloads_title">Cancel all downloads?</string>
+    <string name="cancel_downloads_message">Are you sure you want to cancel %1$d active download(s)? Downloaded progress will be lost.</string>
+    <string name="action_keep_downloading">Keep downloading</string>
 
     <!-- Downloads -->
     <string name="empty_queue">Paste some links above and tap Prepare.</string>

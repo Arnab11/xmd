@@ -48,6 +48,15 @@ import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import kotlinx.coroutines.launch
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
@@ -59,9 +68,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandHorizontally
@@ -205,6 +211,8 @@ fun DownloadsScreen(
     var deleteTargets by remember { mutableStateOf<List<QueueItem>?>(null) }
     var errorDetailsTarget by remember { mutableStateOf<QueueItem?>(null) }
     var overflowMenuExpanded by remember { mutableStateOf(false) }
+    var pendingCancelItem by remember { mutableStateOf<QueueItem?>(null) }
+    var showCancelAllDialog by remember { mutableStateOf(false) }
 
     BackHandler(enabled = selectedIds.isNotEmpty()) {
         selectedIds = emptySet()
@@ -445,7 +453,7 @@ fun DownloadsScreen(
                                             tint = MaterialTheme.colorScheme.error,
                                         )
                                     },
-                                    onClick = { overflowMenuExpanded = false; onCancelAll() },
+                                    onClick = { overflowMenuExpanded = false; showCancelAllDialog = true },
                                 )
                             }
                             if (hasFailed) {
@@ -499,7 +507,7 @@ fun DownloadsScreen(
                             isSelectionMode = selectedIds.isNotEmpty(),
                             modifier = Modifier.animateItem(),
                             onPauseResume = onPauseResume,
-                            onCancel = onCancel,
+                            onCancel = { pendingCancelItem = it },
                             onRetry = onRetry,
                             onClear = { deleteTargets = listOf(it) },
                             onOpen = onOpen,
@@ -608,6 +616,90 @@ fun DownloadsScreen(
         )
     }
 
+    // ── Cancel confirm dialog (single download) ───────────────────────────
+    pendingCancelItem?.let { item ->
+        AlertDialog(
+            onDismissRequest = { pendingCancelItem = null },
+            modifier = Modifier.wideDialogWidth(),
+            properties = WideDialogProperties,
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(stringResource(R.string.cancel_download_title)) },
+            text = {
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Text(
+                        text = item.fileName ?: item.sourceUrl,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = stringResource(R.string.cancel_download_message),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onCancel(item)
+                        pendingCancelItem = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text(stringResource(R.string.action_cancel)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingCancelItem = null }) {
+                    Text(stringResource(R.string.action_keep_downloading))
+                }
+            },
+        )
+    }
+
+    // ── Cancel All confirm dialog ─────────────────────────────────────────
+    if (showCancelAllDialog) {
+        val activeCount = remember(items) {
+            items.count {
+                it.status == ItemStatus.DOWNLOADING || it.status == ItemStatus.PAUSED ||
+                    it.status == ItemStatus.RETRYING || it.status == ItemStatus.SAVING ||
+                    it.status == ItemStatus.PENDING || it.status == ItemStatus.RESOLVING ||
+                    it.status == ItemStatus.READY || it.status == ItemStatus.NEEDS_CHALLENGE
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { showCancelAllDialog = false },
+            modifier = Modifier.wideDialogWidth(),
+            properties = WideDialogProperties,
+            shape = RoundedCornerShape(20.dp),
+            title = { Text(stringResource(R.string.cancel_downloads_title)) },
+            text = {
+                Text(
+                    text = stringResource(R.string.cancel_downloads_message, activeCount),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCancelAllDialog = false
+                        onCancelAll()
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text(stringResource(R.string.action_cancel_all)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCancelAllDialog = false }) {
+                    Text(stringResource(R.string.action_keep_downloading))
+                }
+            },
+        )
+    }
+
     // ── Error / Warning Details dialog ────────────────────────────────────
     errorDetailsTarget?.let { item ->
         ErrorDetailsDialog(
@@ -708,21 +800,39 @@ fun QueueItemRow(
         DownloadInfoDialog(item = item, onDismiss = { showInfo = false })
     }
 
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            if (value == SwipeToDismissBoxValue.EndToStart) {
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                currentOnSwipeClear(currentItem)
-                true
-            } else {
-                false
-            }
-        },
-    )
+    // ── Swipe-to-reveal delete: swipe left stops at the delete action
+    // instead of auto-deleting. Tapping Delete performs the delete.
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val actionWidthPx = with(density) { 88.dp.toPx() }
+    var offsetX by remember { mutableFloatStateOf(0f) }
+    var revealed by remember { mutableStateOf(false) }
 
-    LaunchedEffect(item.id) {
-        if (dismissState.currentValue != SwipeToDismissBoxValue.Settled) {
-            dismissState.reset()
+    LaunchedEffect(item.id, isSelectionMode) {
+        offsetX = 0f
+        revealed = false
+    }
+
+    fun snapTo(target: Float) {
+        scope.launch {
+            val start = offsetX
+            val diff = target - start
+            if (diff == 0f) return@launch
+            androidx.compose.animation.core.Animatable(start).animateTo(
+                target,
+                animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+            ) { offsetX = value }
+            revealed = target != 0f
+        }
+    }
+
+    val dragState = rememberDraggableState { delta ->
+        val next = (offsetX + delta).coerceIn(-actionWidthPx, 0f)
+        offsetX = next
+        val nowRevealed = next <= -actionWidthPx + 1f
+        if (nowRevealed != revealed) {
+            revealed = nowRevealed
+            if (nowRevealed) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
         }
     }
 
@@ -738,36 +848,69 @@ fun QueueItemRow(
         MaterialTheme.colorScheme.surfaceContainer
     }
 
-    SwipeToDismissBox(
-        state = dismissState,
+    Box(
         modifier = modifier.fillMaxWidth(),
-        enableDismissFromStartToEnd = false,
-        enableDismissFromEndToStart = !isSelectionMode,
-        backgroundContent = {
-            val isSwiping = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart ||
-                dismissState.progress > 0.05f && dismissState.dismissDirection == SwipeToDismissBoxValue.EndToStart
-            if (isSwiping && !isSelectionMode) {
+    ) {
+        // Delete action revealed behind the card.
+        if (!isSelectionMode) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(end = 8.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(MaterialTheme.colorScheme.errorContainer)
-                        .padding(horizontal = 20.dp),
-                    contentAlignment = Alignment.CenterEnd,
+                        .width(80.dp)
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = ripple(bounded = true),
+                            onClick = {
+                                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                snapTo(0f)
+                                currentOnSwipeClear(currentItem)
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Icon(
-                        imageVector = Icons.DeleteSweep,
-                        contentDescription = stringResource(R.string.action_clear),
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.size(24.dp),
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.DeleteSweep,
+                            contentDescription = stringResource(R.string.action_clear),
+                            tint = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier.size(24.dp),
+                        )
+                        Text(
+                            text = stringResource(R.string.action_delete),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
                 }
             }
-        },
-    ) {
+        }
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .offset { IntOffset(offsetX.toInt(), 0) }
+                .draggable(
+                    state = dragState,
+                    orientation = Orientation.Horizontal,
+                    enabled = !isSelectionMode,
+                    onDragStopped = { velocity ->
+                        val shouldReveal =
+                            offsetX < -actionWidthPx / 2f || velocity < -800f
+                        snapTo(if (shouldReveal) -actionWidthPx else 0f)
+                    },
+                )
                 .defaultMinSize(minHeight = 72.dp),
             colors = CardDefaults.cardColors(containerColor = cardContainerColor),
             shape = RoundedCornerShape(14.dp),
@@ -780,6 +923,10 @@ fun QueueItemRow(
                 .height(IntrinsicSize.Min)
                 .combinedClickable(
                     onClick = {
+                        if (revealed) {
+                            snapTo(0f)
+                            return@combinedClickable
+                        }
                         if (isSelectionMode) {
                             haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onToggleSelect(item)
