@@ -33,6 +33,8 @@ import com.invictus.xmd.utils.storage.FileNameUtils
 import com.invictus.xmd.domain.download.DownloadCancelledException
 import com.invictus.xmd.domain.download.DownloadCategory
 import com.invictus.xmd.domain.download.DownloadEngine
+import com.invictus.xmd.domain.download.DownloadValidationException
+import com.invictus.xmd.domain.download.IncompleteFileUtil
 import com.invictus.xmd.domain.download.DownloadScheduler
 import com.invictus.xmd.domain.download.ItemStatus
 import com.invictus.xmd.domain.download.MediaPlatform
@@ -1063,8 +1065,37 @@ class DownloadService : LifecycleService() {
                 // runs at full network speed. The finished file is then moved to
                 // /sdcard/Xmd/ in one continuous copy, which is far faster than paying
                 // the FUSE tax on every chunk of the download.
+                //
+                // ABDM-style: bytes live in an incomplete part file
+                // (<name>.dl-<id>.xmd.part) until the download verifies complete,
+                // then it's atomically renamed -- a half-finished file never
+                // masquerades as complete. The engine's own pre-flight
+                // (folder validation + EmptyFileCreator space reserve) runs
+                // inside downloadAuto.
                 val tempDir = File(cacheDir, "xmd_temp/${category.folderName}")
-                val tempFile = File(tempDir, fileName)
+                val realTemp = File(tempDir, fileName)
+                val partId = (itemId.hashCode().toLong() and 0xffffffffL).let {
+                    if (it == 0L) 1L else it
+                }
+                val tempFile = IncompleteFileUtil.addIncompleteIndicator(realTemp, partId)
+                // Migrate pre-incomplete-version resume state (real name +
+                // its .xmdparts sidecar) forward once so an update doesn't
+                // restart in-flight downloads from zero.
+                withContext(Dispatchers.IO) {
+                    if (!tempFile.exists() && realTemp.exists() && realTemp.length() > 0) {
+                        runCatching { realTemp.renameTo(tempFile) }
+                    }
+                    val oldMeta = File(realTemp.parentFile, realTemp.name + ".xmdparts")
+                    val newMeta = File(tempFile.parentFile, tempFile.name + ".xmdparts")
+                    if (!newMeta.exists() && oldMeta.exists()) {
+                        runCatching { oldMeta.renameTo(newMeta) }
+                    }
+                    // Drop stale part files from older attempts with a different id.
+                    realTemp.parentFile?.listFiles { f ->
+                        f != tempFile && f.name.endsWith(".xmd.part") &&
+                            f.name.startsWith(realTemp.nameWithoutExtension.take(40))
+                    }?.forEach { runCatching { it.delete() } }
+                }
                 destinationFile = tempFile
 
                 val customDir = currentItem?.customSaveDirPath
@@ -1092,6 +1123,28 @@ class DownloadService : LifecycleService() {
                         (if (knownTotal > 0) " of ${knownTotal}B" else "") + ")")
                 }
 
+                // Part verified complete -- atomically promote to the real temp
+                // name (ABDM's assemble step) so downstream probing/moving
+                // never sees a ".part" path.
+                val completeTemp = withContext(Dispatchers.IO) {
+                    realTemp.parentFile?.mkdirs()
+                    if (realTemp.exists()) runCatching { realTemp.delete() }
+                    if (!tempFile.renameTo(realTemp)) {
+                        // renameTo fails across mount views -- copy+delete fallback.
+                        runCatching {
+                            tempFile.inputStream().use { input ->
+                                realTemp.outputStream().use { output ->
+                                    input.copyTo(output, 4 * 1024 * 1024)
+                                }
+                            }
+                            tempFile.delete()
+                        }
+                    }
+                    // Sidecar belongs to the part name -- drop it, download is done.
+                    File(tempFile.parentFile, tempFile.name + ".xmdparts").delete()
+                    realTemp
+                }
+
                 // Direct/generic video links carry no duration metadata up front
                 // (unlike YouTube, where yt-dlp's probe already knows it) -- the
                 // only way to tell a movie from a clip is to check the finished
@@ -1100,7 +1153,7 @@ class DownloadService : LifecycleService() {
                 // format) just leaves it in VIDEOS rather than blocking the save.
                 if (category == DownloadCategory.VIDEOS && !Settings.categorizationDisabled()) {
                     val durationSeconds = withContext(Dispatchers.IO) {
-                        MediaDurationUtils.probeDurationSeconds(tempFile)
+                        MediaDurationUtils.probeDurationSeconds(completeTemp)
                     }
                     if (MediaDurationUtils.isMovieLength(durationSeconds)) {
                         category = DownloadCategory.MOVIES
@@ -1112,7 +1165,7 @@ class DownloadService : LifecycleService() {
                 val finalFile = File(finalDir, fileName)
 
                 QueueRepository.markSaving(itemId)
-                withContext(Dispatchers.IO) { moveToPublicStorage(tempFile, finalFile) }
+                withContext(Dispatchers.IO) { moveToPublicStorage(completeTemp, finalFile) }
                 destinationFile = finalFile
 
                 QueueRepository.markDone(itemId, finalFile.absolutePath)
@@ -1120,6 +1173,12 @@ class DownloadService : LifecycleService() {
             } catch (e: DownloadCancelledException) {
                 destinationFile?.let { DownloadEngine.deletePartialFiles(it) }
                 QueueRepository.markFailed(itemId, "Cancelled")
+                return
+            } catch (e: DownloadValidationException) {
+                // Critical destination failure (no space, unwritable folder):
+                // fail immediately with a clear message, never auto-retry.
+                destinationFile?.let { runCatching { it.delete() } }
+                QueueRepository.markFailed(itemId, e.message ?: "Not enough storage")
                 return
             } catch (e: Exception) {
                 // Only a plain network-level failure (timeout, connection dropped, DNS

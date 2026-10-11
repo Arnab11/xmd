@@ -265,6 +265,28 @@ class DownloadEngine(
         }
     }
 
+    /**
+     * ABDM-style folder pre-flight (see DownloadDestination): mkdirs + verify
+     * it exists, is a directory, and is writable. Throws
+     * PrepareDestinationFailedException (critical) so callers fail fast
+     * instead of downloading into a black hole.
+     */
+    private fun prepareDestinationFolder(outputFile: File) {
+        try {
+            val parent = outputFile.parentFile ?: return
+            parent.mkdirs()
+            val canonical = parent.canonicalFile
+            canonical.mkdirs()
+            if (!canonical.exists()) error("Couldn't create folder: ${canonical.absolutePath}")
+            if (!canonical.isDirectory) error("Not a directory: ${canonical.absolutePath}")
+            if (!canonical.canWrite()) error("Folder isn't writable: ${canonical.absolutePath}")
+        } catch (e: DownloadValidationException) {
+            throw e
+        } catch (e: Exception) {
+            throw PrepareDestinationFailedException(e)
+        }
+    }
+
     private fun emitProgress(done: Long, total: Long, speedBps: Double, force: Boolean = false) {
         val now  = System.nanoTime()
         val last = lastProgressEmitNanos.get()
@@ -371,7 +393,8 @@ class DownloadEngine(
 
         /**
          * Deletes a destination file together with its multi-connection
-         * resume sidecar (the ".xmdparts" file written by [writeSegmentMeta]).
+         * resume sidecar (the ".xmdparts" file written by [writeSegmentMeta])
+         * and any ABDM-style incomplete part file (".xmd.part").
          * Call this whenever a download is abandoned for good -- a genuine
          * user Cancel -- so a future download reusing the same temp path
          * doesn't get confused by stale segment metadata. Deliberately NOT
@@ -382,6 +405,14 @@ class DownloadEngine(
         fun deletePartialFiles(destination: File) {
             destination.delete()
             File(destination.parentFile, destination.name + ".xmdparts").delete()
+            // Same stem, incomplete suffix (can't know the id here -- sweep).
+            destination.parentFile?.listFiles { f ->
+                f.name.startsWith(destination.nameWithoutExtension.take(40)) &&
+                    f.name.endsWith(".xmd.part")
+            }?.forEach { runCatching { it.delete() } }
+            if (IncompleteFileUtil.isIncompleteFile(destination)) {
+                destination.delete()
+            }
         }
     }
 
@@ -585,8 +616,19 @@ class DownloadEngine(
         // queues the rest, so this needs no other change to the run loop.
         maxConcurrent: Int = segments.size
     ) {
-        destination.parentFile?.mkdirs()
-        RandomAccessFile(destination, "rw").use { it.setLength(totalSize) }
+        // ABDM-style pre-flight: validated folder + reserved space before any
+        // segment touches the network. EmptyFileCreator throws
+        // NoSpaceInStorageException (critical, no retry) when the growth
+        // doesn't fit, and sparse-extends instantly instead of a raw
+        // setLength so a multi-GB file doesn't pay zero-fill I/O.
+        try {
+            prepareDestinationFolder(destination)
+            EmptyFileCreator.prepareFile(destination, totalSize)
+        } catch (e: DownloadValidationException) {
+            throw e
+        } catch (e: Exception) {
+            throw PrepareDestinationFailedException(e)
+        }
 
         val alreadyDone = segments.sumOf { it.done }
         val doneCounter = AtomicLong(alreadyDone)
@@ -810,6 +852,34 @@ class DownloadEngine(
         val body       = response.body ?: throw RuntimeException("Empty response body")
         var done       = initial
         val speedMeter = SpeedMeter()           // ← per-download sliding window
+
+        // ABDM-style pre-flight for single-connection: validated folder +
+        // free-space check for the remaining bytes before streaming. When the
+        // total is known and we're starting fresh, sparse-reserve it up front
+        // so a full disk fails fast instead of mid-stream.
+        try {
+            prepareDestinationFolder(destination)
+            if (totalSize > 0) {
+                val existing = if (destination.isFile) destination.length() else 0L
+                val remaining = (totalSize - if (append) existing.coerceAtMost(totalSize) else 0L)
+                    .coerceAtLeast(0L)
+                if (remaining > 0) {
+                    val free = DiskStat.getRemainingSpace(destination)
+                    if (free >= 0 && free < remaining) {
+                        throw NoSpaceInStorageException(free, remaining)
+                    }
+                    if (!append) {
+                        EmptyFileCreator.prepareFile(destination, totalSize)
+                    }
+                }
+            }
+        } catch (e: DownloadValidationException) {
+            throw e
+        } catch (e: Exception) {
+            // Don't wrap validation errors twice.
+            if (e is DownloadValidationException) throw e
+            throw PrepareDestinationFailedException(e)
+        }
 
         RandomAccessFile(destination, "rw").use { raf ->
             if (append) {
