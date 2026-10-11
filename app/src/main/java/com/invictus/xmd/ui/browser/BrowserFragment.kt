@@ -11,8 +11,12 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.Toast
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -307,7 +311,9 @@ class BrowserFragment : Fragment() {
     // is flipped by WebView scrolling so the bar hides on scroll-down.
     private var inAppPlayerRequest: InAppPlayRequest? by mutableStateOf(null)
     private var bottomBarEnabled: Boolean by mutableStateOf(true)
+    private var toolbarBottom: Boolean by mutableStateOf(false)
     private var bottomBarScrollVisible: Boolean by mutableStateOf(true)
+    private var navCanGoBack: Boolean by mutableStateOf(false)
     private var navCanGoForward: Boolean by mutableStateOf(false)
     private var lastBottomBarToggleMs: Long = 0L
 
@@ -397,6 +403,7 @@ class BrowserFragment : Fragment() {
                 BrowserScreen(
                     speedDialVisible = speedDialVisible,
                     addressBarFocused = addressBarFocused,
+                    toolbarBottom = toolbarBottom,
                     onDismissAddressBar = { addressBarClearFocusSignal++ },
                     toolbar = {
                         BrowserToolbarRow(
@@ -436,12 +443,34 @@ class BrowserFragment : Fragment() {
                             bookmarkVisible = bookmarkStarVisible,
                             bookmarkFilled = bookmarkStarFilled,
                             onBookmarkTap = ::onBookmarkStarTapped,
+                            onBackTap = {
+                                val v = webViewFor(tabs.getOrNull(currentTabIndex))
+                                if (v != null && v.canGoBack()) {
+                                    showNavLoadingVeil()
+                                    v.goBack()
+                                    navCanGoBack = v.canGoBack()
+                                    navCanGoForward = v.canGoForward()
+                                }
+                            },
+                            canGoBack = navCanGoBack,
+                            onForwardTap = {
+                                val v = webViewFor(tabs.getOrNull(currentTabIndex))
+                                if (v != null && v.canGoForward()) {
+                                    showNavLoadingVeil()
+                                    v.goForward()
+                                    navCanGoBack = v.canGoBack()
+                                    navCanGoForward = v.canGoForward()
+                                }
+                            },
+                            canGoForward = navCanGoForward,
                             onHomeTap = ::goHome,
                             // The bottom bar already has Home, so drop the duplicate up here.
-                            homeVisible = !bottomBarEnabled,
+                            homeVisible = toolbarBottom || !bottomBarEnabled,
                             onNewTabTap = ::addNewTab,
                             onTabsTap = ::showTabsOverlay,
                             tabsCount = tabsCountValue,
+                            onDownloadsTap = { (activity as? Callbacks)?.onBrowserOpenDownloads() },
+                            downloadsVisible = !speedDialVisible,
                             onOverflowTap = { browserMenuExpanded = true },
                             overflowMenu = {
                                 BrowserOverflowMenu(
@@ -465,15 +494,28 @@ class BrowserFragment : Fragment() {
                             },
                             progress = toolbarProgress,
                             progressVisible = toolbarProgressVisible,
+                            modifier = if (toolbarBottom) {
+                                val bottomToolbarPadding by animateDpAsState(
+                                    targetValue = if (speedDialVisible && !addressBarFocused) 80.dp else 0.dp,
+                                    label = "bottomToolbarNavbarPadding",
+                                )
+                                Modifier
+                                    .navigationBarsPadding()
+                                    .padding(bottom = bottomToolbarPadding)
+                            } else {
+                                Modifier
+                            },
+                            isBottomBar = toolbarBottom,
                         )
                     },
                     bottomBar = {
                         androidx.compose.animation.AnimatedVisibility(
-                            visible = bottomBarEnabled && !speedDialVisible && !addressBarFocused && bottomBarScrollVisible,
+                            visible = !toolbarBottom && bottomBarEnabled && !speedDialVisible && !addressBarFocused && bottomBarScrollVisible,
                             enter = androidx.compose.animation.expandVertically() + androidx.compose.animation.fadeIn(),
                             exit = androidx.compose.animation.shrinkVertically() + androidx.compose.animation.fadeOut(),
                         ) {
                             BrowserBottomBar(
+                                canGoBack = navCanGoBack,
                                 canGoForward = navCanGoForward,
                                 onBack = { onBackPressed() },
                                 onForward = {
@@ -481,6 +523,8 @@ class BrowserFragment : Fragment() {
                                     if (v != null && v.canGoForward()) {
                                         showNavLoadingVeil()
                                         v.goForward()
+                                        navCanGoBack = v.canGoBack()
+                                        navCanGoForward = v.canGoForward()
                                     }
                                 },
                                 onHome = ::goHome,
@@ -502,6 +546,7 @@ class BrowserFragment : Fragment() {
                                 loadUrl(shortcut.url)
                             },
                             onPickIcon = { pickIconLauncher.launch("image/*") },
+                            bottomPadding = if (toolbarBottom) 16.dp else 96.dp,
                         )
                     },
                     suggestions = {
@@ -1066,6 +1111,7 @@ class BrowserFragment : Fragment() {
                 }
                 if (isCurrentTab(tab)) {
                     navCanGoForward = view.canGoForward()
+                    navCanGoBack = view.canGoBack()
                     bottomBarScrollVisible = true
                     toolbarProgress = 0
                     toolbarProgressVisible = true
@@ -1101,6 +1147,7 @@ class BrowserFragment : Fragment() {
                 }
                 if (isCurrentTab(tab)) {
                     navCanGoForward = view.canGoForward()
+                    navCanGoBack = view.canGoBack()
                     toolbarProgressVisible = false
                     webViewSwipeRefresh.isRefreshing = false
                     hideNavLoadingVeil()
@@ -1630,6 +1677,8 @@ class BrowserFragment : Fragment() {
             if (view.canGoBack()) {
                 showNavLoadingVeil()
                 view.goBack()
+                navCanGoBack = view.canGoBack()
+                navCanGoForward = view.canGoForward()
             } else if (tab.parentTabId != null && tabs.any { it.id == tab.parentTabId }) {
                 // Chrome: no history left in a tab opened from another tab ->
                 // close it and land back on the tab it came from.
@@ -1863,6 +1912,7 @@ class BrowserFragment : Fragment() {
         toolbarProgress = tab.progress
         toolbarProgressVisible = tab.isLoading
         navCanGoForward = webViewFor(tab)?.canGoForward() == true
+        navCanGoBack = webViewFor(tab)?.canGoBack() == true
         bottomBarScrollVisible = true
         webViewSwipeRefresh.isRefreshing = false
         val url = tab.url
@@ -1959,7 +2009,12 @@ class BrowserFragment : Fragment() {
 
     override fun onResume() {
         super.onResume()
+        toolbarBottom = Settings.browserToolbarBottom()
         bottomBarEnabled = Settings.browserBottomBarEnabled()
+        val currentTab = tabs.getOrNull(currentTabIndex)
+        val currentWebView = if (currentTab != null) webViewFor(currentTab) else null
+        navCanGoBack = !speedDialVisible && currentWebView?.canGoBack() == true
+        navCanGoForward = !speedDialVisible && currentWebView?.canGoForward() == true
         com.invictus.xmd.service.BackgroundPlaybackService.stop(requireContext().applicationContext)
         updateHeaderInteractionState()
         (activity as? Callbacks)?.onBrowserWebpageVisibilityChanged(!speedDialVisible)
@@ -1968,6 +2023,8 @@ class BrowserFragment : Fragment() {
     private fun showSpeedDial() {
         addressBarClearFocusSignal++
         speedDialVisible = true
+        navCanGoBack = false
+        navCanGoForward = false
         addressBarText = ""
         securityIconVisible = false
         bookmarkStarVisible = false

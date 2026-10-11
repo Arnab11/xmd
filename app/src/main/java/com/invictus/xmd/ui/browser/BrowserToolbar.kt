@@ -28,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -114,6 +115,13 @@ fun BrowserToolbarRow(
     progress: Int,
     progressVisible: Boolean,
     modifier: Modifier = Modifier,
+    onBackTap: () -> Unit = {},
+    canGoBack: Boolean = false,
+    onForwardTap: () -> Unit = {},
+    canGoForward: Boolean = false,
+    onDownloadsTap: () -> Unit = {},
+    downloadsVisible: Boolean = true,
+    isBottomBar: Boolean = false,
 ) {
     Box(modifier = modifier.fillMaxWidth()) {
         Surface(
@@ -128,9 +136,23 @@ fun BrowserToolbarRow(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 8.dp),
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
+                if (!addressBarFocused) {
+                    ToolbarIconButton(
+                        icon = Icons.ArrowBack,
+                        contentDescription = stringResource(R.string.browser_bottom_back),
+                        onClick = onBackTap,
+                        enabled = canGoBack,
+                    )
+                    ToolbarIconButton(
+                        icon = Icons.ArrowForward,
+                        contentDescription = stringResource(R.string.browser_bottom_forward),
+                        onClick = onForwardTap,
+                        enabled = canGoForward,
+                    )
+                }
                 if (homeVisible) {
                     ToolbarIconButton(
                         icon = Icons.Home,
@@ -148,7 +170,7 @@ fun BrowserToolbarRow(
                 AddressPill(
                     modifier = Modifier
                         .weight(1f)
-                        .padding(start = if (homeVisible || !addressBarFocused) 6.dp else 0.dp),
+                        .padding(start = if (homeVisible || !addressBarFocused) 4.dp else 0.dp),
                     text = addressText,
                     onTextChange = onAddressTextChange,
                     onFocusChange = onAddressFocusChange,
@@ -174,6 +196,13 @@ fun BrowserToolbarRow(
                         contentDescription = stringResource(R.string.action_tabs),
                         onClick = onTabsTap,
                     )
+                    if (downloadsVisible) {
+                        ToolbarIconButton(
+                            icon = Icons.Download,
+                            contentDescription = stringResource(R.string.browser_bottom_downloads),
+                            onClick = onDownloadsTap,
+                        )
+                    }
                     Box {
                         ToolbarIconButton(
                             icon = Icons.More,
@@ -186,8 +215,7 @@ fun BrowserToolbarRow(
             }
         }
         // Chrome-style thin progress line sitting on the address bar
-        // card's own bottom edge -- same 8dp side margins + 8dp bottom
-        // margin the old pageProgress had, so it spans the same width.
+        // card's edge -- same 8dp side margins + 8dp top/bottom margin.
         // Track is transparent so only the moving indicator line shows.
         if (progressVisible) {
             val animatedProgress by animateFloatAsState(
@@ -197,10 +225,13 @@ fun BrowserToolbarRow(
             LinearProgressIndicator(
                 progress = { animatedProgress },
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
+                    .align(if (isBottomBar) Alignment.TopCenter else Alignment.BottomCenter)
                     .fillMaxWidth()
                     .padding(horizontal = 8.dp)
-                    .padding(bottom = 8.dp)
+                    .padding(
+                        top = if (isBottomBar) 8.dp else 0.dp,
+                        bottom = if (isBottomBar) 0.dp else 8.dp,
+                    )
                     .height(3.dp)
                     .clip(RoundedCornerShape(2.dp)),
                 color = MaterialTheme.colorScheme.primary,
@@ -354,42 +385,49 @@ private fun ToolbarIconButton(
     contentDescription: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    enabled: Boolean = true,
 ) {
-    IconButton(onClick = onClick, modifier = modifier.size(40.dp)) {
+    IconButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(36.dp),
+    ) {
         Icon(
             imageVector = icon,
             contentDescription = contentDescription,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp),
+            modifier = Modifier
+                .size(20.dp)
+                .alpha(if (enabled) 1f else 0.38f),
         )
     }
 }
 
 /** Replicates bg_tabs_counter.xml (transparent fill, 1.6dp
  *  colorOnSurfaceVariant stroke, 6dp corner radius) around the live tab
- *  count, inside a 40dp tap target matching every other toolbar button. */
+ *  count, inside a 36dp tap target matching every other toolbar button. */
 @Composable
 private fun TabsButton(count: Int, contentDescription: String, onClick: () -> Unit) {
     IconButton(
         onClick = onClick,
         modifier = Modifier
-            .size(40.dp)
+            .size(36.dp)
             .semantics { this.contentDescription = contentDescription },
     ) {
         Box(
             modifier = Modifier
-                .size(22.dp)
+                .size(20.dp)
                 .border(
                     width = 1.6.dp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(5.dp),
                 ),
             contentAlignment = Alignment.Center,
         ) {
             Text(
-                text = count.toString(),
+                text = if (count > 99) ":D" else count.toString(),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 12.sp,
+                fontSize = if (count > 9) 10.sp else 11.sp,
                 fontWeight = FontWeight.Bold,
             )
         }

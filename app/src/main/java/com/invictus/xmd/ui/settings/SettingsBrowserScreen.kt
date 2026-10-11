@@ -52,6 +52,8 @@ fun SettingsBrowserScreen(
     onOpenAdblock: () -> Unit,
     backgroundPlaybackEnabled: Boolean,
     onBackgroundPlaybackChanged: (Boolean) -> Unit,
+    toolbarBottom: Boolean,
+    onToolbarBottomChanged: (Boolean) -> Unit,
     bottomBarEnabled: Boolean,
     onBottomBarChanged: (Boolean) -> Unit,
     onImportWebsites: () -> Unit,
@@ -96,6 +98,13 @@ fun SettingsBrowserScreen(
                     Settings.AdblockLevel.OFF -> stringResource(R.string.settings_shields_off_title)
                 },
                 onClick = onOpenAdblock,
+            )
+            SettingsDivider()
+            SwitchSettingRow(
+                title = stringResource(R.string.settings_toolbar_bottom),
+                subtitle = stringResource(R.string.settings_toolbar_bottom_hint),
+                checked = toolbarBottom,
+                onCheckedChange = onToolbarBottomChanged,
             )
             SettingsDivider()
             SwitchSettingRow(
