@@ -875,6 +875,9 @@ private fun BrowserRoute(
     var backgroundPlaybackEnabled by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.backgroundPlaybackEnabled())
     }
+    var toolbarBottom by remember {
+        mutableStateOf(com.invictus.xmd.preferences.Settings.browserToolbarBottom())
+    }
     var bottomBarEnabled by remember {
         mutableStateOf(com.invictus.xmd.preferences.Settings.browserBottomBarEnabled())
     }
@@ -933,6 +936,11 @@ private fun BrowserRoute(
         onBackgroundPlaybackChanged = { checked ->
             backgroundPlaybackEnabled = checked
             com.invictus.xmd.preferences.Settings.setBackgroundPlaybackEnabled(checked)
+        },
+        toolbarBottom = toolbarBottom,
+        onToolbarBottomChanged = { checked ->
+            toolbarBottom = checked
+            com.invictus.xmd.preferences.Settings.setBrowserToolbarBottom(checked)
         },
         bottomBarEnabled = bottomBarEnabled,
         onBottomBarChanged = { checked ->

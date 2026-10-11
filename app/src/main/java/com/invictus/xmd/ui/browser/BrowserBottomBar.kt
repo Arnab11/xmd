@@ -28,6 +28,7 @@ import com.invictus.xmd.ui.icons.Icons
  */
 @Composable
 internal fun BrowserBottomBar(
+    canGoBack: Boolean = true,
     canGoForward: Boolean,
     onBack: () -> Unit,
     onForward: () -> Unit,
@@ -47,7 +48,7 @@ internal fun BrowserBottomBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            BarButton(Icons.ArrowBack, R.string.browser_bottom_back, onBack)
+            BarButton(Icons.ArrowBack, R.string.browser_bottom_back, onBack, enabled = canGoBack)
             BarButton(Icons.ArrowForward, R.string.browser_bottom_forward, onForward, enabled = canGoForward)
             BarButton(Icons.Home, R.string.browser_bottom_home, onHome)
             BarButton(Icons.Bookmarks, R.string.browser_bottom_bookmarks, onBookmarks, iconSize = 20.dp)

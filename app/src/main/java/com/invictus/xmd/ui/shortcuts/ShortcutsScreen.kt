@@ -57,6 +57,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
@@ -89,6 +90,7 @@ fun ShortcutsScreen(
     viewModel: ShortcutsViewModel = viewModel(),
     onOpenUrl: (Shortcut) -> Unit,
     onPickIcon: () -> Unit,
+    bottomPadding: Dp = 96.dp,
 ) {
     val shortcuts by viewModel.displayOrder.collectAsState()
     val reorderMode by viewModel.reorderMode.collectAsState()
@@ -135,6 +137,7 @@ fun ShortcutsScreen(
             onLongPress = viewModel::onTileLongPressed,
             onAddTap = viewModel::onAddTapped,
             modifier = Modifier.fillMaxWidth(),
+            bottomPadding = bottomPadding,
         )
     }
 
@@ -188,6 +191,7 @@ private fun ReorderableShortcutGrid(
     onLongPress: (Shortcut) -> Unit,
     onAddTap: () -> Unit,
     modifier: Modifier = Modifier,
+    bottomPadding: Dp = 96.dp,
 ) {
     var draggingIndex by remember { mutableStateOf(-1) }
     var dragOffset by remember { mutableStateOf(Offset.Zero) }
@@ -204,7 +208,7 @@ private fun ReorderableShortcutGrid(
     LazyVerticalGrid(
         columns = GridCells.Fixed(GRID_COLUMNS),
         modifier = modifier,
-        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = 96.dp),
+        contentPadding = PaddingValues(start = 8.dp, end = 8.dp, bottom = bottomPadding),
     ) {
         itemsIndexed(shortcuts, key = { _, s -> s.id }) { index, shortcut ->
             val isDragging = index == draggingIndex

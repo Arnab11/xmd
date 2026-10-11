@@ -91,6 +91,7 @@ internal fun TranslateLanguageDialog(
 internal fun BrowserScreen(
     speedDialVisible: Boolean,
     addressBarFocused: Boolean = false,
+    toolbarBottom: Boolean = false,
     onDismissAddressBar: () -> Unit = {},
     toolbar: @Composable () -> Unit,
     onWebViewHostReady: (SwipeRefreshLayout, FrameLayout) -> Unit,
@@ -108,7 +109,9 @@ internal fun BrowserScreen(
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            toolbar()
+            if (!toolbarBottom) {
+                toolbar()
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -140,7 +143,7 @@ internal fun BrowserScreen(
                 }
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
+                        .align(if (toolbarBottom) Alignment.BottomCenter else Alignment.TopCenter)
                         .fillMaxWidth()
                         .padding(8.dp),
                 ) {
@@ -148,13 +151,16 @@ internal fun BrowserScreen(
                 }
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
+                        .align(if (toolbarBottom) Alignment.BottomCenter else Alignment.TopCenter)
                         .fillMaxWidth()
                         .padding(8.dp),
                 ) {
                     findInPage()
                 }
                 loadingVeil()
+            }
+            if (toolbarBottom) {
+                toolbar()
             }
             bottomBar()
         }

@@ -69,6 +69,7 @@ object Settings {
     private const val KEY_ADBLOCK_ENABLED = "browser_adblock_enabled"
     private const val KEY_BACKGROUND_PLAYBACK_ENABLED = "browser_background_playback_enabled"
     private const val KEY_BROWSER_BOTTOM_BAR_ENABLED = "browser_bottom_bar_enabled"
+    private const val KEY_BROWSER_TOOLBAR_BOTTOM = "browser_toolbar_bottom"
     private const val KEY_TABS_GRID_MODE = "browser_tabs_grid_mode"
     private const val KEY_AUTO_CHECK_UPDATES = "about_auto_check_for_updates"
     private const val KEY_UPDATE_CHANNEL = "about_update_channel"
@@ -454,6 +455,13 @@ object Settings {
         prefs.getBoolean(KEY_BROWSER_BOTTOM_BAR_ENABLED, false)
     fun setBrowserBottomBarEnabled(value: Boolean) {
         prefs.edit().putBoolean(KEY_BROWSER_BOTTOM_BAR_ENABLED, value).apply()
+    }
+
+    // ── Browser: Bottom address bar ─────────────────────────────────────────
+    fun browserToolbarBottom(): Boolean =
+        prefs.getBoolean(KEY_BROWSER_TOOLBAR_BOTTOM, false)
+    fun setBrowserToolbarBottom(value: Boolean) {
+        prefs.edit().putBoolean(KEY_BROWSER_TOOLBAR_BOTTOM, value).apply()
     }
 
     // ── Browser: Tab switcher layout mode ──────────────────────────────
